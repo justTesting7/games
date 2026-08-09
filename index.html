@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>וורדל — משחק מילים בעברית</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div id="app">
+      <header>
+        <h1>וורדל</h1>
+        <button id="help-btn" class="icon-btn" aria-label="עזרה" title="עזרה">?</button>
+      </header>
+
+      <main>
+        <div id="board" aria-label="לוח המשחק" role="grid"></div>
+        <div id="message" aria-live="polite"></div>
+        <div id="keyboard" aria-label="מקלדת עברית"></div>
+      </main>
+
+      <dialog id="help-dialog">
+        <h2>איך משחקים?</h2>
+        <p>נחשו את המילה בת 5 האותיות ב-6 ניסיונות.</p>
+        <ul>
+          <li><span class="demo correct">א</span> האות במקום הנכון</li>
+          <li><span class="demo present">ב</span> האות קיימת במילה במקום אחר</li>
+          <li><span class="demo absent">ג</span> האות לא קיימת במילה</li>
+        </ul>
+        <p>מילה חדשה כל יום — מבוססת על תאריך היום.</p>
+        <button id="close-help">הבנתי</button>
+      </dialog>
+
+      <dialog id="result-dialog">
+        <h2 id="result-title"></h2>
+        <p id="result-word"></p>
+        <p id="result-stats"></p>
+        <button id="share-btn">העתק תוצאה</button>
+        <button id="close-result">סגור</button>
+      </dialog>
+    </div>
+
+    <script type="module" src="game.js"></script>
+  </body>
+</html>
