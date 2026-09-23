@@ -32,22 +32,40 @@ export function createRosterAvatarStudio() {
 
   const frameModel = (model, w, h) => {
     model.updateMatrixWorld(true);
-    const box = new THREE.Box3().setFromObject(model);
-    const size = box.getSize(new THREE.Vector3());
-    const cx = (box.min.x + box.max.x) * 0.5;
-    const cz = (box.min.z + box.max.z) * 0.5;
-    const eyeY = box.min.y + size.y * 0.84;
-    const headSpan = size.y * 0.28;
+    const head = model.getObjectByName('Head');
+    const neck = model.getObjectByName('Neck');
+    const hp = new THREE.Vector3();
+    const np = new THREE.Vector3();
+    let top, bottom, cx, cz;
+    if (head) {
+      head.getWorldPosition(hp);
+      if (neck) neck.getWorldPosition(np);
+      else np.copy(hp).add(new THREE.Vector3(0, -0.12, 0));
+      top = hp.y + 0.17;
+      bottom = np.y - 0.1;
+      cx = hp.x;
+      cz = hp.z;
+    } else {
+      const box = new THREE.Box3().setFromObject(model);
+      const size = box.getSize(new THREE.Vector3());
+      cx = (box.min.x + box.max.x) * 0.5;
+      cz = (box.min.z + box.max.z) * 0.5;
+      top = box.max.y;
+      bottom = box.min.y + size.y * 0.55;
+    }
+    const midY = (top + bottom) * 0.5;
+    const spanY = top - bottom;
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
     const vFov = (camera.fov * Math.PI) / 180;
     const hFov = 2 * Math.atan(Math.tan(vFov / 2) * camera.aspect);
+    const pad = 1.18;
     const dist = Math.max(
-      (headSpan * 0.58) / Math.tan(vFov / 2),
-      (headSpan * 0.52) / Math.tan(hFov / 2),
+      (spanY * pad * 0.5) / Math.tan(vFov / 2),
+      (spanY * pad * 0.45) / Math.tan(hFov / 2),
     );
-    camera.position.set(cx, eyeY + size.y * 0.04, cz + dist);
-    camera.lookAt(cx, eyeY - size.y * 0.06, cz);
+    camera.position.set(cx, midY, cz + dist);
+    camera.lookAt(cx, midY, cz);
   };
 
   const mount = (source, t = 0) => {
