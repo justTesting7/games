@@ -215,13 +215,13 @@ export class Weapons {
     this.fx.tracer(muzzle, end);
     if (!shooter.isPlayer) this.checkNearMiss(muzzle, end, hit);
     if (!hit) return null;
-    const dist = end.distanceTo(this.player.camera.position);
+    const hitDist = end.distanceTo(this.player.camera.position);
     if (hit.head && hit.fighter) {
       this.fx.headshot(end, dir, hit.normal, rifle ? 1.35 : 1);
-      this.audio.headshot(dist);
+      this.audio.headshot(hitDist);
     } else {
       this.fx.impact(end, hit.normal, hit.surface, dir);
-      this.audio.impact(hit.surface, dist);
+      this.audio.impact(hit.surface, hitDist);
     }
     if (hit.fighter) this.combat.damage(hit.fighter, shooter, hit.head ? def.head : def.body, dir, { head: hit.head, weapon: def.key });
     else if (hit.body || hit.target) hit.scored = this.world.props.hit(hit, end, dir, def.force);
