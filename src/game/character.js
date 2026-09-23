@@ -349,11 +349,11 @@ export class Character {
     this.root.updateMatrixWorld(true);
 
     const aimGoal = s.aiming ? 1 : 0;
-    this.aimWeight += (aimGoal - this.aimWeight) * Math.min(1, dt * (aimGoal ? 12 : 6));
-    this.drawn = this.aimWeight > 0.25 ? 1 : 0;
+    this.aimWeight += (aimGoal - this.aimWeight) * Math.min(1, dt * (aimGoal ? 16 : 5));
+    this.drawn = this.aimWeight > 0.2 ? 1 : 0;
     this.aimTarget.copy(s.aimPoint);
-    this.recoil[0] *= Math.exp(-dt * 18);
-    this.recoil[1] *= Math.exp(-dt * 18);
+    this.recoil[0] *= Math.exp(-dt * 13);
+    this.recoil[1] *= Math.exp(-dt * 13);
     this.applyAim(s);
     this.updateFeet(dt, s);
     this.updateBraid(dt);
@@ -399,22 +399,37 @@ export class Character {
     }
 
     if (w < 0.01) return;
+    // Recoil pushes the firing shoulder back and twists the chest slightly.
+    const kick = this.recoil[0] - this.recoil[1];
+    const kickAll = this.recoil[0] + this.recoil[1];
+    if (kickAll > 1e-3) {
+      const qk = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), -kick * 0.25 * w);
+      qk.multiply(new THREE.Quaternion().setFromAxisAngle(right, -kickAll * 0.12 * w));
+      rotateBoneWorld(B.Spine2, qk, t);
+    }
     // Both arms extend towards the target, like a two-gun stance.
+    const pitchAxis = new THREE.Vector3().crossVectors(dir, new THREE.Vector3(0, 1, 0)).normalize();
     const sides = [['Right', -1], ['Left', 1]];
     sides.forEach(([side, sgn], i) => {
       const upper = B[`${side}Arm`], fore = B[`${side}ForeArm`], hand = B[`${side}Hand`];
+      const finger = B[`${side}HandMiddle1`];
       const sh = upper.getWorldPosition(t.a);
       const aim = this.aimTarget.clone();
       aim.addScaledVector(right, sgn * 0.12);
-      aim.y += this.recoil[i] * 1.2;
       const d = aim.sub(sh).normalize();
       d.addScaledVector(right, sgn * 0.06).normalize();
       rotateBoneToward(upper, fore, d, w, t);
       const fp = fore.getWorldPosition(t.a);
       const d2 = new THREE.Vector3().subVectors(this.aimTarget, fp).normalize();
-      d2.y += this.recoil[i] * 0.6;
-      d2.normalize();
       rotateBoneToward(fore, hand, d2, w, t);
+      // Straight wrist, so the pistol lines up with the forearm.
+      if (finger) rotateBoneToward(hand, finger, d2, w, t);
+      const r = this.recoil[i] * w;
+      if (r > 1e-3) {
+        rotateBoneWorld(upper, new THREE.Quaternion().setFromAxisAngle(pitchAxis, r * 0.35), t);
+        rotateBoneWorld(fore, new THREE.Quaternion().setFromAxisAngle(pitchAxis, r * 0.45), t);
+        rotateBoneWorld(hand, new THREE.Quaternion().setFromAxisAngle(pitchAxis, r * 0.6), t);
+      }
     });
   }
 
@@ -502,17 +517,16 @@ export class Character {
       if (this.drawn) {
         const hand = this.bones[sides[i]];
         const hp = hand.getWorldPosition(t.a);
-        const fore = this.bones[sides[i].replace('Hand', 'ForeArm')].getWorldPosition(t.b);
-        const x = t.c.subVectors(hp, fore).normalize();
-        const aimD = new THREE.Vector3().subVectors(this.aimTarget, hp).normalize();
-        x.lerp(aimD, 0.7).normalize();
+        const finger = this.bones[sides[i].replace('Hand', 'HandMiddle1')] || this.bones[sides[i].replace('Hand', 'ForeArm')];
+        const fp = finger.getWorldPosition(t.b);
+        const x = finger === this.bones[sides[i].replace('Hand', 'HandMiddle1')] ? t.c.subVectors(fp, hp).normalize() : t.c.subVectors(hp, fp).normalize();
         const upW = new THREE.Vector3(0, 1, 0);
         const z = new THREE.Vector3().crossVectors(x, upW).normalize();
         const y = new THREE.Vector3().crossVectors(z, x).normalize();
         const tilt = (i === 0 ? 1 : -1) * 0.25;
         y.applyAxisAngle(x, tilt);
         z.crossVectors(x, y);
-        const pos = hp.clone().addScaledVector(x, 0.075).addScaledVector(y, -0.02);
+        const pos = hp.clone().addScaledVector(x, 0.07).addScaledVector(y, -0.015);
         p.matrix.makeBasis(x, y, z).setPosition(pos);
       } else {
         p.matrix.multiplyMatrices(h.bone.matrixWorld, h.local);
@@ -536,7 +550,7 @@ export class Character {
   }
 
   fired(i) {
-    this.recoil[i] = 0.12;
+    this.recoil[i] = Math.min(0.55, this.recoil[i] + 0.38);
     const sl = this.pistols[i].userData.slide;
     if (sl) sl.userData.kick = 1;
   }

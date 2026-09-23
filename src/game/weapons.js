@@ -14,13 +14,18 @@ export class Weapons {
     this.onHit = null;
   }
 
-  update(dt, firing) {
+  update(dt, firing, pressed) {
     this.cooldown -= dt;
-    if (!firing) return;
-    // Firing from the hip raises both guns first, then shoots.
-    this.player.aimHold = 0.9;
-    if (this.character.aimWeight < 0.7 || this.cooldown > 0) return;
+    if (pressed) this.queued = 0.5;
+    this.queued = Math.max(0, (this.queued || 0) - dt);
+    if (!firing && !this.queued) return;
+    // Firing from the hip turns her to the target and raises both guns
+    // first; a quick click is remembered until they are up.
+    this.player.aimHold = 1.2;
+    const ready = this.character.aimWeight > 0.8 && this.player.facingError < 0.35;
+    if (!ready || this.cooldown > 0) return;
     this.cooldown = FIRE_INTERVAL;
+    this.queued = 0;
     this.fire(this.side);
     this.side = 1 - this.side;
   }
@@ -41,7 +46,7 @@ export class Weapons {
     const right = new THREE.Vector3().crossVectors(axis, up).multiplyScalar(side === 0 ? 1 : -1);
     this.fx.ejectCasing(muzzle.clone().addScaledVector(axis, -0.08).addScaledVector(up, 0.02), right, up);
     ch.fired(side);
-    this.player.recoilPitch += 0.012;
+    this.player.kick(side);
     this.audio.gunshot(side);
 
     const end = hit ? muzzle.clone().addScaledVector(dir, hit.t) : muzzle.clone().addScaledVector(dir, 400);

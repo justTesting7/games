@@ -96,15 +96,19 @@ class ParticlePool {
     let n = 0;
     const alive = [];
     for (const p of this.p) {
-      p.age += dt;
+      // Newly spawned particles are drawn where they were emitted first.
+      const first = p.age === 0;
+      p.age += first ? 1e-4 : dt;
       if (p.age >= p.life) continue;
       alive.push(p);
-      const k = Math.exp(-p.drag * dt);
-      p.vx *= k; p.vy = p.vy * k - p.gravity * dt; p.vz *= k;
-      p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt;
-      p.size += p.grow * dt;
+      if (!first) {
+        const k = Math.exp(-p.drag * dt);
+        p.vx *= k; p.vy = p.vy * k - p.gravity * dt; p.vz *= k;
+        p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt;
+        p.size += p.grow * dt;
+      }
       const t = p.age / p.life;
-      const a = p.a * (p.fade ? (1 - t) * Math.min(1, p.age * 30) : 1);
+      const a = p.a * (p.fade ? 1 - t : 1) * (p.grow > 0 ? Math.min(1, 0.3 + p.age * 20) : 1);
       P.set([p.x, p.y, p.z, p.size], n * 4);
       C.set([p.r, p.g, p.b, a], n * 4);
       V.set([p.vx, p.vy, p.vz, p.stretch], n * 4);
@@ -160,23 +164,24 @@ export class Effects {
 
   muzzle(pos, dir) {
     const add = this.add;
-    add.spawn({ pos, size: 0.09, life: 0.05, color: [60, 38, 14], fade: 1 });
-    add.spawn({ pos: pos.clone().addScaledVector(dir, 0.06), vel: dir.clone().multiplyScalar(0.01), size: 0.035, stretch: 0.16, life: 0.04, color: [80, 50, 18] });
-    for (let i = 0; i < 3; i++) {
-      const d = dir.clone().add(new THREE.Vector3().randomDirection().multiplyScalar(0.5)).normalize();
-      add.spawn({ pos, vel: d.multiplyScalar(0.01), size: 0.02, stretch: 0.07, life: 0.035, color: [50, 30, 10] });
+    const tip = pos.clone().addScaledVector(dir, 0.02);
+    add.spawn({ pos: tip, size: 0.16 + Math.random() * 0.06, life: 0.07, color: [70, 42, 15], fade: 1 });
+    add.spawn({ pos: tip.clone().addScaledVector(dir, 0.14), vel: dir.clone().multiplyScalar(0.01), size: 0.05, stretch: 0.16, life: 0.06, color: [90, 55, 20] });
+    for (let i = 0; i < 4; i++) {
+      const d = dir.clone().add(new THREE.Vector3().randomDirection().multiplyScalar(0.6)).normalize();
+      add.spawn({ pos: tip.clone().addScaledVector(d, 0.06), vel: d.multiplyScalar(0.01), size: 0.025, stretch: 0.07, life: 0.05, color: [60, 34, 12] });
     }
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < 6; i++) {
       this.alpha.spawn({
-        pos: pos.clone().addScaledVector(dir, 0.05),
-        vel: dir.clone().multiplyScalar(1.2 + Math.random()).add(new THREE.Vector3(0, 0.3, 0)),
-        size: 0.04, grow: 0.5, life: 0.6 + Math.random() * 0.4, color: [0.6, 0.6, 0.62], alpha: 0.25, drag: 3,
+        pos: tip.clone().addScaledVector(dir, 0.04 * i),
+        vel: dir.clone().multiplyScalar(1.5 + Math.random() * 1.5).add(new THREE.Vector3(0, 0.35, 0)).add(new THREE.Vector3().randomDirection().multiplyScalar(0.3)),
+        size: 0.05, grow: 0.6, life: 0.8 + Math.random() * 0.6, color: [0.62, 0.62, 0.64], alpha: 0.3, drag: 3,
       });
     }
     const fl = this.pipeline.flashLight;
-    fl.position.copy(pos);
-    fl.intensity = 60;
-    this.flash = 0.05;
+    fl.position.copy(tip);
+    fl.intensity = 160;
+    this.flash = 0.06;
   }
 
   tracer(from, to) {
@@ -186,7 +191,7 @@ export class Effects {
     d.divideScalar(len);
     const speed = 380;
     this.add.spawn({
-      pos: from.clone().addScaledVector(d, 1.5), vel: d.clone().multiplyScalar(speed), size: 0.012, stretch: 1.4,
+      pos: from.clone().addScaledVector(d, 1.25), vel: d.clone().multiplyScalar(speed), size: 0.012, stretch: 1.2,
       life: Math.max(0.02, (len - 2) / speed), color: [30, 20, 9], fade: 0,
     });
   }

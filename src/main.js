@@ -85,7 +85,7 @@ addEventListener('keyup', (e) => {
 });
 canvas.addEventListener('mousedown', (e) => {
   if (document.pointerLockElement !== canvas) return;
-  if (e.button === 0) input.fire = true;
+  if (e.button === 0) { input.fire = true; input.firePressed = true; }
   if (e.button === 2) input.aim = true;
 });
 addEventListener('mouseup', (e) => {
@@ -208,7 +208,8 @@ async function init() {
     const state = player.update(dt, input);
     input.jump = false;
     input.toggleWalk = false;
-    weapons.update(dt, input.fire);
+    weapons.update(dt, input.fire, input.firePressed);
+    input.firePressed = false;
     props.update(dt);
     fx.update(dt);
     terrain.update(elapsed);

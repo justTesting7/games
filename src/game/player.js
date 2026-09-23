@@ -28,6 +28,9 @@ export class Player {
     this.aimPoint = new THREE.Vector3();
     this.aimHit = null;
     this.recoilPitch = 0;
+    this.shake = 0;
+    this.shakeSide = 1;
+    this.facingError = 0;
     this.bob = 0;
     this.localDir = new THREE.Vector3();
     this.tmp = [];
@@ -38,6 +41,12 @@ export class Player {
     this.yaw = this.camYaw = yaw;
     this.character.root.position.copy(this.pos);
     this.camPos.copy(this.pos).add(new THREE.Vector3(0, 2, 0));
+  }
+
+  kick(side) {
+    this.recoilPitch += 0.018;
+    this.shake = 0.12;
+    this.shakeSide = side ? -1 : 1;
   }
 
   look(dx, dy) {
@@ -67,7 +76,8 @@ export class Player {
 
     // Facing: free movement turns the body, aiming locks it to the camera.
     if (aiming) {
-      this.yaw += wrapAngle(this.camYaw - this.yaw) * Math.min(1, dt * 14);
+      const err = wrapAngle(this.camYaw - this.yaw);
+      this.yaw += Math.sign(err) * Math.min(Math.abs(err), Math.max(Math.abs(err) * 16, 6) * dt);
     } else if (moving) {
       const goal = Math.atan2(wish.x, wish.z);
       const turn = this.onGround ? 10 : 3;
@@ -130,6 +140,7 @@ export class Player {
     }
     this.pos.copy(next);
 
+    this.facingError = Math.abs(wrapAngle(this.camYaw - this.yaw));
     const speed = Math.hypot(this.vel.x, this.vel.z);
     const fwdBody = new THREE.Vector3(Math.sin(this.yaw), 0, Math.cos(this.yaw));
     // The avatar's local +X is her left side.
@@ -182,8 +193,10 @@ export class Player {
     this.camPos.copy(shoulderPt).addScaledVector(back, this.smoothDist);
     const minY = terrain.heightAt(this.camPos.x, this.camPos.z) + 0.25;
     if (this.camPos.y < minY) this.camPos.y = minY;
-    cam.position.copy(this.camPos);
-    cam.lookAt(this.camPos.clone().add(dir));
+    this.shake *= Math.exp(-dt * 22);
+    cam.position.copy(this.camPos).addScaledVector(right, this.shake * this.shakeSide * 0.04);
+    cam.lookAt(cam.position.clone().add(dir));
+    cam.rotateZ(this.shake * this.shakeSide * 0.06);
   }
 
   // Finds what the crosshair points at, so bullets land where it shows.
