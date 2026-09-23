@@ -31,13 +31,94 @@ function kindAt(bx, bz, rand) {
   const { halfBlocks } = CITY;
   if (bx === halfBlocks && bz === halfBlocks) return KIND.plaza;
   const edge = bx === 0 || bz === 0 || bx === halfBlocks * 2 || bz === halfBlocks * 2;
-  if (edge) return rand() < 0.35 ? KIND.ruined : KIND.lot;
+  if (edge) return rand() < 0.55 ? KIND.ruined : KIND.damaged;
   const h = rand();
-  if (h < 0.08) return KIND.crater;
-  if (h < 0.22) return KIND.ruined;
-  if (h < 0.42) return KIND.damaged;
+  if (h < 0.06) return KIND.crater;
+  if (h < 0.2) return KIND.ruined;
+  if (h < 0.48) return KIND.damaged;
   if (h < 0.58) return KIND.lot;
   return KIND.intact;
+}
+
+function addCoverWall(covers, x0, x1, z0, z1, y1, type = 'cover') {
+  covers.push({ x0, x1, z0, z1, y0: CITY.baseY, y1: CITY.baseY + y1, type });
+}
+
+// Low walls, berms and street dividers — shared by the heightmap pass and city meshes.
+function generateCover(blocks, rand) {
+  const { pitch, blockW, halfBlocks, streetW } = CITY;
+  const covers = [];
+  const half = blockW * 0.5;
+  const street = streetW * 0.5 + half + 0.5;
+
+  for (const b of blocks) {
+    const { cx, cz, kind, bx, bz } = b;
+    const plaza = bx === halfBlocks && bz === halfBlocks;
+    const sides = [
+      { dx: 1, dz: 0, px: cx + street, pz: cz, along: 'z', len: blockW - 6 },
+      { dx: -1, dz: 0, px: cx - street, pz: cz, along: 'z', len: blockW - 6 },
+      { dx: 0, dz: 1, px: cx, pz: cz + street, along: 'x', len: blockW - 6 },
+      { dx: 0, dz: -1, px: cx, pz: cz - street, along: 'x', len: blockW - 6 },
+    ];
+    for (const s of sides) {
+      const p = plaza ? 0.35 : kind === KIND.lot || kind === KIND.ruined ? 0.82 : 0.62;
+      if (rand() > p) continue;
+      const seg = 3 + Math.floor(rand() * 3);
+      for (let i = 0; i < seg; i++) {
+        const t = (i + 0.5) / seg - 0.5;
+        const wLen = 2.2 + rand() * 2.8;
+        const h = 1.55 + rand() * 1.35;
+        const thick = 0.45 + rand() * 0.25;
+        if (s.along === 'z') {
+          const zc = s.pz + t * s.len;
+          addCoverWall(covers, s.px - thick * 0.5, s.px + thick * 0.5, zc - wLen * 0.5, zc + wLen * 0.5, h);
+        } else {
+          const xc = s.px + t * s.len;
+          addCoverWall(covers, xc - wLen * 0.5, xc + wLen * 0.5, s.pz - thick * 0.5, s.pz + thick * 0.5, h);
+        }
+      }
+    }
+
+    if (kind === KIND.lot || kind === KIND.ruined || kind === KIND.crater) {
+      for (let k = 0; k < 3 + Math.floor(rand() * 4); k++) {
+        const w = 3 + rand() * 5, d = 0.5 + rand() * 0.35, h = 1.8 + rand() * 2.2;
+        const ox = (rand() - 0.5) * (blockW - w - 8);
+        const oz = (rand() - 0.5) * (blockW - w - 8);
+        addCoverWall(covers, cx + ox - w * 0.5, cx + ox + w * 0.5, cz + oz - d * 0.5, cz + oz + d * 0.5, h);
+      }
+    }
+    if (kind === KIND.damaged && rand() > 0.35) {
+      const w = 6 + rand() * 8, d = 0.55, h = 2.4 + rand() * 2;
+      const ox = (rand() < 0.5 ? -1 : 1) * (half - w * 0.5 - 1);
+      addCoverWall(covers, cx + ox - w * 0.5, cx + ox + w * 0.5, cz - d, cz + d, h);
+    }
+  }
+
+  // Intersection strongpoints and mid-block street dividers.
+  for (let bz = 0; bz <= halfBlocks * 2; bz++) {
+    for (let bx = 0; bx <= halfBlocks * 2; bx++) {
+      const cx = (bx - halfBlocks) * pitch;
+      const cz = (bz - halfBlocks) * pitch;
+      if (rand() > 0.55) continue;
+      const arm = 2.5 + rand() * 2;
+      const h = 1.65 + rand() * 0.9;
+      const t = 0.5;
+      addCoverWall(covers, cx - arm, cx + arm, cz - t, cz + t, h);
+      addCoverWall(covers, cx - t, cx + t, cz - arm, cz + arm, h);
+    }
+  }
+  for (let i = -halfBlocks; i <= halfBlocks; i++) {
+    if (rand() > 0.5) continue;
+    const x = i * pitch;
+    for (let k = -3; k <= 3; k++) {
+      if (Math.abs(k) === 0 && rand() > 0.4) continue;
+      const z = k * pitch + (rand() - 0.5) * 8;
+      const w = 2.8 + rand() * 2;
+      addCoverWall(covers, x - 0.35, x + 0.35, z - w * 0.5, z + w * 0.5, 1.5 + rand());
+    }
+  }
+
+  return covers;
 }
 
 export function generateCityLayout(seed) {
@@ -68,9 +149,10 @@ export function generateCityLayout(seed) {
       }
     }
   }
+  const coverBoxes = generateCover(blocks, rand);
   const spawn = { x: 0, z: 0 };
   const peak = { x: pitch * 1.2, z: -pitch * 0.8, h: baseY };
-  return { blocks, buildingBoxes, spawn, peak, seed };
+  return { blocks, buildingBoxes, coverBoxes, spawn, peak, seed };
 }
 
 export function cityHeightAt(x, z, layout, noise) {

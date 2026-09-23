@@ -155,10 +155,12 @@ export class Rival {
 
   findCover(threat) {
     const t = this.world.terrain;
-    const cols = this.world.veg.colliders.query(this.pos.x, this.pos.z, 16, this.cols);
+    const cols = this.world.veg.colliders.query(this.pos.x, this.pos.z, 24, this.cols);
     let best = null, bestD = Infinity;
     for (const c of cols) {
-      if (c.r < 0.22 || c.y1 - t.heightAt(c.x, c.z) < 1.3) continue;
+      const stand = c.y1 - t.heightAt(c.x, c.z);
+      const minH = (c.type === 'cover' || c.type === 'metal' || c.type === 'wood') ? 0.75 : 1.25;
+      if (c.r < 0.15 || stand < minH) continue;
       const away = new THREE.Vector3(c.x - threat.x, 0, c.z - threat.z).normalize();
       const spot = new THREE.Vector3(c.x, 0, c.z).addScaledVector(away, c.r + RADIUS + 0.35);
       const h = t.heightAt(spot.x, spot.z);

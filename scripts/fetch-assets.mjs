@@ -26,7 +26,7 @@ const PH_MODELS = [
   'wooden_crate_01', 'dead_tree_trunk', 'tree_stump_01', 'bolt_action_rifle_7_62',
   'stick_grenade',
   'covered_car', 'concrete_road_barrier', 'street_lamp_01', 'barrel_stove',
-  'metal_trash_can', 'fire_hydrant', 'old_tyre',
+  'metal_trash_can', 'fire_hydrant', 'old_tyre', 'modular_chainlink_fence',
 ];
 const RPM = 'https://raw.githubusercontent.com/readyplayerme/animation-library/master/feminine/glb';
 const RPM_FILES = [
@@ -90,7 +90,7 @@ async function pool(tasks, n = 8) {
 }
 
 async function main() {
-  const marker = path.join(ROOT, '.complete-v3');
+  const marker = path.join(ROOT, '.complete-v4');
   if (await exists(marker)) {
     console.log('[assets] already downloaded');
     return;
