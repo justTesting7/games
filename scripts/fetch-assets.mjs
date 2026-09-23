@@ -47,6 +47,25 @@ const RPM_FILES = [
   'locomotion/F_Walk_Jump_001',
   'locomotion/F_Falling_Idle_000',
 ];
+const RPM_M = 'https://raw.githubusercontent.com/readyplayerme/animation-library/master/masculine/glb';
+// Masculine skeleton: male locomotion, with the jump/fall clips kept on the
+// same timing as the feminine set.
+const RPM_M_FILES = [
+  'Masculine_TPose',
+  'idle/M_Standing_Idle_001',
+  'locomotion/M_Walk_001',
+  'locomotion/M_Walk_Backwards_001',
+  'locomotion/M_Walk_Strafe_Left_002',
+  'locomotion/M_Walk_Strafe_Right_002',
+  'locomotion/M_Jog_001',
+  'locomotion/M_Jog_Backwards_001',
+  'locomotion/M_Jog_Strafe_Left_001',
+  'locomotion/M_Jog_Strafe_Right_001',
+  'locomotion/M_Run_001',
+  'locomotion/F_Jog_Jump_Small_001',
+  'locomotion/F_Run_Jump_001',
+  'locomotion/F_Falling_Idle_000',
+];
 
 async function exists(p) {
   try { await fs.access(p); return true; } catch { return false; }
@@ -91,7 +110,7 @@ async function pool(tasks, n = 8) {
 }
 
 async function main() {
-  const marker = path.join(ROOT, '.complete-v5');
+  const marker = path.join(ROOT, '.complete-v6');
   if (await exists(marker)) {
     console.log('[assets] already downloaded');
     return;
@@ -131,6 +150,9 @@ async function main() {
 
   for (const f of RPM_FILES) {
     tasks.push(() => download(`${RPM}/${f}.glb`, path.join(ROOT, 'rpm', `${path.basename(f)}.glb`)));
+  }
+  for (const f of RPM_M_FILES) {
+    tasks.push(() => download(`${RPM_M}/${f}.glb`, path.join(ROOT, 'rpm', 'm', `${path.basename(f)}.glb`)));
   }
 
   await pool(tasks);

@@ -4,3 +4,4 @@ public/assets/vendor
 .env
 .env.*
 !.env.example
+faces-src
