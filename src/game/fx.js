@@ -226,23 +226,24 @@ export class Effects {
     const add = this.add;
     const k = scale;
     const tip = pos.clone().addScaledVector(dir, 0.02);
-    add.spawn({ pos: tip, size: (0.16 + Math.random() * 0.06) * k, life: 0.07, color: [70, 42, 15], fade: 1 });
-    add.spawn({ pos: tip.clone().addScaledVector(dir, 0.14 * k), vel: dir.clone().multiplyScalar(0.01), size: 0.05 * k, stretch: 0.16 * k, life: 0.06, color: [90, 55, 20] });
-    for (let i = 0; i < 4; i++) {
-      const d = dir.clone().add(new THREE.Vector3().randomDirection().multiplyScalar(0.6)).normalize();
-      add.spawn({ pos: tip.clone().addScaledVector(d, 0.06 * k), vel: d.multiplyScalar(0.01), size: 0.025 * k, stretch: 0.07 * k, life: 0.05, color: [60, 34, 12] });
+    add.spawn({ pos: tip, size: (0.09 + Math.random() * 0.03) * k, life: 0.05, color: [70, 42, 15], fade: 1 });
+    add.spawn({ pos: tip.clone().addScaledVector(dir, 0.08 * k), vel: dir.clone().multiplyScalar(0.01), size: 0.03 * k, stretch: 0.1 * k, life: 0.04, color: [90, 55, 20] });
+    for (let i = 0; i < 2; i++) {
+      const d = dir.clone().add(new THREE.Vector3().randomDirection().multiplyScalar(0.45)).normalize();
+      add.spawn({ pos: tip.clone().addScaledVector(d, 0.04 * k), vel: d.multiplyScalar(0.01), size: 0.016 * k, stretch: 0.05 * k, life: 0.04, color: [60, 34, 12] });
     }
-    for (let i = 0; i < 6 * k; i++) {
+    const puffs = k > 1.2 ? 3 : 2;
+    for (let i = 0; i < puffs; i++) {
       this.alpha.spawn({
-        pos: tip.clone().addScaledVector(dir, 0.04 * i),
-        vel: dir.clone().multiplyScalar((1.5 + Math.random() * 1.5) * k).add(new THREE.Vector3(0, 0.35, 0)).add(new THREE.Vector3().randomDirection().multiplyScalar(0.3 * k)),
-        size: 0.05 * k, grow: 0.6 * k, life: 0.8 + Math.random() * 0.6, color: [0.62, 0.62, 0.64], alpha: 0.3, drag: 3,
+        pos: tip.clone().addScaledVector(dir, 0.025 * i),
+        vel: dir.clone().multiplyScalar((1 + Math.random() * 0.8) * k).add(new THREE.Vector3(0, 0.18, 0)).add(new THREE.Vector3().randomDirection().multiplyScalar(0.15 * k)),
+        size: 0.024 * k, grow: 0.22 * k, life: 0.28 + Math.random() * 0.22, color: [0.58, 0.58, 0.6], alpha: 0.12, drag: 5,
       });
     }
     const fl = this.pipeline.flashLight;
     fl.position.copy(tip);
-    fl.intensity = 160 * k * k;
-    this.flash = 0.06;
+    fl.intensity = 110 * k * k;
+    this.flash = 0.045;
   }
 
   explosion(pos, surface) {
