@@ -16,7 +16,7 @@ import { Combat, MAX_HEALTH } from './game/combat.js';
 import { Rival } from './game/rival.js';
 import { byId, loadSelection, persona, resolveLooks } from './game/roster.js';
 import { setupRosterMenu } from './game/rosterMenu.js';
-import { createRosterPreview } from './game/rosterPreview.js';
+import { createRosterAvatarStudio } from './game/rosterAvatarStudio.js';
 import { Jev } from './game/jev.js';
 
 const $ = (id) => document.getElementById(id);
@@ -140,7 +140,7 @@ const selection = loadSelection();
 const rosterMenu = setupRosterMenu(selection, $('roster'), () => {
   $('play').textContent = rosterMenu.changed() ? 'Apply & reload' : 'Fight';
 });
-const rosterPreview = createRosterPreview();
+const rosterStudio = createRosterAvatarStudio();
 
 $('volume').oninput = (e) => audio.setVolume(e.target.value / 100);
 audio.setVolume($('volume').value / 100);
@@ -177,7 +177,7 @@ async function init() {
   const [, charAssets, looks] = await Promise.all([
     mapDef.vegetation ? veg.load(progress) : Promise.resolve(),
     Character.loadAssets(progress, bodies),
-    resolveLooks(fighters, loadImage),
+    resolveLooks(fighters),
     mapDef.waterCamp ? props.load(progress) : Promise.resolve(),
     city ? city.load(progress) : Promise.resolve(),
   ]);
@@ -220,15 +220,15 @@ async function init() {
   const rosterChars = new Map([[fighters[0].id, character]]);
   fighters.slice(1).forEach((e, i) => rosterChars.set(e.id, rivals[i].character));
   const lookCache = new Map(fighters.map((e, i) => [e.id, looks[i]]));
-  rosterMenu.bindPreview(
-    rosterPreview,
+  rosterMenu.bindAvatars(
+    rosterStudio,
     (id) => rosterChars.get(id),
     async (id) => {
       if (rosterChars.has(id)) return rosterChars.get(id);
       const entry = byId(id);
       let look = lookCache.get(id);
       if (!look) {
-        [look] = await resolveLooks([entry], loadImage);
+        [look] = await resolveLooks([entry]);
         lookCache.set(id, look);
       }
       const ch = new Character();
@@ -415,7 +415,7 @@ async function init() {
     const locked = document.pointerLockElement === canvas;
     menu.classList.toggle('hidden', locked);
     $('hud').classList.toggle('hidden', !locked);
-    if (locked) rosterPreview.hide();
+    if (locked) rosterStudio.hideHover();
     if (!locked) for (const k in input) input[k] = false;
     if (locked && round.state === 'waiting') startRound();
   });

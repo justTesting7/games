@@ -152,31 +152,19 @@ function recolorAtlas(image, look, body) {
     const skin = look.face.skin;
     const k = skin.map((v, i) => v / ATLAS_SKIN[i]);
     const tint = (kk) => [d[kk] / 255 * k[0], d[kk + 1] / 255 * k[1], d[kk + 2] / 255 * k[2]];
-    // Photo covers the face; the stock crown hair on the head unwrap becomes skin.
     region(body.head, (l, kk) => tint(kk));
     region(body.skinSwatch, (l, kk) => tint(kk));
-  }
-  g.putImageData(img, 0, 0);
-  if (body.head && look.face) {
-    g.drawImage(look.face.image, 0, 0, 512, 512);
-    const fin = g.getImageData(0, 0, 1024, 1024);
-    const fd = fin.data;
-    const skin = look.face.skin;
-    // Fill the crown where the face layer is still transparent (no stock hair cap).
     for (let y = 0; y < 130; y++) for (let x = 0; x < 512; x++) {
       const k = (y * 1024 + x) * 4;
-      if (fd[k + 3] < 220) {
-        fd[k] = skin[0]; fd[k + 1] = skin[1]; fd[k + 2] = skin[2]; fd[k + 3] = 255;
-      }
+      d[k] = skin[0]; d[k + 1] = skin[1]; d[k + 2] = skin[2];
     }
-    // Hide the RPM hair-cap mesh (uses the hair swatch on the atlas).
     const [hx0, hy0, hx1, hy1] = body.hairCap;
     for (let y = hy0; y < hy1; y++) for (let x = hx0; x < hx1; x++) {
       const k = (y * 1024 + x) * 4;
-      fd[k + 3] = 0;
+      d[k + 3] = 0;
     }
-    g.putImageData(fin, 0, 0);
   }
+  g.putImageData(img, 0, 0);
   const tex = new THREE.CanvasTexture(c);
   tex.flipY = false;
   tex.colorSpace = THREE.SRGBColorSpace;

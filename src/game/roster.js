@@ -76,21 +76,13 @@ export function persona(entry) {
   return { id: entry.id, name: entry.name, color: entry.color, style: entry.style, ...STYLES[entry.style] };
 }
 
-// Loads face layers and skin tones for the entries that have a face.
-export async function resolveLooks(entries, loadImage) {
+// Skin tones sampled from photos at bake time (faces.json only at runtime).
+export async function resolveLooks(entries) {
   const base = `${import.meta.env.BASE_URL}assets/faces`;
-  const need = entries.filter((e) => e.look.face);
-  if (!need.length) return entries.map((e) => e.look);
+  const need = entries.some((e) => e.look.face);
+  if (!need) return entries.map((e) => e.look);
   const meta = await fetch(`${base}/faces.json`).then((r) => r.json());
-  const images = {};
-  await Promise.all([...new Set(need.map((e) => e.look.face))].map(async (id) => {
-    images[id] = await loadImage(`${base}/${id}.png`);
-  }));
   return entries.map((e) => (e.look.face
-    ? { ...e.look, face: { image: images[e.look.face], skin: meta[e.look.face].skin } }
+    ? { ...e.look, face: { skin: meta[e.look.face].skin } }
     : e.look));
 }
-
-export const portraitUrl = (entry) => (entry.look.face
-  ? `${import.meta.env.BASE_URL}assets/faces/${entry.look.face}_portrait.jpg`
-  : null);

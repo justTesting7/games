@@ -1,4 +1,4 @@
-import { ROSTER, STYLES, byId, portraitUrl, saveSelection } from './roster.js';
+import { ROSTER, STYLES, byId, saveSelection } from './roster.js';
 
 // "Play as" and "Opponents" pickers. Changes apply on the next load, so the
 // caller swaps the Fight button for a reload when `changed()` is true.
@@ -6,6 +6,7 @@ export function setupRosterMenu(initial, root, onChange) {
   const sel = { player: initial.player, rivals: [...initial.rivals] };
   const key = (s) => `${s.player}|${[...s.rivals].sort().join(',')}`;
   const start = key(initial);
+  const chipCanvases = [];
 
   const chip = (entry, group) => {
     const b = document.createElement('button');
@@ -13,9 +14,22 @@ export function setupRosterMenu(initial, root, onChange) {
     b.className = 'chip';
     b.dataset.id = entry.id;
     b.style.setProperty('--c', entry.color);
-    const url = portraitUrl(entry);
-    b.innerHTML = `${url ? `<img src="${url}" alt="">` : `<span class="mono">${entry.name[0]}</span>`}`
-      + `<b>${entry.name}</b><small>${group === 'rivals' ? STYLES[entry.style].label : ''}</small>`;
+    const canvas = document.createElement('canvas');
+    canvas.className = 'thumb';
+    canvas.width = 92;
+    canvas.height = 100;
+    b.append(canvas);
+    const label = document.createElement('b');
+    label.textContent = entry.name;
+    b.append(label);
+    if (group === 'rivals') {
+      const sub = document.createElement('small');
+      sub.textContent = STYLES[entry.style].label;
+      b.append(sub);
+    } else {
+      b.append(document.createElement('small'));
+    }
+    chipCanvases.push({ entry, canvas });
     b.onclick = () => {
       if (group === 'player') {
         if (sel.player === entry.id) return;
@@ -48,24 +62,25 @@ export function setupRosterMenu(initial, root, onChange) {
   }
   render();
 
-  let preview = null;
+  let studio = null;
   let getCharacter = () => null;
   let ensureCharacter = async () => null;
 
-  const bindPreview = (api, getChar, ensureChar) => {
-    preview = api;
+  const bindAvatars = (api, getChar, ensureChar) => {
+    studio = api;
     getCharacter = getChar;
     ensureCharacter = ensureChar;
+    studio.bindChipThumbs(chipCanvases, getCharacter, ensureCharacter);
     for (const b of rows.player.children) {
       const entry = byId(b.dataset.id);
-      b.onmouseenter = () => preview.show(entry, b, getCharacter, ensureCharacter);
-      b.onmouseleave = () => preview.hide();
+      b.onmouseenter = () => studio.showHover(entry, b, getCharacter, ensureCharacter);
+      b.onmouseleave = () => studio.hideHover();
     }
   };
 
   return {
     changed: () => key(sel) !== start,
     save: () => saveSelection(sel),
-    bindPreview,
+    bindAvatars,
   };
 }
