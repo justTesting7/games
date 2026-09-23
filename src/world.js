@@ -158,13 +158,20 @@ export class World {
     const c = this.chunks.get(key(cx, cz));
     if (!c || !c.blocks) return false;
     const lx = x - cx * CHUNK, lz = z - cz * CHUNK;
-    c.blocks[lx + lz * CHUNK + y * CHUNK * CHUNK] = id;
+    const i = lx + lz * CHUNK + y * CHUNK * CHUNK;
+    const old = c.blocks[i];
+    c.blocks[i] = id;
     for (const w of this.workers) w.w.postMessage({ type: 'set', x, y, z, id });
     const dxs = [0], dzs = [0];
-    if (lx === 0) dxs.push(-1);
-    if (lx === CHUNK - 1) dxs.push(1);
-    if (lz === 0) dzs.push(-1);
-    if (lz === CHUNK - 1) dzs.push(1);
+    if (BLOCKS[old].emissive || BLOCKS[id].emissive) {
+      // Light spreads up to 14 blocks, so every neighbour may change.
+      dxs.push(-1, 1); dzs.push(-1, 1);
+    } else {
+      if (lx === 0) dxs.push(-1);
+      if (lx === CHUNK - 1) dxs.push(1);
+      if (lz === 0) dzs.push(-1);
+      if (lz === CHUNK - 1) dzs.push(1);
+    }
     for (const dx of dxs) {
       for (const dz of dzs) {
         const n = this.chunks.get(key(cx + dx, cz + dz));

@@ -47,14 +47,14 @@ class MeshBuilder {
     this.idx = new Buf(Uint32Array, 4096 * 6);
     this.vc = 0;
   }
-  vert(x, y, z, nIdx, ao, sky, flags, u, v, layer) {
+  vert(x, y, z, nIdx, ao, sky, flags, u, v, layer, bl = 0) {
     const p = this.pos; p.ensure(3);
     p.a[p.n++] = x; p.a[p.n++] = y; p.a[p.n++] = z;
     const d = this.data; d.ensure(4);
     d.a[d.n++] = nIdx; d.a[d.n++] = ao; d.a[d.n++] = sky; d.a[d.n++] = flags;
     if (this.uvl) {
       const t = this.uvl; t.ensure(4);
-      t.a[t.n++] = u; t.a[t.n++] = v; t.a[t.n++] = layer; t.a[t.n++] = 0;
+      t.a[t.n++] = u; t.a[t.n++] = v; t.a[t.n++] = layer; t.a[t.n++] = bl;
     }
     return this.vc++;
   }
@@ -83,7 +83,7 @@ class MeshBuilder {
 const CU = [0, 1, 1, 0];
 const CV = [0, 0, 1, 1];
 
-export function meshChunk(pad) {
+export function meshChunk(pad, light) {
   // Column heights for a cheap sky-light estimate.
   const hOp = new Int16Array(PL);
   const hWat = new Int16Array(PL);
@@ -113,6 +113,7 @@ export function meshChunk(pad) {
   const solid = new MeshBuilder(true);
   const water = new MeshBuilder(false);
   const ao = [0, 0, 0, 0];
+  const bl = [0, 0, 0, 0];
 
   for (let y = 0; y < HEIGHT; y++) {
     for (let z = 0; z < CHUNK; z++) {
@@ -125,6 +126,7 @@ export function meshChunk(pad) {
         if (b.cross) {
           const sky = skyAt(x, y, z);
           const layer = b.side;
+          const lv = light ? light[i] * 16 : 0;
           const quads = [
             [[0.15, 0.15], [0.85, 0.85]],
             [[0.85, 0.85], [0.15, 0.15]],
@@ -132,10 +134,10 @@ export function meshChunk(pad) {
             [[0.85, 0.15], [0.15, 0.85]],
           ];
           for (const [a, c] of quads) {
-            solid.vert(x + a[0], y, z + a[1], 6, 3, sky, 0, 0, 0, layer);
-            solid.vert(x + c[0], y, z + c[1], 6, 3, sky, 0, 1, 0, layer);
-            solid.vert(x + c[0], y + 1, z + c[1], 6, 3, sky, 2, 1, 1, layer);
-            solid.vert(x + a[0], y + 1, z + a[1], 6, 3, sky, 2, 0, 1, layer);
+            solid.vert(x + a[0], y, z + a[1], 6, 3, sky, 0, 0, 0, layer, lv);
+            solid.vert(x + c[0], y, z + c[1], 6, 3, sky, 0, 1, 0, layer, lv);
+            solid.vert(x + c[0], y + 1, z + c[1], 6, 3, sky, 2, 1, 1, layer, lv);
+            solid.vert(x + a[0], y + 1, z + a[1], 6, 3, sky, 2, 0, 1, layer, lv);
             solid.quad(false);
           }
           continue;
@@ -178,13 +180,20 @@ export function meshChunk(pad) {
             const s2 = OCCL[pad[ni + su]];
             const c = OCCL[pad[ni + sr + su]];
             ao[k] = s1 && s2 ? 0 : 3 - (s1 + s2 + c);
+            if (light) {
+              let sum = light[ni], n = 1;
+              if (!OPAQUE[pad[ni + sr]]) { sum += light[ni + sr]; n++; }
+              if (!OPAQUE[pad[ni + su]]) { sum += light[ni + su]; n++; }
+              if (!(s1 && s2) && !OPAQUE[pad[ni + sr + su]]) { sum += light[ni + sr + su]; n++; }
+              bl[k] = Math.round((sum / n) * 16);
+            }
           }
           for (let k = 0; k < 4; k++) {
             solid.vert(
               x + F.o[0] + F.r[0] * CU[k] + F.u[0] * CV[k],
               y + F.o[1] + F.r[1] * CU[k] + F.u[1] * CV[k],
               z + F.o[2] + F.r[2] * CU[k] + F.u[2] * CV[k],
-              f, ao[k], sky, flagsBase, CU[k], CV[k], layer,
+              f, ao[k], sky, flagsBase, CU[k], CV[k], layer, bl[k],
             );
           }
           solid.quad(ao[0] + ao[2] < ao[1] + ao[3]);

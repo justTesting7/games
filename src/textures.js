@@ -78,11 +78,11 @@ function stone(t) {
       put(t, x, y, shade(STONE, f), v, 0.25);
     }
   }
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0; i < 4; i++) {
     let x = Math.floor(t.rand() * S), y = Math.floor(t.rand() * S);
-    const len = 2 + Math.floor(t.rand() * 4);
+    const len = 2 + Math.floor(t.rand() * 3);
     for (let k = 0; k < len; k++) {
-      put(t, x, y, shade(STONE, 0.7), 0.1, 0.1);
+      put(t, x, y, shade(STONE, 0.8 + t.rand() * 0.05), 0.25, 0.1);
       x += t.rand() < 0.5 ? 1 : 0; y += t.rand() < 0.5 ? 1 : -1;
     }
   }

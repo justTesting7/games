@@ -24,13 +24,14 @@ vec3 skyIrradiance(vec3 n) { return textureLod(uSkyTex, dirToUV(n), 5.0).rgb; }
 
 float ign(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715)))); }
 
-vec3 applyFog(vec3 col, vec3 worldPos) {
+vec3 applyFog(vec3 col, vec3 worldPos, float skyVis) {
   vec3 d = worldPos - cameraPosition;
   float dist = length(d);
   vec3 v = d / dist;
   vec3 fogCol = skyRadiance(normalize(vec3(v.x, max(v.y, 0.0), v.z)));
   float sunAmt = pow(max(dot(v, uSunDir), 0.0), 6.0);
   vec3 scatter = fogCol + uLightColor * sunAmt * 0.12;
+  scatter *= smoothstep(0.0, 0.7, skyVis);
   float heightF = exp(-max(worldPos.y - 50.0, 0.0) * 0.025);
   float fogAmt = 1.0 - exp(-dist * uFogDensity * (0.35 + heightF));
   float border = smoothstep(uFogStart, uFogEnd, dist);
@@ -83,7 +84,7 @@ float caustics(vec2 p, float t) {
 
 export const blockVert = /* glsl */ `
 attribute vec4 aData;   // face index, ao, skylight, flags
-attribute vec4 aUVL;    // u, v, layer, -
+attribute vec4 aUVL;    // u, v, layer, block light * 16
 uniform float uTime;
 uniform float uWind;
 
@@ -91,6 +92,7 @@ varying vec3 vWorld;
 varying vec2 vUV;
 varying float vAO;
 varying float vSky;
+varying float vBlockLight;
 flat varying float vLayer;
 flat varying int vFlags;
 flat varying vec3 vN;
@@ -134,6 +136,7 @@ void main() {
   vLayer = aUVL.z;
   vAO = aData.y / 3.0;
   vSky = aData.z / 15.0;
+  vBlockLight = aUVL.w / 240.0;
   if (face == 6) vFlags |= 8;
   gl_Position = projectionMatrix * viewMatrix * world;
 }
@@ -145,11 +148,13 @@ uniform sampler2DArray uAlbedo;
 uniform sampler2DArray uNormalTex;
 uniform float uSeaLevel;
 uniform vec3 uCaveAmbient;
+uniform float uHandLight;
 
 varying vec3 vWorld;
 varying vec2 vUV;
 varying float vAO;
 varying float vSky;
+varying float vBlockLight;
 flat varying float vLayer;
 flat varying int vFlags;
 flat varying vec3 vN;
@@ -193,6 +198,17 @@ void main() {
   ambient += skyIrradiance(vec3(0.0, 1.0, 0.0)) * 0.12 * ao * sky;
   ambient += uCaveAmbient * ao;
 
+  // Warm block light from glowstone (flood-filled on the CPU), plus a light
+  // carried by the player when holding glowstone.
+  const vec3 TORCH = vec3(1.0, 0.68, 0.38);
+  float bl = vBlockLight;
+  vec3 blockLight = TORCH * (pow(bl, 3.0) * 2.4 + bl * 0.08) * mix(ao, 1.0, 0.3);
+  float hd = length(vWorld - cameraPosition);
+  float hand = uHandLight * pow(max(0.0, 1.0 - hd / 14.0), 2.0);
+  vec3 toCam = normalize(cameraPosition - vWorld);
+  blockLight += TORCH * hand * 1.6 * (plant ? 0.8 : max(dot(N, toCam), 0.0) * 0.8 + 0.2);
+  ambient += blockLight;
+
   // Underwater caustics for surfaces below sea level that see the sky.
   if (vWorld.y < uSeaLevel + 0.9 && vSky > 0.2 && vSky < 0.999) {
     float depth = uSeaLevel + 0.9 - vWorld.y;
@@ -215,7 +231,7 @@ void main() {
   vec3 col = albedo * (direct + ambient) + specular + env;
   if (emissive) col = albedo * 5.0 + col * 0.2;
 
-  col = applyFog(col, vWorld);
+  col = applyFog(col, vWorld, vSky);
   gl_FragColor = vec4(col, length(vWorld - cameraPosition));
 }
 `;
@@ -392,7 +408,7 @@ void main() {
   }
   vec3 col = mix(refracted, refl, F) + sunSpec * (below ? 0.0 : 1.0);
 
-  if (!below) col = applyFog(col, vWorld);
+  if (!below) col = applyFog(col, vWorld, vSky);
   gl_FragColor = vec4(col, surfDist);
 }
 `;
@@ -757,8 +773,13 @@ void main() {
   float rays = texture(tRays, uv).r;
   col += uLightColor * rays * uRays;
 
+  // Purkinje shift: in dim light colour vision fades and shifts towards blue.
+  float pl = dot(col, vec3(0.2126, 0.7152, 0.0722));
+  float scot = 1.0 - smoothstep(0.004, 0.08, pl);
+  col = mix(col, vec3(0.55, 0.7, 1.0) * pl * 1.1, scot * 0.65);
+
   float avgLum = texture(tLum, vec2(0.5)).r;
-  float exposure = uExposureBias * 0.16 / clamp(avgLum, 0.012, 3.0);
+  float exposure = uExposureBias * 0.16 / clamp(avgLum, 0.04, 3.0);
   col *= exposure;
 
   col = aces(col);

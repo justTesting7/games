@@ -130,6 +130,7 @@ export class Pipeline {
         uNormalTex: { value: textures.normal },
         uSeaLevel: { value: SEA_LEVEL + 1 },
         uCaveAmbient: { value: new THREE.Vector3(0.01, 0.0095, 0.009) },
+        uHandLight: { value: 0 },
       },
     });
 

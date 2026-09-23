@@ -314,6 +314,10 @@ function loop() {
   if (locked && mouse.left && breakCooldown <= 0) { breakBlock(); breakCooldown = 0.25; }
   if (locked && mouse.right && placeCooldown <= 0) { placeBlock(); placeCooldown = 0.25; }
 
+  const handTarget = HOTBAR[selected] === B.GLOWSTONE ? 1 : 0;
+  const hl = pipeline.blockMaterial.uniforms.uHandLight;
+  hl.value += (handTarget - hl.value) * (1 - Math.exp(-dt * 10));
+
   const underwater = player.headInWater;
   $('underwater').style.opacity = underwater ? 1 : 0;
   pipeline.render(camera, dt, { underwater });
