@@ -5,17 +5,18 @@ import { loadTextureArray, VENDOR } from '../engine/assets.js';
 
 export const LAYERS = ['sand', 'grass', 'forest', 'rock'];
 
-export function generateHeightmap() {
+export function generateHeightmap(mapId = 'island') {
   return new Promise((resolve, reject) => {
     const worker = new Worker(new URL('./heightmap.worker.js', import.meta.url), { type: 'module' });
     worker.onmessage = (e) => { worker.terminate(); resolve(e.data); };
     worker.onerror = (e) => { worker.terminate(); reject(e); };
-    worker.postMessage({ seed: WORLD_SEED });
+    worker.postMessage({ seed: WORLD_SEED, map: mapId });
   });
 }
 
-export async function loadTerrainTextures() {
-  const url = (k, t) => `${VENDOR}/textures/${k}_${t}.jpg`;
+export async function loadTerrainTextures(map) {
+  const pre = map?.id === 'city' ? 'city_' : '';
+  const url = (k, t) => `${VENDOR}/textures/${pre}${k}_${t}.jpg`;
   const [albedo, normal, arm] = await Promise.all([
     loadTextureArray(LAYERS.map((k) => url(k, 'diff')), 1024, { srgb: true }),
     loadTextureArray(LAYERS.map((k) => url(k, 'nor')), 1024),
@@ -98,6 +99,7 @@ uniform highp sampler2DArray tNormalArr;
 uniform highp sampler2DArray tArm;
 uniform float uWorldSize;
 uniform float uTime;
+uniform float uUrban;
 varying vec3 vWPos;
 ${heightSampleGLSL}
 
@@ -167,10 +169,11 @@ vec3 tArmS = rS * wf.x + rG * wf.y + rF * wf.z + rR * wf.w;
 vec3 tNrmW = normalize(nS * wf.x + nG * wf.y + nF * wf.z + nR * wf.w);
 
 vec3 grassTint = mix(vec3(0.78, 0.86, 0.55), vec3(1.08, 1.02, 0.78), smoothstep(0.3, 0.75, tNoise(vWPos.xz * 0.02 + 9.0)));
-tAlb *= mix(vec3(1.0), grassTint, wf.y + wf.z * 0.5);
+float vegTint = (wf.y + wf.z * 0.5) * (1.0 - uUrban);
+tAlb *= mix(vec3(1.0), grassTint, vegTint);
 tAlb *= mix(0.82, 1.12, macro);
 
-float wet = (1.0 - smoothstep(0.15, 1.3, vWPos.y + sin(uTime * 0.7 + vWPos.x * 0.1) * 0.15)) * (wf.x + wf.w * 0.5);
+float wet = (1.0 - uUrban) * (1.0 - smoothstep(0.15, 1.3, vWPos.y + sin(uTime * 0.7 + vWPos.x * 0.1) * 0.15)) * (wf.x + wf.w * 0.5);
 tAlb *= mix(1.0, 0.55, wet);
 float tRough = mix(tArmS.g, 0.22, wet);
 float tAO = mix(tArmS.r, 1.0, 0.3);
@@ -179,7 +182,8 @@ diffuseColor.rgb *= tAlb;
 `;
 
 export class Terrain {
-  constructor(data, textures) {
+  constructor(data, textures, { urban = false } = {}) {
+    this.urban = urban;
     this.heights = data.heights;
     this.normalsData = data.normals;
     this.biomeData = data.biome;
@@ -211,6 +215,7 @@ export class Terrain {
       tArm: { value: textures.arm },
       uWorldSize: { value: WORLD_SIZE },
       uTime: { value: 0 },
+      uUrban: { value: urban ? 1 : 0 },
     };
 
     this.material = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, metalness: 0 });
@@ -225,7 +230,7 @@ export class Terrain {
         .replace('#include <normal_fragment_maps>', 'normal = normalize((viewMatrix * vec4(tNrmW, 0.0)).xyz);')
         .replace('#include <aomap_fragment>', 'reflectedLight.indirectDiffuse *= tAO; reflectedLight.indirectSpecular *= tAO;');
     };
-    this.material.customProgramCacheKey = () => 'terrain-splat';
+    this.material.customProgramCacheKey = () => (urban ? 'terrain-splat-urban' : 'terrain-splat');
 
     this.depthMaterial = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
     this.depthMaterial.onBeforeCompile = (shader) => {

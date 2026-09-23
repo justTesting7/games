@@ -299,18 +299,14 @@ export class Weapons {
       p.y = h + 0.035;
     }
     if (collide) {
-      for (const c of veg.colliders.query(p.x, p.z, 0.8, this.cols || (this.cols = []))) {
-        if (p.y > c.y1 || p.y < c.y0) continue;
-        const dx = p.x - c.x, dz = p.z - c.z;
-        const dd = Math.hypot(dx, dz);
-        const r = c.r + 0.04;
-        if (dd < r && dd > 1e-4) {
-          const nx = dx / dd, nz = dz / dd;
-          p.x = c.x + nx * r;
-          p.z = c.z + nz * r;
-          const vn = v.x * nx + v.z * nz;
-          if (vn < 0) { v.x -= vn * 1.4 * nx; v.z -= vn * 1.4 * nz; v.multiplyScalar(0.7); bounced = Math.max(bounced, -vn); }
-        }
+      const prev = p.clone();
+      veg.colliders.resolveXZ(p, 0.04, p.y - 0.05, p.y + 0.05);
+      if (p.distanceToSquared(prev) > 1e-6) {
+        const nx = p.x - prev.x, nz = p.z - prev.z;
+        const len = Math.hypot(nx, nz) || 1;
+        const nnx = nx / len, nnz = nz / len;
+        const vn = v.x * nnx + v.z * nnz;
+        if (vn < 0) { v.x -= vn * 1.3 * nnx; v.z -= vn * 1.3 * nnz; v.multiplyScalar(0.72); bounced = Math.max(bounced, -vn); }
       }
     }
     return bounced;

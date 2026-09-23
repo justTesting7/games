@@ -189,6 +189,53 @@ export class Colliders {
       this.map.get(k).push(c);
     }
   }
+
+  addBox({ x0, x1, z0, z1, y0, y1, type = 'concrete' }) {
+    const cx = (x0 + x1) * 0.5, cz = (z0 + z1) * 0.5;
+    const hx = (x1 - x0) * 0.5, hz = (z1 - z0) * 0.5;
+    this.add({
+      box: true, x0, x1, z0, z1, y0, y1, x: cx, z: cz,
+      r: Math.hypot(hx, hz), type,
+    });
+  }
+
+  // Keeps a capsule-like character out of trees, rocks and building shells.
+  resolveXZ(pos, radius, y0, y1) {
+    for (const c of this.list) {
+      if (y0 > c.y1 || y1 < c.y0) continue;
+      if (c.box) {
+        const inside = pos.x > c.x0 && pos.x < c.x1 && pos.z > c.z0 && pos.z < c.z1;
+        if (inside) {
+          const dl = pos.x - c.x0, dr = c.x1 - pos.x, dd = pos.z - c.z0, du = c.z1 - pos.z;
+          const m = Math.min(dl, dr, dd, du);
+          if (m === dl) pos.x = c.x0 - radius;
+          else if (m === dr) pos.x = c.x1 + radius;
+          else if (m === dd) pos.z = c.z0 - radius;
+          else pos.z = c.z1 + radius;
+          continue;
+        }
+        const px = Math.max(c.x0, Math.min(pos.x, c.x1));
+        const pz = Math.max(c.z0, Math.min(pos.z, c.z1));
+        const dx = pos.x - px, dz = pos.z - pz;
+        const d2 = dx * dx + dz * dz;
+        const r = radius + 0.02;
+        if (d2 < r * r && d2 > 1e-8) {
+          const d = Math.sqrt(d2);
+          pos.x = px + (dx / d) * r;
+          pos.z = pz + (dz / d) * r;
+        }
+        continue;
+      }
+      const dx = pos.x - c.x, dz = pos.z - c.z;
+      const r = c.r + radius;
+      const d2 = dx * dx + dz * dz;
+      if (d2 >= r * r) continue;
+      const d = Math.sqrt(d2) || 1e-4;
+      pos.x = c.x + (dx / d) * r;
+      pos.z = c.z + (dz / d) * r;
+      if (pos.y > c.y1 - 0.5) pos.y = Math.max(pos.y, c.y1);
+    }
+  }
   query(x, z, r, out = []) {
     out.length = 0;
     const i0 = Math.floor((x - r) / this.cell), i1 = Math.floor((x + r) / this.cell);
@@ -208,6 +255,29 @@ export class Colliders {
       const x = o.x + d.x * t, z = o.z + d.z * t;
       this.query(x, z, step * 0.75, tmp);
       for (const c of tmp) {
+        if (c.box) {
+          const inv = 1 / (d.x || 1e-8);
+          let t0 = (c.x0 - o.x) * inv, t1 = (c.x1 - o.x) * inv;
+          if (t0 > t1) { const s = t0; t0 = t1; t1 = s; }
+          let ty0 = (c.y0 - o.y) / (d.y || 1e-8), ty1 = (c.y1 - o.y) / (d.y || 1e-8);
+          if (ty0 > ty1) { const s = ty0; ty0 = ty1; ty1 = s; }
+          let tz0 = (c.z0 - o.z) / (d.z || 1e-8), tz1 = (c.z1 - o.z) / (d.z || 1e-8);
+          if (tz0 > tz1) { const s = tz0; tz0 = tz1; tz1 = s; }
+          const tNear = Math.max(t0, ty0, tz0);
+          const tFar = Math.min(t1, ty1, tz1);
+          if (tNear > tFar || tFar < 0 || tNear > maxDist) continue;
+          const th = tNear < 0 ? tFar : tNear;
+          if (th < 0 || th > maxDist || (best && th >= best.t)) continue;
+          const px = o.x + d.x * th, py = o.y + d.y * th, pz = o.z + d.z * th;
+          const nx = px < c.x0 + 0.01 ? -1 : px > c.x1 - 0.01 ? 1 : 0;
+          const ny = py < c.y0 + 0.01 ? -1 : py > c.y1 - 0.01 ? 1 : 0;
+          const nz = pz < c.z0 + 0.01 ? -1 : pz > c.z1 - 0.01 ? 1 : 0;
+          const n = new THREE.Vector3(nx, ny, nz);
+          if (n.lengthSq() < 1e-4) n.set(0, 1, 0);
+          else n.normalize();
+          best = { t: th, collider: c, normal: n, surface: c.type };
+          continue;
+        }
         const ox = o.x - c.x, oz = o.z - c.z;
         const a = d.x * d.x + d.z * d.z;
         if (a < 1e-8) continue;
@@ -221,7 +291,7 @@ export class Colliders {
         if (y < c.y0 || y > c.y1) continue;
         const hx = o.x + d.x * th - c.x, hz = o.z + d.z * th - c.z;
         const l = Math.hypot(hx, hz) || 1;
-        best = { t: th, collider: c, normal: new THREE.Vector3(hx / l, 0, hz / l) };
+        best = { t: th, collider: c, normal: new THREE.Vector3(hx / l, 0, hz / l), surface: c.type };
       }
       if (best && best.t < t) break;
     }

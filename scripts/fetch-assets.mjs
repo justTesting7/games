@@ -14,11 +14,19 @@ const PH_TEXTURES = {
   rock: 'rock_face_03',
   sand: 'coast_sand_01',
 };
+const PH_CITY_TEXTURES = {
+  sand: 'asphalt_01',
+  grass: 'brushed_concrete_2',
+  forest: 'burned_ground_01',
+  rock: 'broken_brick_wall',
+};
 const PH_MODELS = [
   'service_pistol', 'rock_moss_set_01', 'rock_moss_set_02', 'boulder_01',
   'namaqualand_boulder_02', 'fern_02', 'shrub_02', 'barrel_03',
   'wooden_crate_01', 'dead_tree_trunk', 'tree_stump_01', 'bolt_action_rifle_7_62',
   'stick_grenade',
+  'covered_car', 'concrete_road_barrier', 'street_lamp_01', 'barrel_stove',
+  'metal_trash_can', 'fire_hydrant', 'old_tyre',
 ];
 const RPM = 'https://raw.githubusercontent.com/readyplayerme/animation-library/master/feminine/glb';
 const RPM_FILES = [
@@ -82,7 +90,7 @@ async function pool(tasks, n = 8) {
 }
 
 async function main() {
-  const marker = path.join(ROOT, '.complete-v2');
+  const marker = path.join(ROOT, '.complete-v3');
   if (await exists(marker)) {
     console.log('[assets] already downloaded');
     return;
@@ -97,6 +105,16 @@ async function main() {
     for (const [m, url] of Object.entries(maps)) {
       if (!url) throw new Error(`missing ${m} for ${id}`);
       tasks.push(() => download(url, path.join(ROOT, 'textures', `${key}_${m}.jpg`)));
+    }
+  }
+
+  for (const [key, id] of Object.entries(PH_CITY_TEXTURES)) {
+    const files = await json(`https://api.polyhaven.com/files/${id}`);
+    const pick = (map) => files[map]?.['1k']?.jpg?.url;
+    const maps = { diff: pick('Diffuse'), nor: pick('nor_gl'), arm: pick('arm') };
+    for (const [m, url] of Object.entries(maps)) {
+      if (!url) throw new Error(`missing city ${m} for ${id}`);
+      tasks.push(() => download(url, path.join(ROOT, 'textures', `city_${key}_${m}.jpg`)));
     }
   }
 

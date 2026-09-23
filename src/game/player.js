@@ -114,19 +114,7 @@ export class Player {
       this.vel.z *= 0.2;
     }
 
-    const cols = this.world.veg.colliders.query(next.x, next.z, 1.5, this.tmp);
-    for (const c of cols) {
-      if (next.y > c.y1 || next.y + 1.7 < c.y0) continue;
-      const dx = next.x - c.x, dz = next.z - c.z;
-      const r = c.r + RADIUS;
-      const d2 = dx * dx + dz * dz;
-      if (d2 < r * r) {
-        const d = Math.sqrt(d2) || 1e-4;
-        next.x = c.x + (dx / d) * r;
-        next.z = c.z + (dz / d) * r;
-        if (next.y > c.y1 - 0.5) { next.y = Math.max(next.y, c.y1); this.vel.y = Math.max(0, this.vel.y); }
-      }
-    }
+    this.world.veg.colliders.resolveXZ(next, RADIUS, next.y, next.y + 1.7);
     this.world.props.collidePlayer(next, RADIUS, this.vel);
     for (const f of this.world.combat.fighters) {
       if (f === this.fighter || !f.alive) continue;

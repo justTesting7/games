@@ -4,6 +4,8 @@ import { Progress } from './engine/assets.js';
 import { generateHeightmap, loadTerrainTextures, Terrain } from './world/terrain.js';
 import { Grass } from './world/grass.js';
 import { Vegetation } from './world/vegetation.js';
+import { getMap } from './world/maps.js';
+import { City } from './world/city.js';
 import { Character, OUTFITS } from './game/character.js';
 import { Player } from './game/player.js';
 import { Props } from './game/props.js';
@@ -70,7 +72,7 @@ world.raycast = (o, d, maxDist, ignore) => {
     if (tw < (best ? best.t : maxDist)) best = { t: tw, normal: new THREE.Vector3(0, 1, 0), surface: 'water' };
   }
   const c = world.veg.colliders.raycast(o, d, best ? best.t : maxDist);
-  if (c && (!best || c.t < best.t)) best = { t: c.t, normal: c.normal, surface: c.collider.type };
+  if (c && (!best || c.t < best.t)) best = { t: c.t, normal: c.normal, surface: c.surface || c.collider.type };
   const pr = world.props.raycast(o, d, best ? best.t : maxDist);
   if (pr && (!best || pr.t < best.t)) best = pr;
   const fh = world.combat.raycast(o, d, best ? best.t : maxDist, ignore);
@@ -113,23 +115,34 @@ addEventListener('wheel', (e) => {
 }, { passive: true });
 addEventListener('blur', () => { for (const k in input) input[k] = false; });
 
-let timeOfDay = 0.09;
+const mapId = localStorage.getItem('relic-map') || 'island';
+const mapDef = getMap(mapId);
+$('map').value = mapId;
+$('maptitle').textContent = mapDef.label;
+$('mapsub').textContent = mapDef.subtitle;
+$('map').onchange = (e) => {
+  localStorage.setItem('relic-map', e.target.value);
+  location.reload();
+};
+
+let timeOfDay = mapDef.timeOfDay;
 $('timeofday').value = Math.round(timeOfDay * 1000);
 $('timeofday').oninput = (e) => { timeOfDay = e.target.value / 1000; };
 $('quality').onchange = (e) => {
   pipeline.setQuality(e.target.value);
   localStorage.setItem('relic-quality', e.target.value);
-  if (world.veg) { world.veg.scale = pipeline.quality.trees; world.veg.update(0, camera.position, true); }
+  if (world.veg && world.mapDef?.vegetation) { world.veg.scale = pipeline.quality.trees; world.veg.update(0, camera.position, true); }
 };
 $('volume').oninput = (e) => audio.setVolume(e.target.value / 100);
 audio.setVolume($('volume').value / 100);
 
 async function init() {
+  pipeline.fogMaterial.uniforms.uFogDensity.value = mapDef.fogDensity;
   const [data, textures] = await Promise.all([
-    progress.task('Shaping the island', 3, generateHeightmap),
-    progress.task('Loading terrain materials', 3, loadTerrainTextures),
+    progress.task(mapDef.loadLabel, 3, () => generateHeightmap(mapDef.id)),
+    progress.task('Loading terrain materials', 3, () => loadTerrainTextures(mapDef)),
   ]);
-  const terrain = new Terrain(data, textures);
+  const terrain = new Terrain(data, textures, { urban: mapDef.id === 'city' });
   world.terrain = terrain;
   pipeline.scene.add(terrain.group);
 
@@ -137,24 +150,42 @@ async function init() {
   water.frustumCulled = false;
   pipeline.setWater(water, terrain.heightTex, terrain.uniforms.uWorldSize.value);
 
-  const grass = new Grass(terrain, textures.albedo, pipeline.quality.grass);
-  pipeline.scene.add(grass.group);
+  let grass = null;
+  if (mapDef.grass) {
+    grass = new Grass(terrain, textures.albedo, pipeline.quality.grass);
+    pipeline.scene.add(grass.group);
+  }
 
   const veg = new Vegetation();
   const character = new Character();
   const props = new Props(terrain, veg.colliders);
   world.veg = veg;
   world.props = props;
-  const [, charAssets] = await Promise.all([veg.load(progress), Character.loadAssets(progress), props.load(progress)]);
+  let city = null;
+  if (mapDef.id === 'city') city = new City(terrain, veg.colliders, pipeline);
+  const [, charAssets] = await Promise.all([
+    mapDef.vegetation ? veg.load(progress) : Promise.resolve(),
+    Character.loadAssets(progress),
+    mapDef.waterCamp ? props.load(progress) : Promise.resolve(),
+    city ? city.load(progress) : Promise.resolve(),
+  ]);
   character.load(charAssets, OUTFITS.adventurer);
 
   const spawn = data.spawn;
   const facing = Math.atan2(data.peak.x - spawn.x, data.peak.z - spawn.z);
-  await progress.task('Planting the forest', 1, async () => veg.scatter(terrain, spawn));
-  veg.scale = pipeline.quality.trees;
-  pipeline.scene.add(veg.group);
-  props.place(spawn, facing);
-  pipeline.scene.add(props.group);
+  if (mapDef.vegetation) {
+    await progress.task(mapDef.plantLabel, 1, async () => veg.scatter(terrain, spawn));
+    veg.scale = pipeline.quality.trees;
+    pipeline.scene.add(veg.group);
+  }
+  if (mapDef.waterCamp) {
+    props.place(spawn, facing);
+    pipeline.scene.add(props.group);
+  }
+  if (city && data.layout) {
+    city.build(data.layout);
+    pipeline.scene.add(city.group);
+  }
   character.addTo(pipeline.scene);
 
   const player = new Player(world, character, camera);
@@ -164,7 +195,7 @@ async function init() {
   const weapons = new Weapons(world, player, character, fx, audio, combat);
   weapons.setGrenadeModel(charAssets.grenadeGltf);
   player.fighter.loadout = new Loadout(3);
-  Object.assign(world, { grass, character, player, fx, weapons, data });
+  Object.assign(world, { grass, character, player, fx, weapons, data, city, mapDef });
 
   const rivals = PERSONAS.map((p) => {
     const ch = new Character();
@@ -186,8 +217,9 @@ async function init() {
         const ang = player.yaw + (i ? -1 : 1) * (0.3 + Math.random() * 0.5) + spreadAll;
         const dist = 18 + Math.random() * 10;
         const x = p.x + Math.sin(ang) * dist, z = p.z + Math.cos(ang) * dist;
-        if (!terrain.inBounds(x, z) || terrain.heightAt(x, z) < 0.6) continue;
-        if (terrain.normalAt(x, z).y < 0.8) continue;
+        const h = terrain.heightAt(x, z);
+        if (!terrain.inBounds(x, z) || h < (mapDef.id === 'city' ? 1.2 : 0.6)) continue;
+        if (terrain.normalAt(x, z).y < (mapDef.id === 'city' ? 0.75 : 0.8)) continue;
         if (veg.colliders.query(x, z, 1.2, tmp).length) continue;
         if (rivals.some((o, j) => j < i && Math.hypot(o.pos.x - x, o.pos.z - z) < 8)) continue;
         at = { x, z };
@@ -319,8 +351,8 @@ async function init() {
   };
 
   await progress.task('Compiling shaders', 1, async () => {
-    veg.update(0, player.pos, true);
-    grass.update(0, player.pos, player.pos);
+    if (mapDef.vegetation) veg.update(0, player.pos, true);
+    if (grass) grass.update(0, player.pos, player.pos);
     pipeline.setTimeOfDay(timeOfDay, 0);
     player.update(0.016, input);
     rivals.forEach((r) => r.update(0.016, false));
@@ -396,8 +428,9 @@ async function init() {
     props.update(dt);
     fx.update(dt);
     terrain.update(elapsed);
-    grass.update(elapsed, camera.position, player.pos);
-    veg.update(elapsed, camera.position);
+    if (grass) grass.update(elapsed, camera.position, player.pos);
+    if (mapDef.vegetation) veg.update(elapsed, camera.position);
+    if (city) city.update(dt, fx);
     const coast = THREE.MathUtils.clamp(1 - (terrain.heightAt(player.pos.x, player.pos.z) - 1) / 25, 0, 1);
     audio.updateAmbience(dt, { altitude: player.pos.y, coast, underwater: player.underwater });
 
@@ -447,7 +480,7 @@ async function init() {
           `pos ${player.pos.x.toFixed(1)} ${player.pos.y.toFixed(1)} ${player.pos.z.toFixed(1)}`,
           `speed ${state.speed.toFixed(2)} m/s · ${player.onGround ? 'ground' : 'air'}`,
           `draw calls ${info.calls} · tris ${(info.triangles / 1e6).toFixed(2)}M`,
-          `trees ${veg.stats.trees} · rocks ${veg.stats.rocks} · ferns ${veg.stats.ferns}`,
+          mapDef.vegetation ? `trees ${veg.stats.trees} · rocks ${veg.stats.rocks} · ferns ${veg.stats.ferns}` : `map ${mapDef.label}`,
           `jev ${jev.stats.requests} requests · ${jev.stats.errors} errors`,
           ...rivals.map((r) => `${r.persona.name} ${Math.ceil(r.fighter.health)} hp · ${r.tactic} (${r.source} ${r.confidence.toFixed(2)}) → ${r.target?.name ?? '-'}`),
         ].join('\n');

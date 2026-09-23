@@ -28,14 +28,20 @@
 
     <div id="menu">
       <div class="panel">
-        <h1>Relic Isle</h1>
-        <p class="sub">A pistol deathmatch on a photoreal island against two rivals who think with Jev</p>
+        <h1 id="maptitle">Relic Isle</h1>
+        <p class="sub" id="mapsub">A pistol deathmatch on a photoreal island against two rivals who think with Jev</p>
         <div id="loading">
           <div class="bar"><div id="loadbar"></div></div>
           <div id="loadlabel">Starting…</div>
         </div>
         <button id="play" class="hidden">Fight</button>
         <div class="settings">
+          <label>Map
+            <select id="map">
+              <option value="island">Relic Isle</option>
+              <option value="city">Dead District</option>
+            </select>
+          </label>
           <label>Graphics
             <select id="quality">
               <option value="low">Low</option>
