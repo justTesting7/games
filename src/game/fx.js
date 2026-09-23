@@ -185,7 +185,6 @@ const UP = new THREE.Vector3(0, 1, 0);
 const RIGHT = new THREE.Vector3(1, 0, 0);
 const BLOOD_DARK = [0.14, 0.004, 0.004];
 const BLOOD_FRESH = [0.24, 0.012, 0.01];
-const MIST = [0.3, 0.035, 0.03];
 const TISSUE = [0.26, 0.05, 0.045];
 const TISSUE_PALE = [0.46, 0.28, 0.24];
 const gauss = () => (Math.random() + Math.random() + Math.random() - 1.5) / 1.5;
@@ -311,8 +310,8 @@ export class Effects {
   }
 
   // Wound ballistics, roughly: a little fine back-spatter at the entry, a
-  // fast cone of droplets and a short-lived mist cloud at the exit, plus
-  // tissue for head wounds. Liquid is dark and glossy, not bright red.
+  // fast cone of droplets at the exit, plus tissue for head wounds.
+  // Liquid is dark and glossy, not bright red (no fullscreen mist haze).
   bloodBurst(pos, dir, normal, k, head) {
     const B = this.blood;
     const fwd = dir.clone().normalize();
@@ -358,22 +357,6 @@ export class Effects {
           color: Math.random() < 0.75 ? TISSUE : TISSUE_PALE, gravity: 9.8, drag: 0.5, fade: 0, land: 1,
         });
       }
-    }
-    for (let i = 0; i < (head ? 12 : 5) * k; i++) {
-      const at = exit.clone().addScaledVector(fwd, Math.random() * 0.3 * k);
-      B.spawn({
-        pos: at, vel: cone(fwd, 0.45).multiplyScalar(0.6 + Math.random() * 2.6 * k),
-        size: (0.05 + Math.random() * 0.07) * (head ? 1.2 : 0.8), grow: 0.45 + Math.random() * 0.5,
-        life: 0.6 + Math.random() * 1.1, color: MIST, alpha: 0.22 + Math.random() * 0.2,
-        drag: 3.5, gravity: 0.35, seed: 2 + Math.random(),
-      });
-    }
-    for (let i = 0; i < (head ? 4 : 2); i++) {
-      B.spawn({
-        pos: entry, vel: cone(back, 0.5).multiplyScalar(0.4 + Math.random()),
-        size: 0.03 + Math.random() * 0.03, grow: 0.3, life: 0.5 + Math.random() * 0.4,
-        color: MIST, alpha: 0.25, drag: 4, gravity: 0.3, seed: 2 + Math.random(),
-      });
     }
   }
 
