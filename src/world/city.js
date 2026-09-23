@@ -10,6 +10,7 @@ import {
   buildSewers, buildStreetTrees, dressSidewalks, placeRoadblocks, placeStreetProp,
 } from './streets.js';
 import { dressCityFurniture } from './streetFurniture.js';
+import { buildPlaza, updateFountain } from './plaza.js';
 
 /** Horizontal distance (to the tower footprint) inside which real facade modules are shown. */
 const DETAIL_DIST = 60;
@@ -24,6 +25,7 @@ export class City {
     this.smokeT = 0;
     this.towers = [];
     this.treeWind = null;
+    this.fountain = null;
   }
 
   buildSkyline(layout, rand, darkMat) {
@@ -131,6 +133,7 @@ export class City {
       placeStreetProp(this.models, this.group, this.colliders, this.terrain, id, x, z, yaw, scale, coverY, type)
     );
 
+    this.fountain = buildPlaza(this.group, this.colliders, this.terrain, this.models, rand, place);
     this.treeWind = buildStreetTrees(this.group, this.colliders, this.terrain, rand);
     buildSewers(this.group, this.colliders, this.terrain, rand);
     dressSidewalks(this.models, this.group, this.colliders, this.terrain, rand);
@@ -139,7 +142,7 @@ export class City {
 
     for (const b of layout.blocks) {
       if (b.kind !== 4 && b.kind !== 5 && b.kind !== 6) continue;
-      if (Math.hypot(b.cx, b.cz) > CITY.playRadius - 20) continue;
+      if (Math.hypot(b.cx, b.cz) < 30 || Math.hypot(b.cx, b.cz) > CITY.playRadius - 20) continue;
       if (rand() > 0.55) {
         place('modular_chainlink_fence', b.cx + (rand() - 0.5) * 10, b.cz + (rand() - 0.5) * 10, rand() * Math.PI, 1, 2.2);
       }
@@ -156,7 +159,7 @@ export class City {
     for (let n = 0; n < 8; n++) {
       const x = (rand() - 0.5) * 90, z = (rand() - 0.5) * 90;
       const cell = cityCell(x, z);
-      if (cell.onRoad) continue;
+      if (cell.onRoad || Math.hypot(x, z) < CITY.plazaRoad) continue;
       const stove = place('barrel_stove', x, z, rand() * 6, 1, 1.1);
       if (stove) this.fires.push({ x: stove.position.x, z: stove.position.z, y: stove.position.y + 0.5, phase: rand() * 10 });
     }
@@ -168,6 +171,7 @@ export class City {
   update(dt, fx, camera) {
     if (camera) this.updateLod(camera.position);
     if (this.treeWind) this.treeWind((this._treeT = (this._treeT || 0) + dt));
+    if (this.fountain) updateFountain(fx, this.fountain.fountain, this._treeT || 0);
     this.smokeT += dt;
     if (!fx || this.smokeT < 0.12) return;
     this.smokeT = 0;

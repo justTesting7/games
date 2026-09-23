@@ -104,6 +104,8 @@ uniform float uUrban;
 uniform float uStreetPitch;
 uniform float uBlockW;
 uniform float uStreetW;
+uniform float uPlazaLawn;
+uniform float uPlazaRoad;
 varying vec3 vWPos;
 ${heightSampleGLSL}
 
@@ -184,6 +186,20 @@ float tAO = mix(tArmS.r, 1.0, 0.3);
 tNrmW = normalize(mix(tNrmW, nW, wet * 0.6 + smoothstep(60.0, 300.0, dist) * 0.5));
 
 if (uUrban > 0.5) {
+  float pr = length(vWPos.xz);
+  if (pr < uPlazaLawn) {
+    float gN = tNoise(vWPos.xz * 1.1) * 0.55 + tNoise(vWPos.xz * 3.4 + 4.0) * 0.45;
+    tAlb = mix(vec3(0.18, 0.32, 0.11), vec3(0.38, 0.52, 0.16), gN);
+    tAlb *= mix(0.9, 1.12, macro);
+    tRough = 0.88;
+    tNrmW = normalize(mix(tNrmW, nW, 0.35));
+  } else if (pr < uPlazaRoad) {
+    tAlb *= 0.78;
+    float ring = 1.0 - smoothstep(0.08, 0.16, abs(pr - (uPlazaLawn + uPlazaRoad) * 0.5));
+    float dash = step(0.4, fract(atan(vWPos.z, vWPos.x) * 12.0));
+    tAlb = mix(tAlb, vec3(0.82, 0.7, 0.18), ring * dash * 0.7);
+    tRough = mix(tRough, 0.5, ring * dash);
+  } else {
   float pitch = uStreetPitch;
   float halfStreet = uStreetW * 0.5;
   float wx = vWPos.x, wz = vWPos.z;
@@ -211,6 +227,7 @@ if (uUrban > 0.5) {
   float paint = max(yellow, white) * 0.82;
   tAlb = mix(tAlb, mix(vec3(0.84, 0.82, 0.74), vec3(0.82, 0.7, 0.18), yellow / max(paint, 1e-4)), paint);
   tRough = mix(tRough, 0.5, paint);
+  }
 }
 
 diffuseColor.rgb *= tAlb;
@@ -254,6 +271,8 @@ export class Terrain {
       uStreetPitch: { value: CITY.pitch },
       uBlockW: { value: CITY.blockW },
       uStreetW: { value: CITY.streetW },
+      uPlazaLawn: { value: CITY.plazaLawn },
+      uPlazaRoad: { value: CITY.plazaRoad },
     };
 
     this.material = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, metalness: 0 });

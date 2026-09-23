@@ -10,6 +10,8 @@ export const CITY = {
   baseY: 2.05,
   curb: 0.18,
   playRadius: 210,
+  plazaLawn: 15.5,
+  plazaRoad: 23.5,
 };
 
 const wrapDist = (v, period) => {
@@ -115,18 +117,23 @@ export function generateCityLayout(seed) {
     }
   }
   const coverBoxes = generateCover(blocks, rand);
-  const spawn = { x: 0, z: 0 };
-  const peak = { x: pitch * 1.2, z: -pitch * 0.8, h: baseY };
+  const spawn = { x: 0, z: 13.2 };
+  const peak = { x: 0, z: -10, h: baseY + 3 };
   return { blocks, buildingBoxes, coverBoxes, spawn, peak, seed };
 }
 
 export function cityHeightAt(x, z, layout, noise) {
-  const { baseY, playRadius, curb } = CITY;
+  const { baseY, playRadius, curb, plazaLawn, plazaRoad } = CITY;
   const r = Math.hypot(x, z);
   if (r > playRadius + 40) {
     const t = Math.min(1, (r - playRadius) / 35);
     return baseY + t * t * 28;
   }
+  if (r < plazaLawn) {
+    const n = noise.fbm2(x * 0.35, z * 0.35, 2) * 0.04;
+    return baseY + curb + 0.06 + n;
+  }
+  if (r < plazaRoad) return baseY - 0.13;
   const cell = cityCell(x, z);
   let h = baseY;
   if (cell.onRoad) h -= 0.12;
@@ -148,6 +155,9 @@ export function cityHeightAt(x, z, layout, noise) {
 }
 
 export function cityBiomeAt(x, z, layout) {
+  const r = Math.hypot(x, z);
+  if (r < CITY.plazaLawn) return { sand: 0, grass: 1, rock: 0, forest: 0 };
+  if (r < CITY.plazaRoad) return { sand: 1, grass: 0, rock: 0, forest: 0 };
   const cell = cityCell(x, z);
   const blk = layout.blocks.find((b) => b.bx === cell.bx && b.bz === cell.bz);
   let sand = 0, grass = 0, rock = 0, forest = 0;

@@ -20,7 +20,7 @@ export const MAPS = {
   city: {
     id: 'city',
     label: 'Dead District',
-    subtitle: 'Urban ruins · streets, cover and Jev rivals',
+    subtitle: 'Urban ruins · plaza shootout and Jev rivals',
     loadLabel: 'Raising the dead district',
     plantLabel: 'Scattering wreckage',
     textures: {
