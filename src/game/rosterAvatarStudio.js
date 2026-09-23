@@ -5,36 +5,54 @@ import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 export function createRosterAvatarStudio() {
   const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true, preserveDrawingBuffer: true });
   renderer.setClearColor(0x000000, 0);
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.toneMapping = THREE.NoToneMapping;
   renderer.domElement.className = 'roster-avatar-gl';
   document.body.append(renderer.domElement);
 
   const scene = new THREE.Scene();
   const rig = new THREE.Group();
   scene.add(rig);
-  scene.add(new THREE.HemisphereLight(0xfff4e8, 0x3a4550, 1.15));
-  const key = new THREE.DirectionalLight(0xffffff, 1.05);
-  key.position.set(1.2, 2.4, 2.2);
+  scene.add(new THREE.HemisphereLight(0xe8eef4, 0x3a4550, 0.55));
+  const key = new THREE.DirectionalLight(0xfff8f0, 0.48);
+  key.position.set(0.8, 2.2, 1.6);
   scene.add(key);
-  const fill = new THREE.DirectionalLight(0xa8c8ff, 0.35);
-  fill.position.set(-1.5, 0.5, -1);
+  const fill = new THREE.DirectionalLight(0xa8c8ff, 0.18);
+  fill.position.set(-1.2, 0.8, -0.8);
   scene.add(fill);
 
-  const camera = new THREE.PerspectiveCamera(28, 1, 0.05, 20);
+  const camera = new THREE.PerspectiveCamera(24, 1, 0.05, 20);
   const clock = new THREE.Clock();
   let mixer = null;
   let raf = 0;
   let activeId = null;
   let loadingId = null;
 
-  const bustCamera = (w, h) => {
+  let framed = null;
+
+  const frameModel = (model, w, h) => {
+    model.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(model);
+    const size = box.getSize(new THREE.Vector3());
+    const cx = (box.min.x + box.max.x) * 0.5;
+    const cz = (box.min.z + box.max.z) * 0.5;
+    const eyeY = box.min.y + size.y * 0.84;
+    const headSpan = size.y * 0.28;
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
-    camera.position.set(0, 1.54, 1.05);
-    camera.lookAt(0, 1.48, 0);
+    const vFov = (camera.fov * Math.PI) / 180;
+    const hFov = 2 * Math.atan(Math.tan(vFov / 2) * camera.aspect);
+    const dist = Math.max(
+      (headSpan * 0.58) / Math.tan(vFov / 2),
+      (headSpan * 0.52) / Math.tan(hFov / 2),
+    );
+    camera.position.set(cx, eyeY + size.y * 0.04, cz + dist);
+    camera.lookAt(cx, eyeY - size.y * 0.06, cz);
   };
 
   const mount = (source, t = 0) => {
     rig.clear();
+    framed = null;
     const model = cloneSkinned(source.model);
     model.traverse((o) => { if (o.isMesh) o.frustumCulled = false; });
     rig.add(model);
@@ -46,12 +64,13 @@ export function createRosterAvatarStudio() {
     mixer.update(0);
     rig.rotation.y = 0.1;
     rig.position.y = 0;
+    framed = model;
   };
 
   const renderFrame = (w, h, wobble = 0) => {
     renderer.setSize(w, h, false);
     renderer.setPixelRatio(Math.min(2, devicePixelRatio));
-    bustCamera(w, h);
+    if (framed) frameModel(framed, w, h);
     if (wobble) {
       const t = performance.now() * 0.001;
       rig.rotation.y = 0.1 + Math.sin(t * 1.2) * 0.14;

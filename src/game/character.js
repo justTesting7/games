@@ -154,10 +154,6 @@ function recolorAtlas(image, look, body) {
     const tint = (kk) => [d[kk] / 255 * k[0], d[kk + 1] / 255 * k[1], d[kk + 2] / 255 * k[2]];
     region(body.head, (l, kk) => tint(kk));
     region(body.skinSwatch, (l, kk) => tint(kk));
-    for (let y = 0; y < 130; y++) for (let x = 0; x < 512; x++) {
-      const k = (y * 1024 + x) * 4;
-      d[k] = skin[0]; d[k + 1] = skin[1]; d[k + 2] = skin[2];
-    }
     const [hx0, hy0, hx1, hy1] = body.hairCap;
     for (let y = hy0; y < hy1; y++) for (let x = hx0; x < hx1; x++) {
       const k = (y * 1024 + x) * 4;
@@ -356,7 +352,7 @@ export class Character {
     const { map, roughnessMap } = recolorAtlas(body.baseImage, look, def);
     this.mesh.material = new THREE.MeshStandardMaterial({
       map, normalMap, roughnessMap, roughness: 1, metalness: 0, normalScale: new THREE.Vector2(0.8, 0.8),
-      ...(look.face ? { transparent: true, alphaTest: 0.4, depthWrite: true } : {}),
+      ...(look.face ? { alphaTest: 0.55, depthWrite: true } : {}),
     });
     this.mesh.castShadow = true;
     this.mesh.receiveShadow = true;
