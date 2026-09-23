@@ -105,7 +105,7 @@ function rotateBoneToward(bone, child, targetDir, weight, tmp) {
   const p1 = child.getWorldPosition(tmp.b);
   const cur = tmp.c.subVectors(p1, p0).normalize();
   const q = tmp.q.setFromUnitVectors(cur, targetDir);
-  if (weight < 1) q.slerpQuaternions(tmp.qi.identity(), q, weight);
+  if (weight < 1) q.copy(tmp.qi.identity().slerp(q, weight));
   rotateBoneWorld(bone, q, tmp);
 }
 
@@ -349,8 +349,12 @@ export class Character {
     this.root.updateMatrixWorld(true);
 
     const aimGoal = s.aiming ? 1 : 0;
-    this.aimWeight += (aimGoal - this.aimWeight) * Math.min(1, dt * (aimGoal ? 16 : 5));
-    this.drawn = this.aimWeight > 0.2 ? 1 : 0;
+    // Drawing takes about a fifth of a second with an eased arm swing; the
+    // guns leave the holsters while the hands are still at the hips.
+    this.aimT = THREE.MathUtils.clamp((this.aimT || 0) + (aimGoal ? dt / 0.2 : -dt / 0.35), 0, 1);
+    const e = this.aimT;
+    this.aimWeight = e * e * (3 - 2 * e);
+    this.drawn = this.aimT > 0.12 ? 1 : 0;
     this.aimTarget.copy(s.aimPoint);
     this.recoil[0] *= Math.exp(-dt * 13);
     this.recoil[1] *= Math.exp(-dt * 13);
@@ -394,7 +398,7 @@ export class Character {
     const angle = headFwd.angleTo(hd);
     if (angle < 1.4) {
       const q = new THREE.Quaternion().setFromUnitVectors(headFwd, clampDir);
-      q.slerpQuaternions(new THREE.Quaternion(), q, lookW);
+      q.copy(new THREE.Quaternion().slerp(q, lookW));
       rotateBoneWorld(head, q, t);
     }
 
