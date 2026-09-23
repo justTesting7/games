@@ -84,9 +84,17 @@ export class Combat {
   // `info` is { head, weapon } and is passed on to the callbacks.
   damage(victim, attacker, amount, dir, info = {}) {
     if (!victim.alive || amount <= 0) return;
-    victim.health = Math.max(0, victim.health - amount);
     victim.lastAttacker = attacker;
     victim.lastHitT = this.time;
+    if (info.head) {
+      victim.health = 0;
+      victim.alive = false;
+      victim.character.die(dir);
+      if (attacker && attacker !== victim) attacker.kills++;
+      this.onKill?.(victim, attacker, { ...info, head: true });
+      return;
+    }
+    victim.health = Math.max(0, victim.health - amount);
     if (victim.health <= 0) {
       victim.alive = false;
       victim.character.die(dir);

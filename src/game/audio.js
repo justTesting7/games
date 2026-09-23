@@ -187,6 +187,18 @@ export class Audio {
     src.start(t);
   }
 
+  headshot(distance) {
+    if (!this.ctx) return;
+    const att = Math.min(1, 14 / Math.max(distance, 1));
+    const delay = distance / 343;
+    setTimeout(() => {
+      this.noiseBurst({ freq: 220, q: 0.55, type: 'lowpass', gain: 0.85 * att, attack: 0.001, release: 0.14, send: 0.2 });
+      this.noiseBurst({ freq: 900, q: 1.2, gain: 0.35 * att, attack: 0.002, release: 0.22, send: 0.35 });
+      this.tone(70 + Math.random() * 25, 0.06, 0.35 * att, 'sine');
+      this.tone(140 + Math.random() * 40, 0.04, 0.18 * att, 'triangle');
+    }, delay * 1000);
+  }
+
   impact(surface, distance) {
     if (!this.ctx) return;
     const att = Math.min(1, 12 / Math.max(distance, 1));

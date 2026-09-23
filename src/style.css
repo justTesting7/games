@@ -45,6 +45,9 @@ html, body {
 #hitmarker.kill { width: 30px; height: 30px; }
 #hitmarker.kill::before { left: 14px; height: 30px; background: #ff2a2a; }
 #hitmarker.kill::after { top: 14px; width: 30px; background: #ff2a2a; }
+#hitmarker.kill.head::before, #hitmarker.kill.head::after {
+  box-shadow: 0 0 12px rgba(255, 80, 40, 0.85);
+}
 #crosshair.enemy i, #crosshair.enemy b { background: #ff5a4a; }
 
 #health, #weapon, #round {

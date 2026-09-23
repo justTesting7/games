@@ -215,8 +215,14 @@ export class Weapons {
     this.fx.tracer(muzzle, end);
     if (!shooter.isPlayer) this.checkNearMiss(muzzle, end, hit);
     if (!hit) return null;
-    this.fx.impact(end, hit.normal, hit.surface, dir);
-    this.audio.impact(hit.surface, end.distanceTo(this.player.camera.position));
+    const dist = end.distanceTo(this.player.camera.position);
+    if (hit.head && hit.fighter) {
+      this.fx.headshot(end, dir, hit.normal, rifle ? 1.35 : 1);
+      this.audio.headshot(dist);
+    } else {
+      this.fx.impact(end, hit.normal, hit.surface, dir);
+      this.audio.impact(hit.surface, dist);
+    }
     if (hit.fighter) this.combat.damage(hit.fighter, shooter, hit.head ? def.head : def.body, dir, { head: hit.head, weapon: def.key });
     else if (hit.body || hit.target) hit.scored = this.world.props.hit(hit, end, dir, def.force);
     return hit;
@@ -396,7 +402,7 @@ export class Weapons {
           this.queued = 0;
           this.player.kick(side, L.current === 'rifle' ? 3.2 : 1);
           const hit = this.lastHit;
-          if (hit?.fighter) this.onHit?.(hit.fighter.alive ? (hit.head ? 'head' : 'body') : 'kill');
+          if (hit?.fighter) this.onHit?.(hit.head ? 'kill head' : (hit.fighter.alive ? 'body' : 'kill'));
           else if (hit?.scored || hit?.body) this.onHit?.('prop');
         }
       }

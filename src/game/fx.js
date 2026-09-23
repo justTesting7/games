@@ -243,6 +243,87 @@ export class Effects {
     });
   }
 
+  // Exit-wound spray: blood mist, droplets and brain matter along the bullet path.
+  headshot(pos, dir, normal, scale = 1) {
+    const k = scale;
+    const exit = dir.clone().normalize();
+    const back = exit.clone().negate();
+    const side = new THREE.Vector3().crossVectors(exit, Math.abs(exit.y) < 0.9 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0)).normalize();
+    const up = new THREE.Vector3().crossVectors(side, exit).normalize();
+    const origin = pos.clone().addScaledVector(normal, 0.02);
+
+    this.add.spawn({ pos: origin, size: 0.14 * k, life: 0.05, color: [120, 12, 8], fade: 1 });
+    for (let i = 0; i < 28 * k; i++) {
+      const cone = exit.clone()
+        .addScaledVector(side, (Math.random() - 0.5) * 1.1)
+        .addScaledVector(up, (Math.random() - 0.5) * 1.1)
+        .normalize();
+      const spd = (8 + Math.random() * 14) * k;
+      this.alpha.spawn({
+        pos: origin.clone().addScaledVector(cone, 0.04),
+        vel: cone.multiplyScalar(spd),
+        size: 0.015 + Math.random() * 0.035,
+        life: 0.35 + Math.random() * 0.45,
+        color: Math.random() < 0.35 ? [0.92, 0.1, 0.08] : [0.55, 0.04, 0.03],
+        alpha: 0.95, gravity: 11, drag: 0.8, fade: 0,
+      });
+    }
+    for (let i = 0; i < 18 * k; i++) {
+      const mix = back.clone().lerp(exit, Math.random() * 0.85 + 0.15);
+      mix.addScaledVector(new THREE.Vector3().randomDirection(), 0.55).normalize();
+      this.alpha.spawn({
+        pos: origin,
+        vel: mix.multiplyScalar(4 + Math.random() * 7),
+        size: 0.04 + Math.random() * 0.07,
+        grow: 1.8,
+        life: 0.5 + Math.random() * 0.7,
+        color: [0.78, 0.06, 0.05],
+        alpha: 0.65,
+        drag: 2.5,
+        gravity: 2.5,
+      });
+    }
+    for (let i = 0; i < 22 * k; i++) {
+      const mix = exit.clone().addScaledVector(new THREE.Vector3().randomDirection(), 0.75).normalize();
+      this.alpha.spawn({
+        pos: origin,
+        vel: mix.multiplyScalar(3 + Math.random() * 8),
+        size: 0.025 + Math.random() * 0.05,
+        life: 0.55 + Math.random() * 0.75,
+        color: Math.random() < 0.5 ? [0.82, 0.68, 0.58] : [0.72, 0.55, 0.48],
+        alpha: 1,
+        gravity: 10,
+        fade: 0,
+      });
+    }
+    for (let i = 0; i < 10 * k; i++) {
+      const mix = exit.clone().addScaledVector(side, (Math.random() - 0.5) * 2).normalize();
+      this.add.spawn({
+        pos: origin,
+        vel: mix.multiplyScalar(0.015 + Math.random() * 0.02),
+        size: 0.04 + Math.random() * 0.06,
+        stretch: 0.12 + Math.random() * 0.2,
+        life: 0.08 + Math.random() * 0.12,
+        color: [95, 8, 5],
+        fade: 0.6,
+      });
+    }
+    for (let i = 0; i < 8; i++) {
+      const v = exit.clone().multiplyScalar(6 + Math.random() * 10).addScaledVector(up, 2 + Math.random() * 4);
+      this.alpha.spawn({
+        pos: origin.clone().addScaledVector(exit, 0.15 * i * 0.08),
+        vel: v,
+        size: 0.12 + Math.random() * 0.18,
+        grow: 2.2,
+        life: 0.9 + Math.random() * 0.8,
+        color: [0.42, 0.03, 0.025],
+        alpha: 0.5,
+        drag: 3,
+        gravity: 0.5,
+      });
+    }
+  }
+
   impact(pos, normal, surface, incoming) {
     const s = SURFACE[surface] || SURFACE.grass;
     const refl = incoming.clone().reflect(normal).normalize();
