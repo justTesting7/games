@@ -1,4 +1,4 @@
-import { ROSTER, STYLES, portraitUrl, saveSelection } from './roster.js';
+import { ROSTER, STYLES, byId, portraitUrl, saveSelection } from './roster.js';
 
 // "Play as" and "Opponents" pickers. Changes apply on the next load, so the
 // caller swaps the Fight button for a reload when `changed()` is true.
@@ -48,8 +48,24 @@ export function setupRosterMenu(initial, root, onChange) {
   }
   render();
 
+  let preview = null;
+  let getCharacter = () => null;
+  let ensureCharacter = async () => null;
+
+  const bindPreview = (api, getChar, ensureChar) => {
+    preview = api;
+    getCharacter = getChar;
+    ensureCharacter = ensureChar;
+    for (const b of rows.player.children) {
+      const entry = byId(b.dataset.id);
+      b.onmouseenter = () => preview.show(entry, b, getCharacter, ensureCharacter);
+      b.onmouseleave = () => preview.hide();
+    }
+  };
+
   return {
     changed: () => key(sel) !== start,
     save: () => saveSelection(sel),
+    bindPreview,
   };
 }

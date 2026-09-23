@@ -220,6 +220,28 @@ h1 {
 }
 .chip b { font-size: 11px; font-weight: 600; white-space: nowrap; }
 .chip small { font-size: 9px; opacity: 0.7; min-height: 11px; }
+.roster-preview {
+  position: fixed; z-index: 300; pointer-events: none;
+  transform: translate(-50%, -100%);
+  opacity: 0; transition: opacity 0.12s ease-out;
+}
+.roster-preview:not(.hidden) { opacity: 1; }
+.roster-preview-card {
+  padding: 8px 10px 7px; border-radius: 10px;
+  background: rgba(8, 12, 16, 0.94);
+  border: 1px solid var(--c, #d2a15c);
+  box-shadow: 0 14px 44px rgba(0, 0, 0, 0.55), 0 0 24px color-mix(in srgb, var(--c, #d2a15c) 25%, transparent);
+  animation: roster-preview-float 2.6s ease-in-out infinite;
+}
+.roster-preview-card canvas { display: block; border-radius: 6px; vertical-align: top; }
+.roster-preview-card b {
+  display: block; margin-top: 5px; font-size: 12px; font-weight: 600;
+  letter-spacing: 0.5px; text-align: center; color: var(--c, #f3dcb0);
+}
+@keyframes roster-preview-float {
+  0%, 100% { transform: translateY(0) rotate(-0.4deg); }
+  50% { transform: translateY(-6px) rotate(0.4deg); }
+}
 .settings {
   display: grid; grid-template-columns: 1fr 1fr; gap: 12px 22px; margin: 24px 0 18px; text-align: left;
   font-size: 13px;
