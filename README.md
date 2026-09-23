@@ -1,56 +1,42 @@
-# VoxelCraft
+# Relic Isle
 
-A playable Minecraft-style voxel sandbox that runs in the browser, rendered
-with a custom physically based HDR shader pipeline built on Three.js/WebGL 2.
+A third-person adventure on a photoreal island, running in the browser with Three.js and WebGL 2.
+You explore as a dual-pistol adventurer, with animated running, jumping and aiming, plus targets and props to shoot.
 
 ## Running
 
 ```bash
 npm install
-npm run dev      # http://localhost:5173
-npm run build    # production build in dist/
+npm run dev
 ```
+
+The first `npm run dev` (or `npm run build`) downloads about 100 MB of third-party assets into
+`public/assets/vendor`, which is gitignored. Open the URL Vite prints and click **Explore**.
 
 ## Controls
 
 | Input | Action |
 | --- | --- |
+| Mouse | Look |
 | WASD | Move |
-| Space | Jump / swim up (fly up when flying) |
-| Shift | Sprint (descend when flying) |
-| F or double-tap Space | Toggle flying |
-| Left / right click | Break / place block |
-| Middle click | Pick block |
-| 1-9, mouse wheel | Select hotbar slot |
-| T (hold) | Fast-forward time |
-| F1 / F3 | Hide HUD / toggle debug info |
+| Shift | Sprint |
+| C | Toggle walk / jog |
+| Space | Jump |
+| Right mouse | Aim (over-the-shoulder, both pistols raised) |
+| Left mouse | Fire (alternating pistols; also raises the guns from the hip) |
+| T (hold) | Fast-forward the time of day |
+| F3 | Performance stats |
+| Esc | Menu (graphics quality, time of day, sensitivity, volume) |
 
-## Rendering features
+## What's inside
 
-- **Physically based sky**: Rayleigh + Mie single-scattering atmosphere baked
-  every frame into an HDR texture that also drives fog, ambient light and
-  reflections; sun and moon discs, twinkling stars, and self-shadowed clouds
-  with forward scattering (silver lining).
-- **Dynamic day/night cycle**: sun colour comes from the same atmosphere
-  model (warm sunrises and sunsets), with moonlight at night.
-- **Soft shadows**: texel-snapped sun shadow map with rotated Poisson PCF and
-  normal-offset biasing; foliage casts alpha-tested shadows.
-- **Materials**: generated per-texture normal and smoothness maps,
-  energy-conserving Blinn-Phong specular with Fresnel, sky reflections,
-  translucency for leaves and plants, emissive glowstone.
-- **Water**: procedural wave normals, screen-space reflections with a sky
-  fallback, depth-based refraction and absorption, a sun glint, underwater
-  caustics, total internal reflection and an underwater fog/distortion pass.
-- **Ambient light**: Minecraft-style per-vertex ambient occlusion plus a
-  sky-visibility term that darkens caves and overhangs.
-- **Wind**: swaying leaves, grass and flowers (the shadows sway too).
-- **Post-processing**: physically based bloom (13-tap downsample / tent
-  upsample mip chain), screen-space god rays, automatic eye adaptation, ACES
-  filmic tonemapping, colour grading, vignette and dithering. MSAA on High and
-  Ultra.
+- **Rendering:** an HDR pipeline on Three.js PBR materials. It has a physically based sky (Rayleigh and Mie scattering) that also lights the scene, sun shadows, height fog, and water with refraction, screen-space reflections and shoreline foam. Post-processing adds bloom, eye adaptation, god rays and ACES tone mapping.
+- **World:** a 1.5 km island generated in a Web Worker. The terrain has levels of detail and blends sand, grass, forest floor and rock with height-based blending, triplanar-mapped cliffs and wet sand at the waterline. It also has instanced, wind-blown grass, procedural ez-tree forests, and Poly Haven rocks, boulders, ferns, shrubs and logs.
+- **Character:** a Ready Player Me avatar dressed as an adventurer, with a teal tank top, cargo trousers, boots, a physics braid and thigh holsters. Motion-captured locomotion, strafing and jump clips are driven by the controller's speed. Procedural aiming bends the spine, extends the arms and turns the head.
+- **Gameplay:** hitscan dual pistols with muzzle flashes, tracers, and impact dust, sparks and splashes that depend on the surface hit. Brass casings bounce on the ground. Barrels and crates react with rigid-body physics, and the targets fall when hit and reset. All sound is synthesized with WebAudio: gunshots with echo, ricochets, footsteps, wind and surf.
 
-## World
+## Asset licenses
 
-Infinite procedurally generated terrain streamed in Web Workers: oceans,
-beaches, plains, forests (oak and birch), deserts with cacti, mountains and
-snowy peaks, spaghetti and cheese caves, and ores.
+- Poly Haven textures and models: CC0.
+- ez-tree (bark and leaf textures): MIT.
+- Ready Player Me avatar and animation library: use is allowed with Ready Player Me avatars, but redistribution is not. The files are therefore downloaded by `scripts/fetch-assets.mjs` instead of being committed.
