@@ -248,6 +248,16 @@ player.pos.set(
   spawn.h + 1.01,
   params.has('z') ? Number(params.get('z')) : spawn.z,
 );
+{
+  // Face the most open direction so the first view isn't a wall of dirt.
+  let best = Infinity;
+  for (let a = 0; a < Math.PI * 2; a += Math.PI / 8) {
+    const dx = -Math.sin(a), dz = -Math.cos(a);
+    let score = 0;
+    for (let d = 4; d <= 40; d += 4) score += terrain.column(Math.floor(player.pos.x + dx * d), Math.floor(player.pos.z + dz * d)).h;
+    if (score < best) { best = score; player.yaw = a; }
+  }
+}
 if (params.has('yaw')) player.yaw = Number(params.get('yaw'));
 if (params.has('pitch')) player.pitch = Number(params.get('pitch'));
 let spawned = false;
