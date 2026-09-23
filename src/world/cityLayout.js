@@ -27,17 +27,17 @@ export function cityCell(x, z) {
 
 const KIND = { plaza: 0, street: 1, intact: 2, damaged: 3, ruined: 4, lot: 5, crater: 6 };
 /** Must match `FLOOR_H` in skyscraper.js (facade module height). */
-const FLOOR_H = 4;
+const FLOOR_H = 3;
 
 function towerFloors(kind, bx, bz, rand) {
   const { halfBlocks } = CITY;
   if (kind === KIND.plaza || kind === KIND.crater || kind === KIND.lot) return 0;
   const dist = Math.hypot(bx - halfBlocks, bz - halfBlocks);
-  if (kind === KIND.ruined) return 8 + Math.floor(rand() * 10);
-  if (kind === KIND.damaged) return 16 + Math.floor(rand() * 14);
-  if (dist < 1.15) return 36 + Math.floor(rand() * 12);
-  if (dist < 2.4) return 26 + Math.floor(rand() * 14);
-  return 20 + Math.floor(rand() * 14);
+  if (kind === KIND.ruined) return 11 + Math.floor(rand() * 13);
+  if (kind === KIND.damaged) return 21 + Math.floor(rand() * 18);
+  if (dist < 1.15) return 48 + Math.floor(rand() * 16);
+  if (dist < 2.4) return 34 + Math.floor(rand() * 18);
+  return 26 + Math.floor(rand() * 18);
 }
 
 function towerStyle(kind, rand) {

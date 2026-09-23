@@ -430,7 +430,7 @@ async function init() {
     terrain.update(elapsed);
     if (grass) grass.update(elapsed, camera.position, player.pos);
     if (mapDef.vegetation) veg.update(elapsed, camera.position);
-    if (city) city.update(dt, fx);
+    if (city) city.update(dt, fx, camera);
     const coast = THREE.MathUtils.clamp(1 - (terrain.heightAt(player.pos.x, player.pos.z) - 1) / 25, 0, 1);
     audio.updateAmbience(dt, { altitude: player.pos.y, coast, underwater: player.underwater });
 
