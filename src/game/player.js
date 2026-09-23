@@ -125,6 +125,12 @@ export class Player {
       }
     }
     this.world.props.collidePlayer(next, RADIUS, this.vel);
+    for (const f of this.world.combat.fighters) {
+      if (f === this.fighter || !f.alive) continue;
+      const dx = next.x - f.pos.x, dz = next.z - f.pos.z;
+      const d = Math.hypot(dx, dz);
+      if (d < RADIUS * 2 && d > 1e-4) { next.x = f.pos.x + (dx / d) * RADIUS * 2; next.z = f.pos.z + (dz / d) * RADIUS * 2; }
+    }
 
     const g2 = terrain.heightAt(next.x, next.z);
     const wasGround = this.onGround;
@@ -207,7 +213,7 @@ export class Player {
     cam.getWorldDirection(d);
     const skip = o.distanceTo(this.pos) + 0.5;
     const start = o.clone().addScaledVector(d, skip);
-    const hit = this.world.raycast(start, d, 600);
+    const hit = this.world.raycast(start, d, 600, this.fighter);
     if (hit) { this.aimPoint.copy(start).addScaledVector(d, hit.t); this.aimHit = hit; }
     else { this.aimPoint.copy(start).addScaledVector(d, 600); this.aimHit = null; }
     if (this.aimPoint.distanceTo(this.pos) < 3) this.aimPoint.copy(start).addScaledVector(d, 6);

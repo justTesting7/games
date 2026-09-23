@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 import { loadGLTF, rpmUrl, modelUrl } from '../engine/assets.js';
 
 const CLIPS = {
@@ -47,9 +48,15 @@ function processClip(clip, name, boneNames) {
   return { clip, speed };
 }
 
-// Turns the stock outfit into an adventurer's teal tank top, olive cargo
-// trousers and brown leather boots, and removes the logo print.
-function recolorAtlas(image) {
+export const OUTFITS = {
+  adventurer: { top: [0.16, 0.42, 0.44], trousers: [0.30, 0.27, 0.17], boots: [0.36, 0.22, 0.12], hair: 0x2a1a10 },
+  crimson: { top: [0.46, 0.06, 0.05], trousers: [0.09, 0.09, 0.1], boots: [0.16, 0.11, 0.08], hair: 0x0d0907 },
+  ivory: { top: [0.5, 0.49, 0.45], trousers: [0.1, 0.13, 0.23], boots: [0.28, 0.2, 0.13], hair: 0x6b4a2a },
+};
+
+// Turns the stock outfit into a tank top, cargo trousers and leather boots
+// in the outfit's colours, and removes the logo print.
+function recolorAtlas(image, outfit) {
   const c = document.createElement('canvas');
   c.width = c.height = 1024;
   const g = c.getContext('2d', { willReadFrequently: true });
@@ -69,15 +76,18 @@ function recolorAtlas(image) {
   region(0, 512, 512, 1024, (l) => {
     if (l < 0.03) return [0, 0, 0];
     const t = Math.pow(l, 1.1);
-    return [0.16 * t + 0.02, 0.42 * t + 0.03, 0.44 * t + 0.04];
+    const c = outfit.top;
+    return [c[0] * t + 0.02, c[1] * t + 0.03, c[2] * t + 0.04];
   });
   region(512, 0, 1024, 512, (l) => {
     const t = 0.45 + l * 2.6;
-    return [0.30 * t, 0.27 * t, 0.17 * t];
+    const c = outfit.trousers;
+    return [c[0] * t, c[1] * t, c[2] * t];
   });
   region(768, 512, 1024, 768, (l) => {
     const t = 0.35 + l * 0.9;
-    return [0.36 * t, 0.22 * t, 0.12 * t];
+    const c = outfit.boots;
+    return [c[0] * t, c[1] * t, c[2] * t];
   });
   g.putImageData(img, 0, 0);
   const tex = new THREE.CanvasTexture(c);
@@ -130,6 +140,9 @@ export class Character {
     this.aimDir = new THREE.Vector3(0, 0, 1);
     this.recoil = [0, 0];
     this.drawn = 0;
+    this.dead = null;
+    this.flinch = 0;
+    this.flinchAxis = new THREE.Vector3(1, 0, 0);
     this.jump = null;
     this.onFootstep = null;
     this.footDown = [true, true];
@@ -140,26 +153,41 @@ export class Character {
     };
   }
 
-  async load(progress) {
-    const [avatar, pistolGltf, ...anims] = await progress.task('Loading the adventurer', 5, () => Promise.all([
+  // Loads the model, clips and pistol once; every character clones them.
+  static async loadAssets(progress) {
+    const [avatar, pistolGltf, ...anims] = await progress.task('Loading the adventurers', 5, () => Promise.all([
       loadGLTF(rpmUrl('Feminine_TPose')),
       loadGLTF(modelUrl('service_pistol')),
       ...Object.values(CLIPS).map((f) => loadGLTF(rpmUrl(f))),
     ]));
-
-    this.model = avatar.scene;
-    this.root.add(this.model);
     const boneNames = new Set();
+    let baseImage = null;
+    avatar.scene.traverse((o) => {
+      if (o.isBone) boneNames.add(o.name);
+      if (o.isSkinnedMesh) baseImage = o.material.map.image;
+    });
+    const clips = {}, speeds = {};
+    Object.keys(CLIPS).forEach((name, i) => {
+      const { clip, speed } = processClip(anims[i].animations[0], name, boneNames);
+      clips[name] = clip;
+      speeds[name] = speed;
+    });
+    const normalMap = await avatar.parser.getDependency('texture', 0);
+    normalMap.flipY = false;
+    return { scene: avatar.scene, pistolGltf, clips, speeds, baseImage, normalMap };
+  }
+
+  load(assets, outfit = OUTFITS.adventurer) {
+    this.model = cloneSkinned(assets.scene);
+    this.root.add(this.model);
     this.bones = {};
     this.model.traverse((o) => {
-      if (o.isBone) { boneNames.add(o.name); this.bones[o.name] = o; }
+      if (o.isBone) this.bones[o.name] = o;
       if (o.isSkinnedMesh) this.mesh = o;
     });
 
-    const baseImage = this.mesh.material.map.image;
-    const normalMap = await avatar.parser.getDependency('texture', 0);
-    normalMap.flipY = false;
-    const { map, roughnessMap } = recolorAtlas(baseImage);
+    const normalMap = assets.normalMap;
+    const { map, roughnessMap } = recolorAtlas(assets.baseImage, outfit);
     this.mesh.material = new THREE.MeshStandardMaterial({
       map, normalMap, roughnessMap, roughness: 1, metalness: 0, normalScale: new THREE.Vector2(0.8, 0.8),
     });
@@ -168,26 +196,25 @@ export class Character {
     this.mesh.frustumCulled = false;
 
     this.mixer = new THREE.AnimationMixer(this.model);
-    Object.keys(CLIPS).forEach((name, i) => {
-      const { clip, speed } = processClip(anims[i].animations[0], name, boneNames);
-      const action = this.mixer.clipAction(clip);
+    Object.keys(CLIPS).forEach((name) => {
+      const action = this.mixer.clipAction(assets.clips[name]);
       if (!LOOPING.has(name)) { action.setLoop(THREE.LoopOnce, 1); action.clampWhenFinished = true; }
       action.enabled = true;
       action.setEffectiveWeight(0);
       action.play();
       this.actions[name] = action;
-      this.speeds[name] = speed;
+      this.speeds[name] = assets.speeds[name];
       this.weights[name] = 0;
     });
     this.weights.idle = 1;
     this.actions.idle.setEffectiveWeight(1);
 
-    this.buildBraid();
-    this.buildPistols(pistolGltf);
+    this.buildBraid(outfit.hair);
+    this.buildPistols(assets.pistolGltf);
   }
 
-  buildBraid() {
-    const hair = new THREE.MeshStandardMaterial({ color: 0x2a1a10, roughness: 0.55, metalness: 0 });
+  buildBraid(color) {
+    const hair = new THREE.MeshStandardMaterial({ color, roughness: 0.55, metalness: 0 });
     const lobe = new THREE.SphereGeometry(1, 10, 8);
     this.braidN = 11;
     this.braid = new THREE.InstancedMesh(lobe, hair, this.braidN * 2);
@@ -276,8 +303,52 @@ export class Character {
     }
   }
 
+  // A bullet from direction `dir` knocks the upper body back.
+  hitReact(dir) {
+    this.flinchAxis.set(dir.z, 0, -dir.x).normalize();
+    this.flinch = Math.min(1, this.flinch + 0.7);
+  }
+
+  // Topples away from the killing shot, pivoting on the feet.
+  die(dir) {
+    const flat = new THREE.Vector3(dir.x, 0, dir.z);
+    if (flat.lengthSq() < 1e-6) flat.set(Math.sin(this.root.rotation.y), 0, Math.cos(this.root.rotation.y)).negate();
+    flat.normalize();
+    this.dead = { t: 0, yaw: this.root.rotation.y, axis: new THREE.Vector3().crossVectors(new THREE.Vector3(0, 1, 0), flat).normalize() };
+    this.jump = null;
+  }
+
+  revive() {
+    this.dead = null;
+    this.flinch = 0;
+    this.aimT = 0;
+    this.aimWeight = 0;
+    this.drawn = 0;
+    this.root.rotation.set(0, this.root.rotation.y, 0);
+    this.actions.fall.timeScale = 1;
+  }
+
+  updateDead(dt) {
+    const d = this.dead;
+    d.t += dt;
+    const k = Math.min(1, d.t / 0.75);
+    const tip = 1.5 * k * k;
+    this.root.quaternion.setFromAxisAngle(d.axis, tip).multiply(this.tmp.q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), d.yaw));
+    this.root.position.y += 0.13 * k;
+    this.setWeights({ fall: 1 }, 0.25, dt);
+    if (d.t > 0.7) this.actions.fall.timeScale = Math.max(0, this.actions.fall.timeScale - dt * 3);
+    this.aimT = 0;
+    this.aimWeight = 0;
+    this.drawn = 0;
+    this.mixer.update(dt);
+    this.root.updateMatrixWorld(true);
+    this.updateBraid(dt);
+    this.updatePistols(dt);
+  }
+
   // Called by the controller every frame with the movement state.
   update(dt, s) {
+    if (this.dead) { this.updateDead(dt); return; }
     const target = {};
     const locomotion = () => {
       const sp = s.speed;
@@ -359,6 +430,10 @@ export class Character {
     this.recoil[0] *= Math.exp(-dt * 13);
     this.recoil[1] *= Math.exp(-dt * 13);
     this.applyAim(s);
+    if (this.flinch > 0.01) {
+      rotateBoneWorld(this.bones.Spine1, this.tmp.q.setFromAxisAngle(this.flinchAxis, this.flinch * 0.32), this.tmp);
+      this.flinch *= Math.exp(-dt * 9);
+    }
     this.updateFeet(dt, s);
     this.updateBraid(dt);
     this.updatePistols(dt);

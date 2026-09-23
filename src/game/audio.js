@@ -90,25 +90,39 @@ export class Audio {
     return f;
   }
 
-  gunshot(side) {
+  // `distance` is 0 for the player's own guns; others are delayed by the
+  // speed of sound, quieter, duller and panned to where they came from.
+  gunshot(side, distance = 0, panDir = null) {
     if (!this.ctx) return;
+    if (distance > 1) {
+      setTimeout(() => this.gunshotNow(side, distance, panDir), (distance / 343) * 1000);
+      return;
+    }
+    this.gunshotNow(side, 0, null);
+  }
+
+  gunshotNow(side, distance, panDir) {
     const ctx = this.ctx;
     const t = ctx.currentTime;
-    const pan = side ? -0.15 : 0.15;
+    const far = distance > 1;
+    const att = far ? Math.min(1, 6 / distance) : 1;
+    const pan = far ? Math.max(-0.9, Math.min(0.9, panDir * 0.9)) : side ? -0.15 : 0.15;
     const pitch = 0.92 + Math.random() * 0.16;
-    this.noiseBurst({ freq: 2400 * pitch, q: 0.5, gain: 0.9, attack: 0.001, release: 0.09, pan, send: 1 });
-    const body = this.noiseBurst({ freq: 900 * pitch, q: 0.8, type: 'lowpass', gain: 0.8, attack: 0.001, release: 0.32, pan, send: 1.2 });
-    body.frequency.setValueAtTime(3000, t);
+    const dull = far ? Math.max(0.25, 1 - distance / 120) : 1;
+    this.noiseBurst({ freq: 2400 * pitch * dull, q: 0.5, gain: 0.9 * att, attack: 0.001, release: 0.09, pan, send: far ? 1.6 : 1 });
+    const body = this.noiseBurst({ freq: 900 * pitch, q: 0.8, type: 'lowpass', gain: 0.8 * Math.sqrt(att), attack: 0.001, release: 0.32, pan, send: far ? 1.8 : 1.2 });
+    body.frequency.setValueAtTime(3000 * dull, t);
     body.frequency.exponentialRampToValueAtTime(300, t + 0.3);
     const o = ctx.createOscillator();
     o.type = 'sine';
     o.frequency.setValueAtTime(140 * pitch, t);
     o.frequency.exponentialRampToValueAtTime(38, t + 0.18);
     const g = ctx.createGain();
-    this.env(g.gain, t, 0.002, 0.9, 0.22);
+    this.env(g.gain, t, 0.002, 0.9 * att, 0.22);
     o.connect(g).connect(this.master);
     o.start(t);
     o.stop(t + 0.3);
+    if (far) return;
     const c = ctx.createOscillator();
     c.type = 'square';
     c.frequency.value = 3200;
@@ -129,6 +143,9 @@ export class Audio {
       } else if (surface === 'rock' || surface === 'metal') {
         this.noiseBurst({ freq: 3500, q: 2, gain: 0.3 * att, attack: 0.001, release: 0.06, send: 0.4 });
         if (Math.random() < 0.35) this.ricochet(att);
+      } else if (surface === 'flesh') {
+        this.noiseBurst({ freq: 380, q: 0.9, type: 'lowpass', gain: 0.6 * att, attack: 0.001, release: 0.09, send: 0.15 });
+        this.tone(95 + Math.random() * 20, 0.08, 0.25 * att, 'sine');
       } else if (surface === 'wood' || surface === 'target') {
         this.noiseBurst({ freq: 700, q: 1.5, gain: 0.45 * att, attack: 0.001, release: 0.08, send: 0.3 });
         this.tone(220 + Math.random() * 60, 0.12, 0.2 * att, 'triangle');
@@ -154,6 +171,20 @@ export class Audio {
     p.connect(this.reverbSend);
     o.start(t);
     o.stop(t + 0.5);
+  }
+
+  // Supersonic crack of a bullet passing close by.
+  whiz(miss) {
+    if (!this.ctx) return;
+    const g = 0.35 * (1 - miss / 1.8);
+    this.noiseBurst({ freq: 4200, q: 1.2, gain: g, attack: 0.001, release: 0.035, pan: Math.random() * 1.2 - 0.6, send: 0.3 });
+    this.noiseBurst({ freq: 1800, q: 3, gain: g * 0.5, attack: 0.004, release: 0.12, pan: Math.random() * 1.2 - 0.6 });
+  }
+
+  hurt(fatal) {
+    if (!this.ctx) return;
+    this.noiseBurst({ freq: 220, q: 0.7, type: 'lowpass', gain: 0.7, attack: 0.002, release: fatal ? 0.5 : 0.16 });
+    this.tone(fatal ? 70 : 110, fatal ? 0.6 : 0.14, 0.35);
   }
 
   tone(freq, dur, gain, type = 'sine') {

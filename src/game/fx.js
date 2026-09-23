@@ -133,6 +133,7 @@ const SURFACE = {
   target: { dust: [0.8, 0.75, 0.65], chunks: [0.8, 0.7, 0.5] },
   metal: { dust: [0.4, 0.4, 0.4], chunks: [0.3, 0.3, 0.3], sparks: true },
   water: { dust: [0.85, 0.9, 0.95], chunks: [0.85, 0.9, 0.95] },
+  flesh: { dust: [0.32, 0.03, 0.03], chunks: [0.25, 0.01, 0.01] },
 };
 
 export class Effects {

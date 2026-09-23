@@ -41,14 +41,67 @@ html, body {
 #hitmarker::after { left: 0; top: 10px; width: 22px; height: 2px; }
 #hitmarker.show { opacity: 1; transition: none; }
 
-#score, #weapon {
-  position: absolute; bottom: 26px; display: flex; flex-direction: column;
+#hitmarker.head::before, #hitmarker.head::after { background: #ffd23c; }
+#hitmarker.kill { width: 30px; height: 30px; }
+#hitmarker.kill::before { left: 14px; height: 30px; background: #ff2a2a; }
+#hitmarker.kill::after { top: 14px; width: 30px; background: #ff2a2a; }
+#crosshair.enemy i, #crosshair.enemy b { background: #ff5a4a; }
+
+#health, #weapon, #round {
+  position: absolute; display: flex; flex-direction: column;
   text-shadow: 0 2px 6px rgba(0, 0, 0, 0.7); font-weight: 600;
 }
-#score { left: 32px; }
-#weapon { right: 32px; align-items: flex-end; }
-#score span, #weapon span { font-size: 34px; line-height: 1; }
-#score small, #weapon small { font-size: 12px; letter-spacing: 2px; text-transform: uppercase; opacity: 0.75; }
+#health { left: 32px; bottom: 26px; width: 230px; }
+#weapon { right: 32px; bottom: 26px; align-items: flex-end; }
+#round { left: 50%; top: 18px; transform: translateX(-50%); align-items: center; }
+#health span, #weapon span, #round span { font-size: 34px; line-height: 1; }
+#health small, #weapon small, #round small { font-size: 12px; letter-spacing: 2px; text-transform: uppercase; opacity: 0.75; }
+#health .bar { height: 6px; margin: 6px 0 4px; background: rgba(0, 0, 0, 0.35); border-radius: 3px; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5); }
+#hpbar { height: 100%; width: 100%; background: linear-gradient(90deg, #e9d3a3, #fff4dc); transition: width 0.15s; }
+#hpbar.low { background: linear-gradient(90deg, #b3261e, #ff5a4a); }
+#jevstat { margin-top: 4px; font-size: 11px; font-style: normal; font-weight: 500; letter-spacing: 1px; opacity: 0.7; }
+#jevstat.off { color: #ffb08a; }
+
+#damage {
+  position: absolute; inset: 0; opacity: 0;
+  background: radial-gradient(ellipse at center, rgba(120, 0, 0, 0) 45%, rgba(140, 0, 0, 0.55) 80%, rgba(90, 0, 0, 0.9) 100%);
+}
+#dmgdir { position: absolute; left: 50%; top: 50%; width: 0; height: 0; opacity: 0; }
+#dmgdir i {
+  position: absolute; left: -60px; top: -150px; width: 120px; height: 26px;
+  border-top: 5px solid rgba(255, 50, 30, 0.9); border-radius: 50% 50% 0 0 / 100% 100% 0 0;
+  filter: drop-shadow(0 0 4px rgba(255, 0, 0, 0.8));
+}
+#dmgdir.show { animation: dmgdir 1.1s ease-out forwards; }
+@keyframes dmgdir { 0% { opacity: 1; } 60% { opacity: 0.8; } 100% { opacity: 0; } }
+
+#feed {
+  position: absolute; right: 24px; top: 20px; display: flex; flex-direction: column; align-items: flex-end; gap: 4px;
+  font-size: 14px; text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
+}
+#feed div { background: rgba(0, 0, 0, 0.35); padding: 4px 10px; border-radius: 4px; transition: opacity 1s; }
+#feed div.fade { opacity: 0; }
+#feed .gun { opacity: 0.8; margin: 0 4px; }
+
+#tags { position: absolute; inset: 0; }
+.tag {
+  position: absolute; left: 0; top: 0; display: flex; flex-direction: column; align-items: center; gap: 2px;
+  font-size: 12px; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9); white-space: nowrap; opacity: 0; will-change: transform;
+}
+.tag b { font-size: 13px; letter-spacing: 1px; }
+.tag .hp { width: 64px; height: 4px; background: rgba(0, 0, 0, 0.45); border-radius: 2px; overflow: hidden; }
+.tag .hp i { display: block; height: 100%; background: #ff5a4a; }
+.tag small { font-size: 10px; opacity: 0.8; letter-spacing: 0.5px; }
+
+#banner {
+  position: absolute; left: 50%; top: 34%; transform: translate(-50%, -50%); text-align: center; opacity: 0;
+  transition: opacity 0.3s; text-shadow: 0 3px 12px rgba(0, 0, 0, 0.8);
+}
+#banner.show { opacity: 1; }
+#bannertitle { font-size: 64px; font-weight: 300; letter-spacing: 10px; text-transform: uppercase; }
+#bannersub { margin-top: 6px; font-size: 15px; letter-spacing: 1px; opacity: 0.85; }
+#banner.won #bannertitle { color: #f3dcb0; }
+#banner.lost #bannertitle { color: #ff6a55; }
 
 #debug {
   position: absolute; left: 10px; top: 10px;

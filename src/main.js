@@ -4,12 +4,15 @@ import { Progress } from './engine/assets.js';
 import { generateHeightmap, loadTerrainTextures, Terrain } from './world/terrain.js';
 import { Grass } from './world/grass.js';
 import { Vegetation } from './world/vegetation.js';
-import { Character } from './game/character.js';
+import { Character, OUTFITS } from './game/character.js';
 import { Player } from './game/player.js';
 import { Props } from './game/props.js';
 import { Effects } from './game/fx.js';
 import { Weapons } from './game/weapons.js';
 import { Audio } from './game/audio.js';
+import { Combat, MAX_HEALTH } from './game/combat.js';
+import { Rival, PERSONAS } from './game/rival.js';
+import { Jev } from './game/jev.js';
 
 const $ = (id) => document.getElementById(id);
 const canvas = $('game');
@@ -53,8 +56,9 @@ const surfaceAt = (x, z, y) => {
   return best;
 };
 
-// Closest hit among terrain, water, trees and rocks, and props.
-world.raycast = (o, d, maxDist) => {
+// Closest hit among terrain, water, trees and rocks, props and fighters
+// other than `ignore`.
+world.raycast = (o, d, maxDist, ignore) => {
   let best = null;
   const tt = world.terrain.raycast(o, d, maxDist);
   if (tt !== null) {
@@ -69,15 +73,22 @@ world.raycast = (o, d, maxDist) => {
   if (c && (!best || c.t < best.t)) best = { t: c.t, normal: c.normal, surface: c.collider.type };
   const pr = world.props.raycast(o, d, best ? best.t : maxDist);
   if (pr && (!best || pr.t < best.t)) best = pr;
+  const fh = world.combat.raycast(o, d, best ? best.t : maxDist, ignore);
+  if (fh) best = fh;
   return best;
 };
+const combat = new Combat();
+world.combat = combat;
+const jev = new Jev();
 
+const NO_INPUT = { forward: false, back: false, left: false, right: false, sprint: false, jump: false, aim: false, fire: false, toggleWalk: false };
 const input = { forward: false, back: false, left: false, right: false, sprint: false, jump: false, aim: false, fire: false, toggleWalk: false, fastTime: false };
 const keymap = { KeyW: 'forward', ArrowUp: 'forward', KeyS: 'back', ArrowDown: 'back', KeyA: 'left', ArrowLeft: 'left', KeyD: 'right', ArrowRight: 'right', ShiftLeft: 'sprint', ShiftRight: 'sprint', KeyT: 'fastTime' };
 addEventListener('keydown', (e) => {
   if (keymap[e.code]) input[keymap[e.code]] = true;
   if (e.code === 'Space') { input.jump = true; e.preventDefault(); }
   if (e.code === 'KeyC' && !e.repeat) input.toggleWalk = true;
+  if (e.code === 'KeyR' && !e.repeat) input.restart = true;
   if (e.code === 'F3') { $('debug').classList.toggle('hidden'); e.preventDefault(); }
 });
 addEventListener('keyup', (e) => {
@@ -127,7 +138,8 @@ async function init() {
   const props = new Props(terrain, veg.colliders);
   world.veg = veg;
   world.props = props;
-  await Promise.all([veg.load(progress), character.load(progress), props.load(progress)]);
+  const [, charAssets] = await Promise.all([veg.load(progress), Character.loadAssets(progress), props.load(progress)]);
+  character.load(charAssets, OUTFITS.adventurer);
 
   const spawn = data.spawn;
   const facing = Math.atan2(data.peak.x - spawn.x, data.peak.z - spawn.z);
@@ -139,11 +151,136 @@ async function init() {
   character.addTo(pipeline.scene);
 
   const player = new Player(world, character, camera);
+  player.fighter = combat.add({ id: 'adventurer', name: 'You', character, pos: player.pos, isPlayer: true, color: '#f3dcb0' });
   player.spawn(spawn.x, spawn.z, facing);
   const fx = new Effects(pipeline, terrain, audio);
-  const weapons = new Weapons(world, player, character, fx, audio);
+  const weapons = new Weapons(world, player, character, fx, audio, combat);
   Object.assign(world, { grass, character, player, fx, weapons, data });
-  window.__game = { world, pipeline, camera, input };
+
+  const rivals = PERSONAS.map((p) => {
+    const ch = new Character();
+    ch.load(charAssets, OUTFITS[p.outfit]);
+    ch.addTo(pipeline.scene);
+    return new Rival(world, combat, weapons, jev, p, ch);
+  });
+  window.__game = { world, pipeline, camera, input, rivals, combat, jev };
+
+  // Rivals appear 18-28 m away, ahead of the player on either side, on
+  // open, dry, walkable ground.
+  const spawnRivals = () => {
+    const p = player.pos;
+    const tmp = [];
+    rivals.forEach((r, i) => {
+      let at = null;
+      for (let k = 0; k < 80 && !at; k++) {
+        const spreadAll = k > 30 ? (Math.random() - 0.5) * Math.PI * 2 : 0;
+        const ang = player.yaw + (i ? -1 : 1) * (0.3 + Math.random() * 0.5) + spreadAll;
+        const dist = 18 + Math.random() * 10;
+        const x = p.x + Math.sin(ang) * dist, z = p.z + Math.cos(ang) * dist;
+        if (!terrain.inBounds(x, z) || terrain.heightAt(x, z) < 0.6) continue;
+        if (terrain.normalAt(x, z).y < 0.8) continue;
+        if (veg.colliders.query(x, z, 1.2, tmp).length) continue;
+        if (rivals.some((o, j) => j < i && Math.hypot(o.pos.x - x, o.pos.z - z) < 8)) continue;
+        at = { x, z };
+      }
+      at ||= { x: p.x + (i ? -5 : 5), z: p.z + 10 };
+      r.spawn(at.x, at.z, Math.atan2(p.x - at.x, p.z - at.z));
+    });
+  };
+  spawnRivals();
+
+  const round = { state: 'waiting', t: 0 };
+  const banner = (title, sub, cls = '') => {
+    $('banner').className = cls;
+    $('bannertitle').textContent = title;
+    $('bannersub').textContent = sub;
+  };
+  const startRound = () => {
+    if (!player.fighter.alive) {
+      player.spawn(spawn.x, spawn.z, facing);
+      player.vel.set(0, 0, 0);
+    }
+    combat.reset(player.fighter);
+    spawnRivals();
+    $('feed').innerHTML = '';
+    round.state = 'countdown';
+    round.t = 3;
+  };
+
+  const feed = (html) => {
+    const el = document.createElement('div');
+    el.innerHTML = html;
+    $('feed').prepend(el);
+    setTimeout(() => el.classList.add('fade'), 6000);
+    setTimeout(() => el.remove(), 7000);
+    while ($('feed').children.length > 5) $('feed').lastChild.remove();
+  };
+  const tagName = (f) => `<b style="color:${f.color}">${f.name}</b>`;
+
+  let hurt = 0;
+  const dmgDir = $('dmgdir');
+  const pointDamage = (from) => {
+    const a = Math.atan2(from.pos.x - player.pos.x, from.pos.z - player.pos.z);
+    const rel = Math.atan2(Math.sin(a - player.camYaw), Math.cos(a - player.camYaw));
+    dmgDir.style.transform = `rotate(${-rel}rad)`;
+    dmgDir.classList.remove('show');
+    void dmgDir.offsetWidth;
+    dmgDir.classList.add('show');
+  };
+  combat.onDamage = (victim, attacker, amount) => {
+    if (victim === player.fighter) {
+      hurt = Math.min(1, hurt + amount / 30);
+      player.shake = Math.max(player.shake, 0.25);
+      audio.hurt(false);
+      if (attacker) pointDamage(attacker);
+    }
+  };
+  combat.onKill = (victim, attacker, head) => {
+    feed(`${attacker ? tagName(attacker) : ''} <span class="gun">${head ? '⌖' : '▸'}</span> ${tagName(victim)}`);
+    if (victim === player.fighter) {
+      hurt = 1;
+      audio.hurt(true);
+      if (attacker) pointDamage(attacker);
+      round.state = 'over';
+      banner('Eliminated', `${attacker ? attacker.name : 'A rival'} got you. Press R to fight again.`, 'show lost');
+    } else if (rivals.every((r) => !r.fighter.alive) && player.fighter.alive) {
+      round.state = 'over';
+      banner('Victory', 'You outlasted both rivals. Press R to fight again.', 'show won');
+    }
+  };
+  weapons.onNearMiss = (miss) => audio.whiz(miss);
+
+  const tags = rivals.map((r) => {
+    const el = document.createElement('div');
+    el.className = 'tag';
+    el.innerHTML = `<b style="color:${r.persona.color}">${r.persona.name}</b><div class="hp"><i></i></div><small></small>`;
+    $('tags').appendChild(el);
+    return { r, el, bar: el.querySelector('i'), info: el.querySelector('small'), seen: 0, losT: 0 };
+  });
+  const tagPos = new THREE.Vector3();
+  const updateTags = (dt) => {
+    for (const t of tags) {
+      const f = t.r.fighter;
+      t.losT -= dt;
+      if (t.losT <= 0) {
+        t.losT = 0.2;
+        const o = camera.position;
+        const d = combat.chest(f).sub(o);
+        const len = d.length();
+        const hit = len < 110 ? world.raycast(o, d.divideScalar(len), len + 0.5, player.fighter) : null;
+        t.visible = len < 110 && (!hit || hit.fighter === f || hit.t > len - 0.4);
+      }
+      t.seen = t.visible ? 1 : Math.max(0, t.seen - dt * 2);
+      tagPos.copy(f.alive ? f.head : f.pos).y += f.alive ? 0.42 : 0.6;
+      tagPos.project(camera);
+      if (t.seen <= 0 || tagPos.z > 1) { t.el.style.opacity = 0; continue; }
+      t.el.style.opacity = (f.alive ? 1 : 0.55) * t.seen;
+      t.el.style.transform = `translate(${((tagPos.x + 1) / 2) * innerWidth}px, ${((1 - tagPos.y) / 2) * innerHeight}px) translate(-50%, -100%)`;
+      t.bar.style.width = `${(f.health / MAX_HEALTH) * 100}%`;
+      t.info.textContent = !f.alive ? 'eliminated'
+        : `${t.r.label}${t.r.target ? ` → ${t.r.target.isPlayer ? 'you' : t.r.target.name}` : ''} · ${t.r.source === 'jev' ? `Jev ${Math.round(t.r.confidence * 100)}%` : 'local AI'}`;
+    }
+  };
 
   character.onFootstep = (i, speed) => {
     const p = player.pos;
@@ -153,10 +290,10 @@ async function init() {
   player.onLand = (v) => audio.land(v);
 
   let hitTimer = 0;
-  weapons.onHit = (scored) => {
-    hitTimer = 0.25;
-    $('hitmarker').classList.add('show');
-    if (scored) $('targets').textContent = props.hits;
+  weapons.onHit = (kind) => {
+    hitTimer = kind === 'kill' ? 0.5 : 0.25;
+    const hm = $('hitmarker');
+    hm.className = `show ${kind}`;
   };
 
   await progress.task('Compiling shaders', 1, async () => {
@@ -164,6 +301,8 @@ async function init() {
     grass.update(0, player.pos, player.pos);
     pipeline.setTimeOfDay(timeOfDay, 0);
     player.update(0.016, input);
+    rivals.forEach((r) => r.update(0.016, false));
+    combat.update(0);
     renderer.compile(pipeline.scene, camera);
     pipeline.render(camera, 0.016, {});
   });
@@ -183,6 +322,7 @@ async function init() {
     menu.classList.toggle('hidden', locked);
     $('hud').classList.toggle('hidden', !locked);
     if (!locked) for (const k in input) input[k] = false;
+    if (locked && round.state === 'waiting') startRound();
   });
   addEventListener('mousemove', (e) => {
     if (document.pointerLockElement !== canvas) return;
@@ -205,11 +345,24 @@ async function init() {
     }
     pipeline.setTimeOfDay(timeOfDay, elapsed);
 
-    const state = player.update(dt, input);
+    const locked = document.pointerLockElement === canvas;
+    if (input.restart && (round.state === 'over' || round.state === 'fight')) startRound();
+    input.restart = false;
+    if (round.state === 'countdown') {
+      round.t -= dt;
+      banner(round.t > 0 ? `${Math.ceil(round.t)}` : 'Fight', 'Two rivals are closing in. Last one standing wins.', 'show countdown');
+      if (round.t <= -0.6) { round.state = 'fight'; banner('', '', ''); }
+    }
+
+    const alive = player.fighter.alive;
+    const state = player.update(dt, alive ? input : NO_INPUT);
     input.jump = false;
     input.toggleWalk = false;
-    weapons.update(dt, input.fire, input.firePressed);
+    if (alive && round.state !== 'countdown') weapons.update(dt, input.fire, input.firePressed);
     input.firePressed = false;
+    const active = locked && (round.state === 'fight' || round.state === 'over');
+    rivals.forEach((r) => r.update(dt, active));
+    combat.update(dt);
     props.update(dt);
     fx.update(dt);
     terrain.update(elapsed);
@@ -219,7 +372,20 @@ async function init() {
     audio.updateAmbience(dt, { altitude: player.pos.y, coast, underwater: player.underwater });
 
     $('crosshair').classList.toggle('idle', !state.aiming);
+    $('crosshair').classList.toggle('enemy', !!player.aimHit?.fighter);
+    $('crosshair').classList.toggle('hidden', !alive);
     if (hitTimer > 0) { hitTimer -= dt; if (hitTimer <= 0) $('hitmarker').classList.remove('show'); }
+    const hp = player.fighter.health;
+    $('hpbar').style.width = `${(hp / MAX_HEALTH) * 100}%`;
+    $('hpbar').classList.toggle('low', hp <= 35);
+    $('hpnum').textContent = Math.ceil(hp);
+    $('rivalsleft').textContent = rivals.filter((r) => r.fighter.alive).length;
+    hurt = Math.max(0, hurt - dt * 1.6);
+    $('damage').style.opacity = Math.max(hurt, alive ? Math.max(0, (45 - hp) / 45) * 0.45 : 0.7);
+    const js = jev.stats;
+    $('jevstat').textContent = js.online === null ? 'Jev · waiting' : js.online ? `Jev online · ${Math.round(js.latency)} ms` : `Jev offline (${js.error}) · local AI`;
+    $('jevstat').className = js.online === false ? 'off' : '';
+    updateTags(dt);
 
     renderer.info.reset();
     pipeline.render(camera, dt, { underwater: player.underwater, shadowCenter: player.pos });
@@ -238,6 +404,8 @@ async function init() {
           `speed ${state.speed.toFixed(2)} m/s · ${player.onGround ? 'ground' : 'air'}`,
           `draw calls ${info.calls} · tris ${(info.triangles / 1e6).toFixed(2)}M`,
           `trees ${veg.stats.trees} · rocks ${veg.stats.rocks} · ferns ${veg.stats.ferns}`,
+          `jev ${jev.stats.requests} requests · ${jev.stats.errors} errors`,
+          ...rivals.map((r) => `${r.persona.name} ${Math.ceil(r.fighter.health)} hp · ${r.tactic} (${r.source} ${r.confidence.toFixed(2)}) → ${r.target?.name ?? '-'}`),
         ].join('\n');
       }
     }
