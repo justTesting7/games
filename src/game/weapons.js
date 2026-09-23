@@ -59,6 +59,7 @@ export class Weapons {
     this.combat = combat;
     this.queued = 0;
     this.sniperHeld = false;
+    this.sniperWasScoped = false;
     this.onHit = null;
     this.onNearMiss = null;
     this.onExplosion = null;
@@ -90,7 +91,11 @@ export class Weapons {
   equip(f, key) {
     const L = f.loadout;
     if (key === L.current || !L.has(key)) return false;
-    if (f.isPlayer) { this.chargingGrenade = false; this.grenadeCharge = 0; this.pendingThrow = 0; this.sniperHeld = false; }
+    if (f.isPlayer) {
+      this.chargingGrenade = false; this.grenadeCharge = 0; this.pendingThrow = 0;
+      this.sniperHeld = false; this.sniperWasScoped = false;
+      if (this.player) this.player.sniperPending = false;
+    }
     L.current = key;
     L.reloadT = 0;
     L.autoReload = 0;
@@ -202,15 +207,28 @@ export class Weapons {
   shoot(shooter, side, aimPoint, spread, def) {
     const ch = shooter.character;
     const rifle = side < 0;
-    const muzzle = rifle ? ch.rifleMuzzle() : ch.muzzleWorld(side);
-    const axis = rifle ? ch.rifleAxis() : ch.pistolAxis(side);
-    const target = aimPoint.clone();
-    const r = spread * target.distanceTo(muzzle);
-    target.add(new THREE.Vector3().randomDirection().multiplyScalar(r * Math.random()));
-    const dir = target.clone().sub(muzzle).normalize();
+    const throughScope = rifle && shooter.isPlayer && (this.sniperWasScoped || this.player.scopeT > 0.35);
+    let muzzle, axis, dir;
+    if (throughScope) {
+      // The reticle is the camera. A muzzle-to-crosshair ray misses when the
+      // hidden rifle sits behind cover the scope is peeking over.
+      axis = new THREE.Vector3();
+      this.player.camera.getWorldDirection(axis);
+      muzzle = this.player.camera.position.clone().addScaledVector(axis, 0.15);
+      dir = axis.clone();
+    } else {
+      muzzle = rifle ? ch.rifleMuzzle() : ch.muzzleWorld(side);
+      axis = rifle ? ch.rifleAxis() : ch.pistolAxis(side);
+      const target = aimPoint.clone();
+      const r = spread * target.distanceTo(muzzle);
+      target.add(new THREE.Vector3().randomDirection().multiplyScalar(r * Math.random()));
+      dir = target.clone().sub(muzzle).normalize();
+    }
     const hit = this.world.raycast(muzzle, dir, 900, shooter);
 
-    this.fx.muzzle(muzzle, axis, rifle ? 2.4 : 1);
+    const flashAt = throughScope ? ch.rifleMuzzle() : muzzle;
+    const flashAxis = throughScope ? ch.rifleAxis() : axis;
+    this.fx.muzzle(flashAt, flashAxis, rifle ? 2.4 : 1);
     if (!rifle) {
       const up = new THREE.Vector3().setFromMatrixColumn(ch.pistols[side].matrixWorld, 1);
       const right = new THREE.Vector3().crossVectors(axis, up).multiplyScalar(side === 0 ? 1 : -1);
@@ -464,7 +482,9 @@ export class Weapons {
         } else if (input.fireReleased && this.sniperHeld) {
           this.sniperHeld = false;
           this.queued = 1.2;
-        } else if (!input.fire) {
+          this.sniperWasScoped = this.player.scopeT > 0.35;
+          this.player.sniperPending = true;
+        } else if (!input.fire && !this.player.sniperPending) {
           this.sniperHeld = false;
         }
       }
@@ -473,16 +493,25 @@ export class Weapons {
         : (def.auto && input.fire) || this.queued > 0;
       if (firing) {
         this.player.aimHold = 1.2;
-        const ready = ch.aimWeight > 0.8 && this.player.facingError < 0.35;
-        const spread = L.current === 'rifle' ? (this.player.scopeT > 0.4 ? def.spread : def.hipSpread) : def.spread;
+        const scopedShot = L.current === 'rifle' && (this.sniperWasScoped || this.player.scopeT > 0.4);
+        const ready = scopedShot
+          ? ch.weapon === 'rifle' && ch.equipT >= 1
+          : ch.aimWeight > 0.8 && this.player.facingError < 0.35;
+        const spread = L.current === 'rifle' ? (scopedShot ? 0 : def.hipSpread) : def.spread;
         const side = L.side;
         if (ready && this.trigger(f, this.player.aimPoint, spread)) {
           this.queued = 0;
+          this.sniperWasScoped = false;
+          this.player.sniperPending = false;
           this.player.kick(side, L.current === 'rifle' ? 5.2 : 1);
           const hit = this.lastHit;
           if (hit?.fighter) this.onHit?.(hit.head ? 'kill head' : (hit.fighter.alive ? 'body' : 'kill'));
           else if (hit?.scored || hit?.body) this.onHit?.('prop');
         }
+      }
+      if (L.current === 'rifle' && this.player.sniperPending && this.queued <= 0) {
+        this.player.sniperPending = false;
+        this.sniperWasScoped = false;
       }
     }
     this.tick(f, dt);

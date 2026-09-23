@@ -285,6 +285,8 @@ async function init() {
     weapons.live = [];
     weapons.queued = 0;
     weapons.sniperHeld = false;
+    weapons.sniperWasScoped = false;
+    player.sniperPending = false;
     fx.decals.clear();
     spawnRivals();
     $('feed').innerHTML = '';

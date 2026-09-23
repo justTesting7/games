@@ -53,6 +53,7 @@ export class Player {
     this.holdingBreath = false;
     this.scopeT = 0;
     this.scoped = false;
+    this.sniperPending = false;
     this.crouchToggle = false;
     this.crouchT = 0;
     this.crouching = false;
@@ -73,7 +74,7 @@ export class Player {
     const { terrain } = this.world;
     const weapon = this.fighter?.loadout.current;
     const sniping = weapon === 'rifle';
-    const holdScope = sniping ? (input.fire || input.fireReleased) : input.aim;
+    const holdScope = sniping ? (input.fire || input.fireReleased || this.sniperPending) : input.aim;
     const aiming = holdScope || this.aimHold > 0;
     this.aimHold = Math.max(0, this.aimHold - dt);
     this.time = (this.time || 0) + dt;
@@ -256,13 +257,14 @@ export class Player {
     const o = cam.position.clone();
     const d = new THREE.Vector3();
     cam.getWorldDirection(d);
-    const skip = o.distanceTo(this.pos) + 0.5;
+    const through = this.scopeT > 0.4;
+    const skip = through ? 0.12 : o.distanceTo(this.pos) + 0.5;
     const start = o.clone().addScaledVector(d, skip);
-    const reach = this.scoped ? 900 : 600;
+    const reach = through ? 900 : 600;
     const hit = this.world.raycast(start, d, reach, this.fighter);
     if (hit) { this.aimPoint.copy(start).addScaledVector(d, hit.t); this.aimHit = hit; }
     else { this.aimPoint.copy(start).addScaledVector(d, reach); this.aimHit = null; }
-    if (this.aimPoint.distanceTo(this.pos) < 3) this.aimPoint.copy(start).addScaledVector(d, 6);
+    if (!through && this.aimPoint.distanceTo(this.pos) < 3) this.aimPoint.copy(start).addScaledVector(d, 6);
   }
 
   get underwater() { return this.camera.position.y < 0.05; }
