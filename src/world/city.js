@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { loadGLTF, modelUrl } from '../engine/assets.js';
 import { mulberry32 } from './noise.js';
 import { CITY, cityCell } from './cityLayout.js';
+import { FacadeInstancer, loadFacadeKit } from './facadeKit.js';
+import { buildSkyscraper, colliderFor } from './skyscraper.js';
 
 function cloneModel(gltf) {
   const root = gltf.scene.clone(true);
@@ -35,16 +37,19 @@ export class City {
       'covered_car', 'concrete_road_barrier', 'street_lamp_01', 'barrel_stove', 'metal_trash_can',
       'fire_hydrant', 'old_tyre', 'wooden_crate_01', 'barrel_03', 'modular_chainlink_fence',
     ];
-    const models = await progress.task('Loading urban wreckage', 4, () => Promise.all(ids.map((id) => loadGLTF(modelUrl(id)))));
-    this.models = Object.fromEntries(ids.map((id, i) => [id, models[i]]));
+    const [propModels, apt, factory] = await progress.task('Loading urban wreckage', 8, () => Promise.all([
+      Promise.all(ids.map((id) => loadGLTF(modelUrl(id)))),
+      loadFacadeKit('modular_urban_apartments_facade'),
+      loadFacadeKit('modular_factory_facade'),
+    ]));
+    this.models = Object.fromEntries(ids.map((id, i) => [id, propModels[i]]));
+    this.kits = { apt, factory };
   }
 
   build(layout) {
     const rand = mulberry32((layout.seed || 0) ^ 0xdead);
-    const wallMat = new THREE.MeshStandardMaterial({ color: 0x6a5c52, roughness: 0.92, metalness: 0.05 });
     const coverMat = new THREE.MeshStandardMaterial({ color: 0x4a423c, roughness: 0.96, metalness: 0.02 });
     const darkMat = new THREE.MeshStandardMaterial({ color: 0x2a2520, roughness: 0.95, metalness: 0.02 });
-    const winMat = new THREE.MeshStandardMaterial({ color: 0x1a1815, roughness: 0.4, metalness: 0.15, emissive: 0x050403, emissiveIntensity: 0.4 });
 
     const addCoverMesh = (c) => {
       const w = c.x1 - c.x0, d = c.z1 - c.z0, h = c.y1 - c.y0;
@@ -57,44 +62,33 @@ export class City {
 
     for (const c of layout.coverBoxes || []) addCoverMesh(c);
 
+    const facades = new FacadeInstancer(95000);
+    const skyline = new THREE.Group();
+    skyline.name = 'skyline';
     for (const b of layout.buildingBoxes) {
-      const w = b.x1 - b.x0, d = b.z1 - b.z0, h = b.y1 - b.y0;
-      const shell = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), wallMat);
-      shell.position.set((b.x0 + b.x1) * 0.5, b.y0 + h * 0.5, (b.z0 + b.z1) * 0.5);
-      shell.castShadow = shell.receiveShadow = true;
-      this.group.add(shell);
-      this.colliders.addBox({ ...b, type: 'concrete' });
-
-      const cols = Math.max(2, Math.floor(w / 5));
-      const rows = Math.max(2, Math.floor(h / 3.2));
-      for (let i = 0; i < cols; i++) {
-        for (let j = 1; j < rows; j++) {
-          if (rand() > 0.55) continue;
-          const pane = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 2.1), rand() > 0.35 ? winMat : darkMat);
-          const px = b.x0 + 1.2 + i * ((w - 2.4) / Math.max(1, cols - 1));
-          const py = b.y0 + 1.5 + j * 3.0;
-          pane.position.set(px, py, b.z1 + 0.06);
-          this.group.add(pane);
-        }
-      }
+      if (!b.floors || !this.kits) continue;
+      buildSkyscraper(facades, this.kits, b, rand);
+      this.colliders.addBox(colliderFor(b));
       if (b.kind === 4 || b.kind === 3) {
-        for (let k = 0; k < 12; k++) {
+        const w = b.x1 - b.x0, d = b.z1 - b.z0;
+        for (let k = 0; k < 14; k++) {
           const rub = new THREE.Mesh(new THREE.BoxGeometry(0.6 + rand(), 0.4 + rand() * 0.8, 0.5 + rand()), darkMat);
           rub.position.set(b.x0 + rand() * w, b.y0 + rub.geometry.parameters.height * 0.5, b.z0 + rand() * d);
           rub.rotation.y = rand() * 6;
           rub.castShadow = true;
-          this.group.add(rub);
-          if (k < 5) {
-            const rx0 = rub.position.x - 0.5, rx1 = rub.position.x + 0.5;
-            const rz0 = rub.position.z - 0.45, rz1 = rub.position.z + 0.45;
+          skyline.add(rub);
+          if (k < 6) {
             this.colliders.addBox({
-              x0: rx0, x1: rx1, z0: rz0, z1: rz1,
+              x0: rub.position.x - 0.5, x1: rub.position.x + 0.5,
+              z0: rub.position.z - 0.45, z1: rub.position.z + 0.45,
               y0: b.y0, y1: b.y0 + 1.2 + rand() * 0.8, type: 'cover',
             });
           }
         }
       }
     }
+    facades.attach(skyline);
+    this.group.add(skyline);
 
     const place = (id, x, z, yaw = 0, scale = 1, coverY = 1.5) => {
       const gltf = this.models[id];

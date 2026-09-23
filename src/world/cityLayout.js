@@ -26,6 +26,25 @@ export function cityCell(x, z) {
 }
 
 const KIND = { plaza: 0, street: 1, intact: 2, damaged: 3, ruined: 4, lot: 5, crater: 6 };
+/** Must match `FLOOR_H` in skyscraper.js (facade module height). */
+const FLOOR_H = 4;
+
+function towerFloors(kind, bx, bz, rand) {
+  const { halfBlocks } = CITY;
+  if (kind === KIND.plaza || kind === KIND.crater || kind === KIND.lot) return 0;
+  const dist = Math.hypot(bx - halfBlocks, bz - halfBlocks);
+  if (kind === KIND.ruined) return 8 + Math.floor(rand() * 10);
+  if (kind === KIND.damaged) return 16 + Math.floor(rand() * 14);
+  if (dist < 1.15) return 36 + Math.floor(rand() * 12);
+  if (dist < 2.4) return 26 + Math.floor(rand() * 14);
+  return 20 + Math.floor(rand() * 14);
+}
+
+function towerStyle(kind, rand) {
+  if (kind === KIND.damaged && rand() < 0.38) return 'factory';
+  if (rand() < 0.24) return 'factory';
+  return 'apt';
+}
 
 function kindAt(bx, bz, rand) {
   const { halfBlocks } = CITY;
@@ -132,19 +151,18 @@ export function generateCityLayout(seed) {
       const cz = (bz - halfBlocks) * pitch;
       const kind = kindAt(bx, bz, rand);
       const rot = Math.floor(rand() * 4);
-      const stories = kind === KIND.intact ? 4 + Math.floor(rand() * 3)
-        : kind === KIND.damaged ? 2 + Math.floor(rand() * 2)
-          : kind === KIND.ruined ? 1 + Math.floor(rand() * 2) : 0;
-      blocks.push({ bx, bz, cx, cz, kind, rot, stories });
-      if (stories > 0 && kind !== KIND.crater) {
-        const inset = kind === KIND.ruined ? 6 : 2;
+      const floors = towerFloors(kind, bx, bz, rand);
+      blocks.push({ bx, bz, cx, cz, kind, rot, floors });
+      if (floors > 0) {
+        const inset = kind === KIND.ruined ? 5 : kind === KIND.damaged ? 3 : 2;
         const w = blockW - inset * 2;
-        const h = stories * 3.1 + (kind === KIND.ruined ? 0 : 1.2);
+        const crown = kind === KIND.ruined ? 2 : 5;
+        const h = floors * FLOOR_H + crown;
         buildingBoxes.push({
           x0: cx - w * 0.5, x1: cx + w * 0.5,
           z0: cz - w * 0.5, z1: cz + w * 0.5,
           y0: baseY, y1: baseY + h,
-          kind, rot, stories,
+          kind, rot, floors, style: towerStyle(kind, rand),
         });
       }
     }
