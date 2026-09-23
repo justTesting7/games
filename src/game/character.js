@@ -52,7 +52,7 @@ const BODIES = {
     trousers: [512, 0, 768, 256],
     boots: [512, 256, 1024, 768], boot: (l) => 0.08 + l * 0.55,
     rough: [[0, 512, 512, 512, 0.85], [512, 0, 256, 256, 0.9], [512, 256, 512, 512, 0.6], [768, 0, 256, 256, 0.15]],
-    head: [0, 0, 512, 512], hairRows: 300, skinSwatch: [768, 768, 896, 896], hairSwatch: [768, 896, 896, 1024],
+    head: [0, 0, 512, 512], skinSwatch: [768, 768, 896, 896], hairCap: [768, 896, 896, 1024],
   },
 };
 const ATLAS_SKIN = [209, 145, 112];
@@ -152,15 +152,31 @@ function recolorAtlas(image, look, body) {
     const skin = look.face.skin;
     const k = skin.map((v, i) => v / ATLAS_SKIN[i]);
     const tint = (kk) => [d[kk] / 255 * k[0], d[kk + 1] / 255 * k[1], d[kk + 2] / 255 * k[2]];
-    const scalp = skin.map((v) => (v / 255) * 0.78);
-    const hair = look.bald ? scalp : hexRgb(look.hair);
-    const hairAt = (l) => (look.bald ? scalp : hair.map((v) => v * Math.min(2.2, 0.35 + l / 0.19 * 0.65)));
-    region(body.head, (l, kk) => (l < 0.3 && kk < body.hairRows * 4096 ? hairAt(l) : tint(kk)));
+    // Photo covers the face; the stock crown hair on the head unwrap becomes skin.
+    region(body.head, (l, kk) => tint(kk));
     region(body.skinSwatch, (l, kk) => tint(kk));
-    region(body.hairSwatch, (l) => hairAt(l * 1.6));
   }
   g.putImageData(img, 0, 0);
-  if (body.head && look.face) g.drawImage(look.face.image, 0, 0, 512, 512);
+  if (body.head && look.face) {
+    g.drawImage(look.face.image, 0, 0, 512, 512);
+    const fin = g.getImageData(0, 0, 1024, 1024);
+    const fd = fin.data;
+    const skin = look.face.skin;
+    // Fill the crown where the face layer is still transparent (no stock hair cap).
+    for (let y = 0; y < 130; y++) for (let x = 0; x < 512; x++) {
+      const k = (y * 1024 + x) * 4;
+      if (fd[k + 3] < 220) {
+        fd[k] = skin[0]; fd[k + 1] = skin[1]; fd[k + 2] = skin[2]; fd[k + 3] = 255;
+      }
+    }
+    // Hide the RPM hair-cap mesh (uses the hair swatch on the atlas).
+    const [hx0, hy0, hx1, hy1] = body.hairCap;
+    for (let y = hy0; y < hy1; y++) for (let x = hx0; x < hx1; x++) {
+      const k = (y * 1024 + x) * 4;
+      fd[k + 3] = 0;
+    }
+    g.putImageData(fin, 0, 0);
+  }
   const tex = new THREE.CanvasTexture(c);
   tex.flipY = false;
   tex.colorSpace = THREE.SRGBColorSpace;
@@ -352,6 +368,7 @@ export class Character {
     const { map, roughnessMap } = recolorAtlas(body.baseImage, look, def);
     this.mesh.material = new THREE.MeshStandardMaterial({
       map, normalMap, roughnessMap, roughness: 1, metalness: 0, normalScale: new THREE.Vector2(0.8, 0.8),
+      ...(look.face ? { transparent: true, alphaTest: 0.4, depthWrite: true } : {}),
     });
     this.mesh.castShadow = true;
     this.mesh.receiveShadow = true;
