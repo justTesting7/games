@@ -43,6 +43,8 @@ export class Combat {
   }
 
   chest(f, out = new THREE.Vector3()) {
+    const spine = f.character?.bones?.Spine2;
+    if (spine) return spine.getWorldPosition(out);
     return out.copy(f.pos).setY(f.pos.y + 1.2);
   }
 

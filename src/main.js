@@ -86,13 +86,14 @@ const combat = new Combat();
 world.combat = combat;
 const jev = new Jev();
 
-const NO_INPUT = { forward: false, back: false, left: false, right: false, sprint: false, jump: false, aim: false, fire: false, toggleWalk: false };
-const input = { forward: false, back: false, left: false, right: false, sprint: false, jump: false, aim: false, fire: false, toggleWalk: false, fastTime: false };
-const keymap = { KeyW: 'forward', ArrowUp: 'forward', KeyS: 'back', ArrowDown: 'back', KeyA: 'left', ArrowLeft: 'left', KeyD: 'right', ArrowRight: 'right', ShiftLeft: 'sprint', ShiftRight: 'sprint', KeyT: 'fastTime' };
+const NO_INPUT = { forward: false, back: false, left: false, right: false, sprint: false, jump: false, aim: false, fire: false, toggleWalk: false, crouch: false };
+const input = { forward: false, back: false, left: false, right: false, sprint: false, jump: false, aim: false, fire: false, toggleWalk: false, crouch: false, fastTime: false };
+const keymap = { KeyW: 'forward', ArrowUp: 'forward', KeyS: 'back', ArrowDown: 'back', KeyA: 'left', ArrowLeft: 'left', KeyD: 'right', ArrowRight: 'right', ShiftLeft: 'sprint', ShiftRight: 'sprint', ControlLeft: 'crouch', ControlRight: 'crouch', KeyT: 'fastTime' };
 addEventListener('keydown', (e) => {
   if (keymap[e.code]) input[keymap[e.code]] = true;
   if (e.code === 'Space') { input.jump = true; e.preventDefault(); }
-  if (e.code === 'KeyC' && !e.repeat) input.toggleWalk = true;
+  if (e.code === 'KeyC' && !e.repeat) input.toggleCrouch = true;
+  if (e.code === 'KeyV' && !e.repeat) input.toggleWalk = true;
   if (e.code === 'KeyR' && !e.repeat) input.reload = true;
   if (e.code === 'Enter' && !e.repeat) input.restart = true;
   if (/^Digit[1-3]$/.test(e.code)) input.slot = Number(e.code.slice(5));
@@ -459,6 +460,7 @@ async function init() {
     const state = player.update(dt, alive ? input : NO_INPUT);
     input.jump = false;
     input.toggleWalk = false;
+    input.toggleCrouch = false;
     if (alive && round.state !== 'countdown') weapons.update(dt, input);
     else weapons.tick(player.fighter, dt);
     input.slot = 0;

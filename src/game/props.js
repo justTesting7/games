@@ -296,12 +296,12 @@ export class Props {
   }
 
   // Keeps the player out of props and lets her shove them a little.
-  collidePlayer(pos, radius, vel) {
+  collidePlayer(pos, radius, vel, standH = 1.7) {
     for (const b of this.bodies) {
       const dx = pos.x - b.pos.x, dz = pos.z - b.pos.z;
       const r = radius + b.radius * 0.85;
       const d2 = dx * dx + dz * dz;
-      if (d2 > r * r || pos.y > b.pos.y + b.half.y + 0.3 || pos.y + 1.7 < b.pos.y - b.half.y) continue;
+      if (d2 > r * r || pos.y > b.pos.y + b.half.y + 0.3 || pos.y + standH < b.pos.y - b.half.y) continue;
       const d = Math.sqrt(d2) || 1e-4;
       pos.x = b.pos.x + (dx / d) * r;
       pos.z = b.pos.z + (dz / d) * r;

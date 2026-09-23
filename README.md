@@ -28,7 +28,9 @@ The first `npm run dev` (or `npm run build`) downloads about 100 MB of third-par
 | Mouse | Look |
 | WASD | Move |
 | Shift | Sprint |
-| C | Toggle walk / jog |
+| Ctrl | Hold crouch |
+| C | Toggle crouch |
+| V | Toggle walk / jog |
 | Space | Jump |
 | Right mouse | Aim pistols, or show the grenade throw arc |
 | Left mouse | Fire pistols; with the sniper, **hold** to scope and **release** to fire; with grenades, **hold** to throw farther |

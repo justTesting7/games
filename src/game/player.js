@@ -3,7 +3,7 @@ import * as THREE from 'three';
 const GRAVITY = 16;
 const JUMP_V = 5.4;
 const RADIUS = 0.3;
-const SPEED = { walk: 1.7, jog: 3.9, sprint: 6.3, aim: 3.0, aimWalk: 1.6 };
+const SPEED = { walk: 1.7, jog: 3.9, sprint: 6.3, aim: 3.0, aimWalk: 1.6, crouch: 1.25 };
 
 const wrapAngle = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 
@@ -20,6 +20,9 @@ export class Player {
     this.onGround = true;
     this.airTime = 0;
     this.walkMode = false;
+    this.crouchToggle = false;
+    this.crouchT = 0;
+    this.crouching = false;
     this.aimHold = 0;
     this.camDist = 3.2;
     this.camPos = new THREE.Vector3();
@@ -50,6 +53,9 @@ export class Player {
     this.holdingBreath = false;
     this.scopeT = 0;
     this.scoped = false;
+    this.crouchToggle = false;
+    this.crouchT = 0;
+    this.crouching = false;
   }
 
   kick(side, strength = 1) {
@@ -83,6 +89,11 @@ export class Player {
       this.breath = Math.min(1, this.breath + dt / 1.55);
     }
     if (input.toggleWalk) this.walkMode = !this.walkMode;
+    if (input.toggleCrouch) this.crouchToggle = !this.crouchToggle;
+    if (input.sprint && !this.scoped) this.crouchToggle = false;
+    if (input.jump) this.crouchToggle = false;
+    this.crouching = !!(input.crouch || this.crouchToggle) && this.onGround;
+    this.crouchT += ((this.crouching ? 1 : 0) - this.crouchT) * Math.min(1, dt * 8);
 
     const f = (input.forward ? 1 : 0) - (input.back ? 1 : 0);
     const s = (input.right ? 1 : 0) - (input.left ? 1 : 0);
@@ -94,7 +105,8 @@ export class Player {
 
     let target = 0;
     if (moving) {
-      if (this.scoped) target = SPEED.aimWalk;
+      if (this.crouching) target = SPEED.crouch;
+      else if (this.scoped) target = SPEED.aimWalk;
       else if (aiming) target = input.sprint ? SPEED.aim : (this.walkMode ? SPEED.aimWalk : SPEED.aim * 0.85);
       else target = input.sprint ? SPEED.sprint : this.walkMode ? SPEED.walk : SPEED.jog;
     }
@@ -136,8 +148,9 @@ export class Player {
       this.vel.z *= 0.2;
     }
 
-    this.world.veg.colliders.resolveXZ(next, RADIUS, next.y, next.y + 1.7);
-    this.world.props.collidePlayer(next, RADIUS, this.vel);
+    const standH = 1.7 - this.crouchT * 0.68;
+    this.world.veg.colliders.resolveXZ(next, RADIUS, next.y, next.y + standH);
+    this.world.props.collidePlayer(next, RADIUS, this.vel, standH);
     for (const f of this.world.combat.fighters) {
       if (f === this.fighter || !f.alive) continue;
       const dx = next.x - f.pos.x, dz = next.z - f.pos.z;
@@ -170,12 +183,13 @@ export class Player {
     ch.root.position.copy(this.pos);
     ch.root.rotation.y = this.yaw;
 
-    this.updateCamera(dt, aiming, input.sprint && speed > 4.5 && !this.scoped, speed);
+    this.updateCamera(dt, aiming, input.sprint && speed > 4.5 && !this.scoped && !this.crouching, speed);
     this.updateAim();
 
     ch.update(dt, {
       speed, onGround: this.onGround, airTime: this.airTime, strafe: aiming, localDir: this.localDir,
       jumpStarted, predictedAir: (2 * JUMP_V) / GRAVITY, aiming, aimPoint: this.aimPoint,
+      crouch: this.crouchT,
     });
     return { speed, aiming };
   }
@@ -210,7 +224,8 @@ export class Player {
     const yaw = this.camYaw + swayYaw;
     const dir = new THREE.Vector3(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch));
     const right = new THREE.Vector3(-Math.cos(this.camYaw), 0, Math.sin(this.camYaw));
-    const pivot = this.pos.clone().add(new THREE.Vector3(0, through ? 1.64 : aiming ? 1.58 : 1.55, 0));
+    const eye = (through ? 1.64 : aiming ? 1.58 : 1.55) - this.crouchT * 0.55;
+    const pivot = this.pos.clone().add(new THREE.Vector3(0, eye, 0));
     const smoothPivot = this.smoothPivot || pivot.clone();
     smoothPivot.x = pivot.x;
     smoothPivot.z = pivot.z;

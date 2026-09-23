@@ -679,6 +679,7 @@ export class Character {
     this.setWeights(target, fade, dt);
     this.mixer.update(dt);
     this.root.updateMatrixWorld(true);
+    this.applyCrouch(s.crouch || 0);
 
     this.updateEquip(dt);
     const act = this.action;
@@ -886,6 +887,23 @@ export class Character {
   setRate(name, speed) {
     const cs = this.speeds[name];
     if (cs > 0.1) this.actions[name].timeScale = THREE.MathUtils.clamp(speed / cs, 0.55, 1.6);
+  }
+
+  applyCrouch(k) {
+    if (k < 0.01) return;
+    const B = this.bones;
+    if (!B.Hips) return;
+    B.Hips.position.y -= 0.38 * k;
+    B.Hips.updateMatrixWorld(true);
+    const right = this.bodyAxes().right;
+    const qThigh = new THREE.Quaternion().setFromAxisAngle(right, 0.92 * k);
+    const qShin = new THREE.Quaternion().setFromAxisAngle(right, -1.55 * k);
+    const qSpine = new THREE.Quaternion().setFromAxisAngle(right, 0.18 * k);
+    if (B.LeftUpLeg) rotateBoneWorld(B.LeftUpLeg, qThigh, this.tmp);
+    if (B.RightUpLeg) rotateBoneWorld(B.RightUpLeg, qThigh, this.tmp);
+    if (B.LeftLeg) rotateBoneWorld(B.LeftLeg, qShin, this.tmp);
+    if (B.RightLeg) rotateBoneWorld(B.RightLeg, qShin, this.tmp);
+    if (B.Spine) rotateBoneWorld(B.Spine, qSpine, this.tmp);
   }
 
   applyAim(s) {
