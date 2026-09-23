@@ -236,6 +236,59 @@ function solveArm(B, side, target, pole, finger, lateral, w, tmp) {
   rotateBoneWorld(hand, tmp.q.setFromAxisAngle(fd, ang * w), tmp);
 }
 
+function attachSniperScope(rifle) {
+  const box = new THREE.Box3().setFromObject(rifle);
+  const size = box.getSize(new THREE.Vector3());
+  const mid = box.getCenter(new THREE.Vector3());
+  const steel = new THREE.MeshStandardMaterial({ color: 0x1b1d20, roughness: 0.28, metalness: 0.88, envMapIntensity: 1.2 });
+  const matte = new THREE.MeshStandardMaterial({ color: 0x141618, roughness: 0.62, metalness: 0.45 });
+  const glass = new THREE.MeshStandardMaterial({
+    color: 0x07140f, roughness: 0.06, metalness: 0.35, envMapIntensity: 1.6,
+  });
+  const g = new THREE.Group();
+  g.name = 'sniperScope';
+  const x = mid.x + size.x * 0.04;
+  const y = box.max.y + 0.01;
+  const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.017, 0.02, 0.26, 18), steel);
+  tube.rotation.z = Math.PI / 2;
+  tube.position.set(x, y, 0);
+  g.add(tube);
+  const bell = new THREE.Mesh(new THREE.CylinderGeometry(0.026, 0.02, 0.045, 16), steel);
+  bell.rotation.z = Math.PI / 2;
+  bell.position.set(x + 0.14, y, 0);
+  g.add(bell);
+  const eye = new THREE.Mesh(new THREE.CylinderGeometry(0.019, 0.022, 0.04, 14), steel);
+  eye.rotation.z = Math.PI / 2;
+  eye.position.set(x - 0.14, y, 0);
+  g.add(eye);
+  const lensF = new THREE.Mesh(new THREE.CircleGeometry(0.022, 16), glass);
+  lensF.rotation.y = Math.PI / 2;
+  lensF.position.set(x + 0.163, y, 0);
+  g.add(lensF);
+  const lensR = new THREE.Mesh(new THREE.CircleGeometry(0.016, 14), glass);
+  lensR.rotation.y = -Math.PI / 2;
+  lensR.position.set(x - 0.161, y, 0);
+  g.add(lensR);
+  const turret = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, 0.018, 10), matte);
+  turret.position.set(x - 0.02, y + 0.026, 0);
+  g.add(turret);
+  const wind = new THREE.Mesh(new THREE.CylinderGeometry(0.009, 0.009, 0.016, 10), matte);
+  wind.rotation.x = Math.PI / 2;
+  wind.position.set(x + 0.02, y + 0.006, 0.02);
+  g.add(wind);
+  for (const sx of [-0.06, 0.05]) {
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.014, 0.004, 8, 14), matte);
+    ring.rotation.y = Math.PI / 2;
+    ring.position.set(x + sx, y - 0.008, 0);
+    g.add(ring);
+    const post = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.018, 0.01), matte);
+    post.position.set(x + sx, y - 0.016, 0);
+    g.add(post);
+  }
+  g.traverse((o) => { if (o.isMesh) o.castShadow = o.receiveShadow = true; });
+  rifle.add(g);
+}
+
 // Points on the rifle, in its own space: +X towards the muzzle, +Y up, +Z to
 // the shooter's right. Hand points are where the wrist bone goes.
 const RIFLE = {
@@ -399,6 +452,7 @@ export class Character {
     this.bolts = ['bolt_action_rifle_7_62_bolt_a', 'bolt_action_rifle_7_62_bolt_b']
       .map((n) => rifle.getObjectByName(n)).filter(Boolean)
       .map((o) => ({ o, rest: o.position.clone() }));
+    attachSniperScope(rifle);
     rifle.matrixAutoUpdate = false;
     this.rifle = rifle;
     // Slung diagonally across the back, measured in the bind pose.

@@ -20,8 +20,44 @@
       <div id="round"><span id="rivalsleft">3</span><small>rivals left</small><em id="jevstat">Jev · waiting</em></div>
       <div id="feed"></div>
       <div id="health"><span id="hpnum">100</span><div class="bar"><div id="hpbar"></div></div><small>health</small></div>
-      <div id="weapon"><div id="slots"><b>1 pistols</b><b>2 rifle</b><b>3 grenades</b></div><span id="ammo">16 / 96</span><small id="weaponname">Dual pistols</small></div>
-      <div id="scope"><i></i></div>
+      <div id="weapon"><div id="slots"><b>1 pistols</b><b>2 sniper</b><b>3 grenades</b></div><span id="ammo">16 / 96</span><small id="weaponname">Dual pistols</small></div>
+      <div id="scope">
+        <div class="scope-shade"></div>
+        <svg class="scope-reticle" viewBox="0 0 200 200" aria-hidden="true">
+          <g fill="none" stroke="rgba(8,10,8,0.88)" stroke-width="0.7">
+            <line x1="100" y1="18" x2="100" y2="88" />
+            <line x1="100" y1="112" x2="100" y2="182" />
+            <line x1="18" y1="100" x2="88" y2="100" />
+            <line x1="112" y1="100" x2="182" y2="100" />
+          </g>
+          <g fill="#d8261a">
+            <circle cx="100" cy="100" r="1.15" />
+            <circle cx="100" cy="76" r="1.05" />
+            <circle cx="100" cy="52" r="1.05" />
+            <circle cx="100" cy="124" r="1.05" />
+            <circle cx="100" cy="148" r="1.05" />
+            <circle cx="76" cy="100" r="1.05" />
+            <circle cx="52" cy="100" r="1.05" />
+            <circle cx="124" cy="100" r="1.05" />
+            <circle cx="148" cy="100" r="1.05" />
+          </g>
+          <g fill="none" stroke="rgba(8,10,8,0.7)" stroke-width="0.55">
+            <line x1="96" y1="76" x2="104" y2="76" />
+            <line x1="96" y1="52" x2="104" y2="52" />
+            <line x1="96" y1="124" x2="104" y2="124" />
+            <line x1="96" y1="148" x2="104" y2="148" />
+            <line x1="76" y1="96" x2="76" y2="104" />
+            <line x1="52" y1="96" x2="52" y2="104" />
+            <line x1="124" y1="96" x2="124" y2="104" />
+            <line x1="148" y1="96" x2="148" y2="104" />
+          </g>
+        </svg>
+        <div class="scope-meta">
+          <b id="scopedist">— m</b>
+          <small id="scopehint">shift · hold breath</small>
+          <i id="breathbar"></i>
+        </div>
+      </div>
       <div id="grenadewarn">grenade!</div>
       <div id="banner"><div id="bannertitle"></div><div id="bannersub"></div></div>
       <div id="debug" class="hidden"></div>
@@ -65,8 +101,9 @@
         <div class="controls">
           <div><b>WASD</b> move</div><div><b>Shift</b> sprint</div>
           <div><b>Space</b> jump</div><div><b>C</b> walk / jog toggle</div>
-          <div><b>Right mouse</b> aim / scope / show arc</div><div><b>Left mouse</b> fire / throw</div>
+          <div><b>Right mouse</b> aim / sniper scope / show arc</div><div><b>Left mouse</b> fire / throw</div>
           <div><b>1 2 3</b>, <b>wheel</b>, <b>Q</b> switch weapon</div><div><b>R</b> reload</div>
+          <div><b>Shift</b> (scoped) hold breath</div>
           <div><b>T</b> (hold) fast-forward time</div><div><b>Enter</b> restart round</div>
           <div><b>F3</b> stats</div><div><b>Esc</b> menu</div>
         </div>

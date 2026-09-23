@@ -25,7 +25,7 @@ export class Audio {
     this.noise = this.noiseBuffer(2);
     this.shots = [0, 1, 2, 3].map(() => this.renderGunshot(true));
     this.farShots = [0, 1].map(() => this.renderGunshot(false));
-    const rifle = { blastT: 0.075, thumpF: 110, thumpT: 0.12, rumbleT: 0.55, len: 1.4, mix: { crack: 1, thump: 1.3, rumble: 0.4 } };
+    const rifle = { blastT: 0.11, thumpF: 82, thumpT: 0.2, rumbleT: 0.9, len: 1.85, mix: { crack: 1.2, thump: 1.55, rumble: 0.58 } };
     this.rifleShots = [0, 1, 2].map(() => this.renderGunshot(false, rifle));
     this.boom = [0, 1].map(() => this.renderGunshot(false, { blastT: 0.16, thumpF: 70, thumpT: 0.35, rumbleT: 1.3, len: 3.2, mix: { crack: 0.6, blast: 1, thump: 1.6, rumble: 0.7 } }));
     this.startAmbience();
@@ -166,7 +166,7 @@ export class Audio {
     const ctx = this.ctx;
     const t = ctx.currentTime;
     const far = distance > 1;
-    const att = far ? Math.min(1, (rifle ? 12 : 7) / distance) : 1;
+    const att = far ? Math.min(1, (rifle ? 16 : 7) / distance) : 1;
     const pan = far ? Math.max(-0.9, Math.min(0.9, panDir * 0.9)) : rifle ? 0.05 : side ? -0.12 : 0.12;
     const set = rifle ? this.rifleShots : far ? this.farShots : this.shots;
     const src = ctx.createBufferSource();
@@ -277,6 +277,7 @@ export class Audio {
       case 'slide': click(3000, 0.3); setTimeout(() => click(2400, 0.4, 0.03), 90); break;
       case 'dry': click(5000, 0.25, 0.015, 6); break;
       case 'equip': scrape(700, 0.12, 0.12); click(2600, 0.12); break;
+      case 'scope': click(2100, 0.1, 0.03); this.noiseBurst({ freq: 280, q: 0.7, type: 'lowpass', gain: 0.12 * att, attack: 0.02, release: 0.16, send: 0.08 }); break;
       case 'pin': click(3500, 0.15, 0.02); scrape(2400, 0.08, 0.06); break;
       case 'throw': this.noiseBurst({ freq: 500, q: 0.8, gain: 0.25 * att, attack: 0.04, release: 0.2 }); break;
       case 'bounce': this.noiseBurst({ freq: 600, q: 1.8, type: 'bandpass', gain: 0.5 * att, attack: 0.001, release: 0.06 }); click(2300, 0.15, 0.03); break;

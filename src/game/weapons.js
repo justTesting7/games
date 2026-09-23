@@ -7,8 +7,8 @@ export const WEAPONS = {
     mag: 16, reserve: 96, reload: 1.7, interval: 0.13, body: 9, head: 30, spread: 0.0035, hipSpread: 0.0035, force: 4.5,
   },
   rifle: {
-    key: 'rifle', name: 'Bolt-action rifle', short: 'rifle', slot: 2, auto: false,
-    mag: 5, reserve: 20, reload: 2.6, interval: 0.95, body: 55, head: 200, spread: 0.0003, hipSpread: 0.03, force: 14,
+    key: 'rifle', name: '7.62 Sniper', short: 'sniper', slot: 2, auto: false,
+    mag: 5, reserve: 15, reload: 2.9, interval: 1.35, body: 80, head: 200, spread: 0.00012, hipSpread: 0.05, force: 18,
   },
   grenade: {
     key: 'grenade', name: 'Stick grenades', short: 'grenade', slot: 3,
@@ -209,7 +209,7 @@ export class Weapons {
     const dir = target.clone().sub(muzzle).normalize();
     const hit = this.world.raycast(muzzle, dir, 900, shooter);
 
-    this.fx.muzzle(muzzle, axis, rifle ? 1.8 : 1);
+    this.fx.muzzle(muzzle, axis, rifle ? 2.4 : 1);
     if (!rifle) {
       const up = new THREE.Vector3().setFromMatrixColumn(ch.pistols[side].matrixWorld, 1);
       const right = new THREE.Vector3().crossVectors(axis, up).multiplyScalar(side === 0 ? 1 : -1);
@@ -465,7 +465,7 @@ export class Weapons {
         const side = L.side;
         if (ready && this.trigger(f, this.player.aimPoint, spread)) {
           this.queued = 0;
-          this.player.kick(side, L.current === 'rifle' ? 3.2 : 1);
+          this.player.kick(side, L.current === 'rifle' ? 5.2 : 1);
           const hit = this.lastHit;
           if (hit?.fighter) this.onHit?.(hit.head ? 'kill head' : (hit.fighter.alive ? 'body' : 'kill'));
           else if (hit?.scored || hit?.body) this.onHit?.('prop');

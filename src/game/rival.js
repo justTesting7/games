@@ -23,7 +23,7 @@ const healthWord = (h) => (h > 70 ? 'healthy' : h > 40 ? 'wounded' : h > 15 ? 'b
 const rangeWord = (d) => (d < 6 ? 'point blank' : d < 14 ? 'close' : d < 30 ? 'medium range' : 'far away');
 const GUNS = {
   pistols: 'dual pistols: fast fire, accurate only within about 20 m',
-  rifle: 'scoped bolt-action rifle: one slow, very powerful shot about every second, deadly at medium and long range, weak up close',
+  rifle: '7.62 sniper: first-person scope, one very heavy bolt-action shot, deadly at long range, useless from the hip',
   grenade: 'throw a grenade: flushes an enemy out of cover or punishes one standing still, 8-30 m away',
 };
 const ammoWord = (L, key) => {

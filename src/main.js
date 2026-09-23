@@ -207,6 +207,7 @@ async function init() {
   const weapons = new Weapons(world, player, character, fx, audio, combat);
   weapons.setGrenadeModel(charAssets.grenadeGltf);
   player.fighter.loadout = new Loadout(3);
+  player.onScope = () => audio.mech('scope');
   Object.assign(world, { grass, character, player, fx, weapons, data, city, mapDef });
 
   const rivals = fighters.slice(1).map((entry, i) => {
@@ -421,7 +422,7 @@ async function init() {
   });
   addEventListener('mousemove', (e) => {
     if (document.pointerLockElement !== canvas) return;
-    const sens = Number($('sens').value) * 0.00022 * (player.scoped ? 0.22 : player.camDist < 2 ? 0.7 : 1);
+    const sens = Number($('sens').value) * 0.00022 * (player.scoped ? 0.16 : player.camDist < 2 ? 0.7 : 1);
     player.look(e.movementX * sens, e.movementY * sens);
   });
 
@@ -477,8 +478,15 @@ async function init() {
 
     $('crosshair').classList.toggle('idle', !state.aiming);
     $('crosshair').classList.toggle('enemy', !!player.aimHit?.fighter);
-    $('crosshair').classList.toggle('hidden', !alive || player.scoped);
-    $('scope').classList.toggle('show', alive && player.scoped);
+    $('crosshair').classList.toggle('hidden', !alive || player.scopeT > 0.35);
+    const scoped = alive && player.scopeT > 0.45;
+    $('scope').classList.toggle('show', scoped);
+    $('scope').classList.toggle('steady', scoped && player.holdingBreath);
+    if (scoped) {
+      $('scopedist').textContent = `${Math.round(player.aimPoint.distanceTo(player.pos))} m`;
+      $('scopehint').textContent = player.holdingBreath ? 'steady' : player.breath < 0.08 ? 'out of breath' : 'shift · hold breath';
+      $('breathbar').style.setProperty('--pct', `${(player.breath * 100).toFixed(0)}%`);
+    }
     const L = player.fighter.loadout;
     const wdef = WEAPONS[L.current];
     $('ammo').textContent = L.current === 'grenade' ? `${L.grenades}` : `${L.mag[L.current]} / ${L.reserve[L.current]}`;
