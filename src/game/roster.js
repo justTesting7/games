@@ -24,31 +24,31 @@ export const STYLES = {
   },
 };
 
-// Everyone who can be played or fought. Masculine fighters wear a face baked
-// by scripts/bake-faces.py into public/assets/faces/<id>.png.
+// Everyone who can be played or fought. Ben, Nagar, Dror, Idan and Noam wear
+// faces baked by scripts/bake-faces.py into public/assets/faces/<id>.png.
 export const ROSTER = [
   {
     id: 'adventurer', name: 'Mara', color: '#f3dcb0', style: 'flanker',
     look: { body: 'f', outfit: OUTFITS.adventurer },
   },
   {
-    id: 'redpolo', name: 'Red Polo', color: '#ff6a55', style: 'brawler',
+    id: 'redpolo', name: 'Ben', color: '#ff6a55', style: 'brawler',
     look: { body: 'm', face: 'redpolo', hair: 0x1c130c, outfit: { top: [0.5, 0.05, 0.05], trousers: [0.1, 0.1, 0.12], boots: [0.16, 0.11, 0.08] } },
   },
   {
-    id: 'greytee', name: 'Grey Tee', color: '#8fc8ff', style: 'sharpshooter',
+    id: 'greytee', name: 'Nagar', color: '#8fc8ff', style: 'sharpshooter',
     look: { body: 'm', face: 'greytee', hair: 0x0f0b08, outfit: { top: [0.3, 0.3, 0.31], trousers: [0.12, 0.14, 0.22], boots: [0.25, 0.18, 0.12] } },
   },
   {
-    id: 'checkers', name: 'Checkers', color: '#ff9ad0', style: 'flanker',
+    id: 'checkers', name: 'Dror', color: '#ff9ad0', style: 'flanker',
     look: { body: 'm', face: 'checkers', hair: 0x140e0a, outfit: { top: [0.42, 0.08, 0.08], check: [0.62, 0.6, 0.58], trousers: [0.09, 0.1, 0.13], boots: [0.18, 0.12, 0.08] } },
   },
   {
-    id: 'denim', name: 'Denim', color: '#c8d46a', style: 'grenadier',
+    id: 'denim', name: 'Idan', color: '#c8d46a', style: 'grenadier',
     look: { body: 'm', face: 'denim', hair: 0x120d09, outfit: { top: [0.14, 0.22, 0.36], trousers: [0.08, 0.08, 0.09], boots: [0.2, 0.15, 0.1] } },
   },
   {
-    id: 'linen', name: 'Linen', color: '#f0b060', style: 'sharpshooter',
+    id: 'linen', name: 'Noam', color: '#f0b060', style: 'sharpshooter',
     look: { body: 'm', face: 'linen', bald: true, outfit: { top: [0.56, 0.53, 0.46], trousers: [0.3, 0.27, 0.2], boots: [0.22, 0.15, 0.1] } },
   },
 ];
