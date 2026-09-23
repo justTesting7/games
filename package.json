@@ -1,0 +1,23 @@
+{
+  "name": "voxelcraft",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A Minecraft-style voxel sandbox for the browser with a physically based shader pipeline",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/justTesting7/games.git"
+  },
+  "license": "ISC",
+  "dependencies": {
+    "three": "^0.186.0"
+  },
+  "devDependencies": {
+    "vite": "^8.3.0"
+  }
+}

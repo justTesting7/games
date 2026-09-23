@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>VoxelCraft</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <canvas id="game"></canvas>
+
+    <div id="hud" class="hidden">
+      <div id="crosshair"></div>
+      <div id="debug"></div>
+      <div id="blockname"></div>
+      <div id="hotbar"></div>
+      <div id="underwater"></div>
+    </div>
+
+    <div id="menu">
+      <div class="panel">
+        <h1>VoxelCraft</h1>
+        <p class="sub">A voxel sandbox with a physically based shader pipeline</p>
+        <button id="play" disabled>Generating world…</button>
+        <div class="settings">
+          <label>Graphics
+            <select id="quality">
+              <option value="low">Low</option>
+              <option value="medium">Medium</option>
+              <option value="high" selected>High</option>
+              <option value="ultra">Ultra</option>
+            </select>
+          </label>
+          <label>Render distance <span id="rdval">8</span>
+            <input id="renderdist" type="range" min="3" max="16" value="8" />
+          </label>
+          <label>Time of day
+            <input id="timeofday" type="range" min="0" max="1000" value="80" />
+          </label>
+          <label>Mouse sensitivity
+            <input id="sens" type="range" min="1" max="20" value="8" />
+          </label>
+        </div>
+        <div class="controls">
+          <div><b>WASD</b> move</div><div><b>Space</b> jump / swim</div>
+          <div><b>Shift</b> sprint (descend when flying)</div><div><b>F</b> or double-tap <b>Space</b> fly</div>
+          <div><b>Left click</b> break</div><div><b>Right click</b> place</div>
+          <div><b>Middle click</b> pick block</div><div><b>1-9 / wheel</b> select block</div>
+          <div><b>T</b> (hold) fast-forward time</div><div><b>F1</b> hide HUD · <b>F3</b> debug</div>
+        </div>
+      </div>
+    </div>
+
+    <div id="error" class="hidden"></div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
