@@ -133,7 +133,7 @@ export class City {
       placeStreetProp(this.models, this.group, this.colliders, this.terrain, id, x, z, yaw, scale, coverY, type)
     );
 
-    this.fountain = buildPlaza(this.group, this.colliders, this.terrain, this.models, rand, place);
+    this.fountain = buildPlaza(this.group, this.colliders, this.terrain, this.models, rand, place, this.pipeline);
     this.treeWind = buildStreetTrees(this.group, this.colliders, this.terrain, rand);
     buildSewers(this.group, this.colliders, this.terrain, rand);
     dressSidewalks(this.models, this.group, this.colliders, this.terrain, rand);
@@ -171,7 +171,7 @@ export class City {
   update(dt, fx, camera) {
     if (camera) this.updateLod(camera.position);
     if (this.treeWind) this.treeWind((this._treeT = (this._treeT || 0) + dt));
-    if (this.fountain) updateFountain(fx, this.fountain.fountain, this._treeT || 0);
+    if (this.fountain) updateFountain(fx, this.fountain, this._treeT || 0);
     this.smokeT += dt;
     if (!fx || this.smokeT < 0.12) return;
     this.smokeT = 0;

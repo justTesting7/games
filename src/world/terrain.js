@@ -189,9 +189,15 @@ if (uUrban > 0.5) {
   float pr = length(vWPos.xz);
   if (pr < uPlazaLawn) {
     float gN = tNoise(vWPos.xz * 1.1) * 0.55 + tNoise(vWPos.xz * 3.4 + 4.0) * 0.45;
-    tAlb = mix(vec3(0.18, 0.32, 0.11), vec3(0.38, 0.52, 0.16), gN);
-    tAlb *= mix(0.9, 1.12, macro);
-    tRough = 0.88;
+    tAlb = mix(vec3(0.16, 0.3, 0.1), vec3(0.4, 0.54, 0.16), gN);
+    float path = 1.0 - smoothstep(0.12, 0.52, abs(pr - 5.35));
+    tAlb = mix(tAlb, vec3(0.34, 0.3, 0.2), path * 0.62);
+    float worn = smoothstep(0.64, 0.88, tNoise(vWPos.xz * 0.32 + 2.0));
+    tAlb = mix(tAlb, vec3(0.3, 0.28, 0.16), worn * 0.32);
+    float wetRing = 1.0 - smoothstep(3.2, 4.4, pr);
+    tAlb = mix(tAlb, tAlb * vec3(0.55, 0.62, 0.58), wetRing * 0.55);
+    tAlb *= mix(0.88, 1.14, macro);
+    tRough = mix(0.9, 0.55, max(path, wetRing * 0.7));
     tNrmW = normalize(mix(tNrmW, nW, 0.35));
   } else if (pr < uPlazaRoad) {
     tAlb *= 0.78;
