@@ -65,6 +65,9 @@ export class Weapons {
     this.template = null;
     this.grenadeCharge = 0;
     this.chargingGrenade = false;
+    this.pendingThrow = 0;
+    this.pendingCharge = 0;
+    this.previewVel = new THREE.Vector3();
 
     const n = 64;
     const geo = new THREE.BufferGeometry();
@@ -86,7 +89,7 @@ export class Weapons {
   equip(f, key) {
     const L = f.loadout;
     if (key === L.current || !L.has(key)) return false;
-    if (f.isPlayer) { this.chargingGrenade = false; this.grenadeCharge = 0; }
+    if (f.isPlayer) { this.chargingGrenade = false; this.grenadeCharge = 0; this.pendingThrow = 0; }
     L.current = key;
     L.reloadT = 0;
     L.autoReload = 0;
@@ -184,7 +187,7 @@ export class Weapons {
     }
     ch.showGrenade = L.grenades > 0 || (ch.action?.type === 'throw');
     if (ch.consumeRelease()) {
-      const from = ch.handPosition();
+      const from = f.isPlayer ? this.throwOrigin() : ch.handPosition();
       this.throwGrenade(f, from, L.throwVel);
       this.sound(f, 'throw');
     }
@@ -423,22 +426,30 @@ export class Weapons {
         this.grenadeCharge = Math.min(1, this.grenadeCharge + dt / gdef.chargeMax);
         this.player.aimHold = Math.max(this.player.aimHold, 1.4);
       } else if (this.chargingGrenade && !input.fire) {
-        const charge = Math.max(0.06, this.grenadeCharge);
-        const speed = THREE.MathUtils.lerp(gdef.speedMin, gdef.speedMax, charge);
-        L.throwVel.copy(this.playerThrowVelocity(speed));
-        if (this.player.facingError < 0.45) this.trigger(f, this.player.aimPoint);
+        // The throw keeps exactly the velocity the arc showed at release.
+        this.pendingCharge = Math.max(0.06, this.grenadeCharge);
+        this.pendingThrow = 0.5;
         this.chargingGrenade = false;
         this.grenadeCharge = 0;
       } else if (!input.fire) {
         this.chargingGrenade = false;
         this.grenadeCharge = Math.max(0, this.grenadeCharge - dt * 4);
       }
-      const preview = this.chargingGrenade ? this.grenadeCharge : (input.aim ? 0.45 : 0.12);
+      if (this.pendingThrow > 0) {
+        this.pendingThrow -= dt;
+        if (this.player.facingError < 0.45) {
+          const speed = THREE.MathUtils.lerp(gdef.speedMin, gdef.speedMax, this.pendingCharge);
+          L.throwVel.copy(this.playerThrowVelocity(speed));
+          this.trigger(f, this.player.aimPoint);
+          this.pendingThrow = 0;
+        }
+      }
+      const preview = this.chargingGrenade ? this.grenadeCharge : this.pendingThrow > 0 ? this.pendingCharge : (input.aim ? 0.45 : 0.12);
       const previewSpeed = THREE.MathUtils.lerp(gdef.speedMin, gdef.speedMax, preview);
-      L.throwVel.copy(this.playerThrowVelocity(previewSpeed));
+      this.previewVel.copy(this.playerThrowVelocity(previewSpeed));
       ch.grenadeWindup = this.chargingGrenade ? this.grenadeCharge : 0;
-      const showArc = canToss && (this.chargingGrenade || input.aim);
-      this.updateArc(showArc, L.throwVel, this.chargingGrenade ? this.grenadeCharge : preview);
+      const showArc = canToss && (this.chargingGrenade || input.aim || this.pendingThrow > 0);
+      this.updateArc(showArc, this.previewVel, preview);
     } else {
       this.chargingGrenade = false;
       this.grenadeCharge = 0;
@@ -472,6 +483,13 @@ export class Weapons {
     return d.addScaledVector(this.player.vel, 0.35 + 0.25 * (speed / WEAPONS.grenade.speedMax));
   }
 
+  // Where the player's grenade leaves the hand; shared by the arc preview and
+  // the real throw so the two trajectories are identical.
+  throwOrigin(out = new THREE.Vector3()) {
+    const right = new THREE.Vector3(-Math.cos(this.player.yaw), 0, Math.sin(this.player.yaw));
+    return out.copy(this.player.pos).setY(this.player.pos.y + 1.75).addScaledVector(right, 0.2);
+  }
+
   updateArc(show, vel, charge = 0) {
     this.arc.visible = show;
     this.marker.visible = show;
@@ -481,16 +499,14 @@ export class Weapons {
     this.arcMat.color.copy(col).multiplyScalar(1.6 + c * 1.4);
     this.markerMat.color.copy(col).multiplyScalar(2 + c * 2);
     this.marker.scale.setScalar(0.85 + c * 1.15);
-    const p = this.player.pos.clone().setY(this.player.pos.y + 1.75);
-    const right = new THREE.Vector3(-Math.cos(this.player.yaw), 0, Math.sin(this.player.yaw));
-    p.addScaledVector(right, 0.2);
+    const p = this.throwOrigin();
     const v = vel.clone();
     const attr = this.arc.geometry.attributes.position;
     let n = 0;
     let settled = 0;
     for (; n < attr.count; n++) {
       attr.setXYZ(n, p.x, p.y, p.z);
-      for (let k = 0; k < 3; k++) this.stepGrenade(p, v, 1 / 60, true);
+      for (let k = 0; k < 4; k++) this.stepGrenade(p, v, 1 / 60, true);
       if (v.lengthSq() < 1) settled++;
       if (settled > 3) { n++; break; }
     }
