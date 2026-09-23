@@ -7,8 +7,9 @@ import {
   DETAIL_FLOORS, FACES, FLOOR_H, ImpostorBuilder, buildTowerDetail, buildTowerImpostor, colliderFor,
 } from './skyscraper.js';
 import {
-  buildDumpsters, buildSewers, buildStreetTrees, dressSidewalks, placeRoadblocks, placeStreetProp,
+  buildSewers, buildStreetTrees, dressSidewalks, placeRoadblocks, placeStreetProp,
 } from './streets.js';
+import { dressCityFurniture } from './streetFurniture.js';
 
 /** Horizontal distance (to the tower footprint) inside which real facade modules are shown. */
 const DETAIL_DIST = 60;
@@ -108,6 +109,8 @@ export class City {
     const ids = [
       'covered_car', 'concrete_road_barrier', 'street_lamp_01', 'barrel_stove', 'metal_trash_can',
       'fire_hydrant', 'old_tyre', 'wooden_crate_01', 'barrel_03', 'modular_chainlink_fence',
+      'utility_box_01', 'utility_box_02', 'power_box_01', 'painted_wooden_bench',
+      'planter_box_01', 'korean_public_payphone_01',
     ];
     const [propModels, apt, factory] = await progress.task('Loading urban wreckage', 8, () => Promise.all([
       Promise.all(ids.map((id) => loadGLTF(modelUrl(id)))),
@@ -120,30 +123,18 @@ export class City {
 
   build(layout) {
     const rand = mulberry32((layout.seed || 0) ^ 0xdead);
-    const coverMat = new THREE.MeshStandardMaterial({ color: 0x4a423c, roughness: 0.96, metalness: 0.02 });
     const darkMat = new THREE.MeshStandardMaterial({ color: 0x2a2520, roughness: 0.95, metalness: 0.02 });
-
-    const addCoverMesh = (c) => {
-      const w = c.x1 - c.x0, d = c.z1 - c.z0, h = c.y1 - c.y0;
-      const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), coverMat);
-      mesh.position.set((c.x0 + c.x1) * 0.5, c.y0 + h * 0.5, (c.z0 + c.z1) * 0.5);
-      mesh.castShadow = mesh.receiveShadow = true;
-      this.group.add(mesh);
-      this.colliders.addBox({ ...c, type: c.type || 'cover' });
-    };
-
-    for (const c of layout.coverBoxes || []) addCoverMesh(c);
 
     this.buildSkyline(layout, rand, darkMat);
 
-    const place = (id, x, z, yaw = 0, scale = 1, coverY = 1.5) => (
-      placeStreetProp(this.models, this.group, this.colliders, this.terrain, id, x, z, yaw, scale, coverY)
+    const place = (id, x, z, yaw = 0, scale = 1, coverY = 1.5, type) => (
+      placeStreetProp(this.models, this.group, this.colliders, this.terrain, id, x, z, yaw, scale, coverY, type)
     );
 
     this.treeWind = buildStreetTrees(this.group, this.colliders, this.terrain, rand);
     buildSewers(this.group, this.colliders, this.terrain, rand);
-    buildDumpsters(this.group, this.colliders, this.terrain, rand);
     dressSidewalks(this.models, this.group, this.colliders, this.terrain, rand);
+    dressCityFurniture(this.models, this.group, this.colliders, this.terrain, rand, place);
     placeRoadblocks(this.models, this.group, this.colliders, this.terrain, rand);
 
     for (const b of layout.blocks) {

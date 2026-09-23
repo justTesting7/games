@@ -219,34 +219,6 @@ export function buildSewers(group, colliders, terrain, rand) {
   });
 }
 
-export function buildDumpsters(group, colliders, terrain, rand) {
-  const body = new THREE.MeshStandardMaterial({ color: 0x3a4a32, roughness: 0.7, metalness: 0.15 });
-  const lid = new THREE.MeshStandardMaterial({ color: 0x2d3828, roughness: 0.55, metalness: 0.2 });
-  const geo = new THREE.BoxGeometry(1.7, 1.15, 0.95);
-  const lidGeo = new THREE.BoxGeometry(1.76, 0.08, 1.0);
-  alongStreetEdges((x, z, yaw) => {
-    if (!inPlay(x, z) || cityCell(x, z).intersection) return;
-    if (rand() > 0.03) return;
-    const y = terrain.heightAt(x, z);
-    const g = new THREE.Group();
-    const bin = new THREE.Mesh(geo, body);
-    bin.position.y = 0.58;
-    const top = new THREE.Mesh(lidGeo, lid);
-    top.position.set(0, 1.2, 0);
-    top.rotation.x = rand() > 0.5 ? -0.35 : 0;
-    g.add(bin, top);
-    g.position.set(x + (rand() - 0.5), y, z + (rand() - 0.5));
-    g.rotation.y = yaw + (rand() - 0.5) * 0.4;
-    g.traverse((o) => { if (o.isMesh) o.castShadow = o.receiveShadow = true; });
-    group.add(g);
-    colliders.addBox({
-      x0: g.position.x - 0.9, x1: g.position.x + 0.9,
-      z0: g.position.z - 0.55, z1: g.position.z + 0.55,
-      y0: y, y1: y + 1.3, type: 'metal',
-    });
-  });
-}
-
 export function placeStreetProp(models, group, colliders, terrain, id, x, z, yaw, scale, coverY, type) {
   const gltf = models[id];
   if (!gltf) return null;
@@ -277,16 +249,16 @@ export function dressSidewalks(models, group, colliders, terrain, rand) {
     if (cell.intersection) return;
     i++;
     const jitter = () => (rand() - 0.5) * 0.5;
-    if (i % 3 === 0) {
+    if (i % 4 === 0) {
       placeStreetProp(models, group, colliders, terrain, 'street_lamp_01', x + jitter(), z + jitter(), yaw, 1, 2.8, 'metal');
     }
-    if (i % 5 === 1 && rand() > 0.35) {
+    if (i % 6 === 1 && rand() > 0.4) {
       placeStreetProp(models, group, colliders, terrain, 'metal_trash_can', x + jitter() * 2, z + jitter() * 2, rand() * 6, 1, 1.15, 'metal');
     }
-    if (i % 9 === 2 && rand() > 0.45) {
+    if (i % 11 === 2 && rand() > 0.5) {
       placeStreetProp(models, group, colliders, terrain, 'fire_hydrant', x + jitter(), z + jitter(), rand() * 6, 1, 0.95, 'metal');
     }
-    if (i % 6 === 3 && rand() > 0.4) {
+    if (i % 8 === 3 && rand() > 0.45) {
       const inward = dir === 'ns' ? -Math.sign(x) : -Math.sign(z);
       const px = dir === 'ns' ? x + inward * 2.2 : x + (rand() - 0.5) * 1.2;
       const pz = dir === 'ew' ? z + inward * 2.2 : z + (rand() - 0.5) * 1.2;
@@ -309,7 +281,7 @@ export function placeRoadblocks(models, group, colliders, terrain, rand) {
   };
   for (let bz = -halfBlocks; bz <= halfBlocks; bz++) {
     for (let bx = -halfBlocks; bx <= halfBlocks; bx++) {
-      if (rand() > 0.38) continue;
+      if (rand() > 0.22) continue;
       const x = (bx + 0.5) * pitch;
       const z = (bz + 0.5) * pitch;
       if (!inPlay(x, z)) continue;

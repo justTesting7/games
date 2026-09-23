@@ -28,6 +28,8 @@ const PH_MODELS = [
   'covered_car', 'concrete_road_barrier', 'street_lamp_01', 'barrel_stove',
   'metal_trash_can', 'fire_hydrant', 'old_tyre', 'modular_chainlink_fence',
   'modular_urban_apartments_facade', 'modular_factory_facade', 'modular_fire_escape',
+  'utility_box_01', 'utility_box_02', 'power_box_01', 'painted_wooden_bench',
+  'planter_box_01', 'korean_public_payphone_01',
 ];
 const RPM = 'https://raw.githubusercontent.com/readyplayerme/animation-library/master/feminine/glb';
 const RPM_FILES = [
@@ -90,7 +92,7 @@ async function download(url, dest, tries = 4) {
 }
 
 async function json(url) {
-  const res = await fetch(url);
+  const res = await fetch(url, { headers: { 'User-Agent': 'relic-isle-asset-fetch' } });
   if (!res.ok) throw new Error(`${res.status} ${url}`);
   return res.json();
 }
@@ -110,7 +112,7 @@ async function pool(tasks, n = 8) {
 }
 
 async function main() {
-  const marker = path.join(ROOT, '.complete-v6');
+  const marker = path.join(ROOT, '.complete-v7');
   if (await exists(marker)) {
     console.log('[assets] already downloaded');
     return;
