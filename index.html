@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>VoxelCraft</title>
+    <title>Relic Isle</title>
     <link rel="icon" href="data:," />
     <link rel="stylesheet" href="/src/style.css" />
   </head>
@@ -11,18 +11,22 @@
     <canvas id="game"></canvas>
 
     <div id="hud" class="hidden">
-      <div id="crosshair"></div>
-      <div id="debug"></div>
-      <div id="blockname"></div>
-      <div id="hotbar"></div>
-      <div id="underwater"></div>
+      <div id="crosshair"><i></i><i></i><i></i><i></i><b></b></div>
+      <div id="hitmarker"></div>
+      <div id="score"><span id="targets">0</span><small>targets hit</small></div>
+      <div id="weapon"><span id="ammo">∞</span><small>dual pistols</small></div>
+      <div id="debug" class="hidden"></div>
     </div>
 
     <div id="menu">
       <div class="panel">
-        <h1>VoxelCraft</h1>
-        <p class="sub">A voxel sandbox with a physically based shader pipeline</p>
-        <button id="play" disabled>Generating world…</button>
+        <h1>Relic Isle</h1>
+        <p class="sub">A third-person adventure on a photoreal island</p>
+        <div id="loading">
+          <div class="bar"><div id="loadbar"></div></div>
+          <div id="loadlabel">Starting…</div>
+        </div>
+        <button id="play" class="hidden">Explore</button>
         <div class="settings">
           <label>Graphics
             <select id="quality">
@@ -32,22 +36,21 @@
               <option value="ultra">Ultra</option>
             </select>
           </label>
-          <label><span>Render distance: <span id="rdval">8</span> chunks</span>
-            <input id="renderdist" type="range" min="3" max="16" value="8" />
-          </label>
           <label>Time of day
-            <input id="timeofday" type="range" min="0" max="1000" value="80" />
+            <input id="timeofday" type="range" min="0" max="1000" value="90" />
           </label>
           <label>Mouse sensitivity
             <input id="sens" type="range" min="1" max="20" value="8" />
           </label>
+          <label>Volume
+            <input id="volume" type="range" min="0" max="100" value="70" />
+          </label>
         </div>
         <div class="controls">
-          <div><b>WASD</b> move</div><div><b>Space</b> jump / swim</div>
-          <div><b>Shift</b> sprint (descend when flying)</div><div><b>F</b> or double-tap <b>Space</b> fly</div>
-          <div><b>Left click</b> break</div><div><b>Right click</b> place</div>
-          <div><b>Middle click</b> pick block</div><div><b>1-9 / wheel</b> select block</div>
-          <div><b>T</b> (hold) fast-forward time</div><div><b>F1</b> hide HUD · <b>F3</b> debug</div>
+          <div><b>WASD</b> move</div><div><b>Shift</b> sprint</div>
+          <div><b>Space</b> jump</div><div><b>C</b> walk / jog toggle</div>
+          <div><b>Right mouse</b> aim</div><div><b>Left mouse</b> fire</div>
+          <div><b>T</b> (hold) fast-forward time</div><div><b>F3</b> stats · <b>Esc</b> menu</div>
         </div>
       </div>
     </div>

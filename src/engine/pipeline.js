@@ -1,9 +1,10 @@
 import * as THREE from 'three';
 import * as S from './shaders.js';
-import { SEA_LEVEL } from './blocks.js';
+import { patchShaderChunks } from './patch.js';
 
 const R0 = 6372e3, R_PLANET = 6371e3, R_ATMOS = 6471e3;
 const K_RLH = [5.5e-6, 13.0e-6, 22.4e-6], K_MIE = 21e-6;
+export const SUN_INTENSITY = 25;
 
 // CPU version of the optical depth integral, used for the direct sun colour.
 function transmittance(dir, out) {
@@ -29,7 +30,7 @@ function transmittance(dir, out) {
   );
 }
 
-const smoothstep = (a, b, x) => {
+export const smoothstep = (a, b, x) => {
   const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
   return t * t * (3 - 2 * t);
 };
@@ -71,22 +72,25 @@ function fsMaterial(frag, uniforms, extra = {}) {
 }
 
 export const QUALITY = {
-  low: { label: 'Low', shadow: 1024, ssr: 0, msaa: 0, pixelRatio: 0.75, soft: 1.2, shadowDist: 60 },
-  medium: { label: 'Medium', shadow: 2048, ssr: 16, msaa: 0, pixelRatio: 1, soft: 1.5, shadowDist: 80 },
-  high: { label: 'High', shadow: 2048, ssr: 32, msaa: 4, pixelRatio: 1.25, soft: 1.8, shadowDist: 90 },
-  ultra: { label: 'Ultra', shadow: 4096, ssr: 48, msaa: 4, pixelRatio: 2, soft: 2.4, shadowDist: 110 },
+  low: { label: 'Low', shadow: 2048, shadowDist: 40, ssr: 0, msaa: 0, pixelRatio: 0.75, grass: 0.45, trees: 0.6 },
+  medium: { label: 'Medium', shadow: 2048, shadowDist: 50, ssr: 16, msaa: 0, pixelRatio: 1, grass: 0.7, trees: 0.8 },
+  high: { label: 'High', shadow: 4096, shadowDist: 60, ssr: 32, msaa: 4, pixelRatio: 1.25, grass: 1, trees: 1 },
+  ultra: { label: 'Ultra', shadow: 4096, shadowDist: 70, ssr: 48, msaa: 4, pixelRatio: 2, grass: 1.3, trees: 1.25 },
 };
 
 export class Pipeline {
-  constructor(renderer, textures) {
+  constructor(renderer) {
+    patchShaderChunks();
     this.renderer = renderer;
-    this.textures = textures;
+    renderer.toneMapping = THREE.NoToneMapping;
+    renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFShadowMap;
+
     this.quad = new FullscreenQuad();
-    this.opaqueScene = new THREE.Scene();
+    this.scene = new THREE.Scene();
     this.waterScene = new THREE.Scene();
-    this.overlayScene = new THREE.Scene();
-    this.opaqueScene.matrixWorldAutoUpdate = false;
-    this.waterScene.matrixWorldAutoUpdate = false;
+    this.fxScene = new THREE.Scene();
 
     this.sunDir = new THREE.Vector3();
     this.moonDir = new THREE.Vector3();
@@ -96,69 +100,36 @@ export class Pipeline {
     this.night = 0;
     this.frame = 0;
     this.firstFrame = true;
+    this.envAge = Infinity;
 
     this.skyRT = hdrTarget(256, 128, {
       minFilter: THREE.LinearMipmapLinearFilter,
       generateMipmaps: true,
       wrapS: THREE.RepeatWrapping,
     });
+    this.skyRT.texture.mapping = THREE.EquirectangularReflectionMapping;
+    this.pmrem = new THREE.PMREMGenerator(renderer);
+    this.envRT = null;
 
-    // Uniforms shared by reference between every material.
+    this.sun = new THREE.DirectionalLight(0xffffff, 1);
+    this.sun.castShadow = true;
+    this.sun.shadow.bias = -0.0004;
+    this.sun.shadow.normalBias = 0.035;
+    this.sun.shadow.radius = 2;
+    this.scene.add(this.sun, this.sun.target);
+
+    // Muzzle flashes reuse a single light that is always present, so toggling
+    // it never changes the light count and never triggers shader recompiles.
+    this.flashLight = new THREE.PointLight(0xffb060, 0, 14, 2);
+    this.scene.add(this.flashLight);
+
     this.u = {
       uSkyTex: { value: this.skyRT.texture },
       uLightDir: { value: this.lightDir },
       uLightColor: { value: this.lightColor },
       uSunDir: { value: this.sunDir },
       uTime: { value: 0 },
-      uFogStart: { value: 80 },
-      uFogEnd: { value: 120 },
-      uFogDensity: { value: 0.0022 },
-      uRain: { value: 0 },
-      uShadowMap: { value: null },
-      uShadowMatrix: { value: new THREE.Matrix4() },
-      uShadowTexel: { value: 1 / 2048 },
-      uShadowSoft: { value: 1.8 },
-      uWind: { value: 1 },
     };
-
-    this.blockMaterial = new THREE.ShaderMaterial({
-      vertexShader: S.blockVert,
-      fragmentShader: S.blockFrag,
-      uniforms: {
-        ...this.u,
-        uAlbedo: { value: textures.albedo },
-        uNormalTex: { value: textures.normal },
-        uSeaLevel: { value: SEA_LEVEL + 1 },
-        uCaveAmbient: { value: new THREE.Vector3(0.01, 0.0095, 0.009) },
-        uHandLight: { value: 0 },
-      },
-    });
-
-    this.shadowMaterial = new THREE.ShaderMaterial({
-      vertexShader: S.shadowVert,
-      fragmentShader: S.shadowFrag,
-      uniforms: { uTime: this.u.uTime, uWind: this.u.uWind, uAlbedo: { value: textures.albedo } },
-      side: THREE.DoubleSide,
-    });
-
-    this.waterMaterial = new THREE.ShaderMaterial({
-      vertexShader: S.waterVert,
-      fragmentShader: S.waterFrag,
-      uniforms: {
-        ...this.u,
-        uSceneTex: { value: null },
-        uResolution: { value: new THREE.Vector2() },
-        uProj: { value: new THREE.Matrix4() },
-        uSSRSteps: { value: 32 },
-        uUnderwater: { value: 0 },
-      },
-      side: THREE.DoubleSide,
-    });
-
-    this.outlineMaterial = new THREE.ShaderMaterial({
-      vertexShader: S.outlineVert,
-      fragmentShader: S.outlineFrag,
-    });
 
     this.skyGenMaterial = fsMaterial(S.skyGenFrag, {
       uSunDir: this.u.uSunDir,
@@ -174,7 +145,7 @@ export class Pipeline {
         uMoonDir: { value: this.moonDir },
         uSunColor: { value: this.sunColor },
         uNight: { value: 0 },
-        uCloudCover: { value: 0.52 },
+        uCloudCover: { value: 0.5 },
       },
       depthTest: false,
       depthWrite: false,
@@ -182,12 +153,39 @@ export class Pipeline {
     this.skyMesh = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.skyMaterial);
     this.skyMesh.frustumCulled = false;
 
+    this.waterMaterial = new THREE.ShaderMaterial({
+      vertexShader: S.waterVert,
+      fragmentShader: S.waterFrag,
+      uniforms: {
+        ...this.u,
+        uSceneTex: { value: null },
+        uHeightTex: { value: null },
+        uWorldSize: { value: 1 },
+        uResolution: { value: new THREE.Vector2() },
+        uProj: { value: new THREE.Matrix4() },
+        uSSRSteps: { value: 32 },
+      },
+      side: THREE.DoubleSide,
+    });
+
     this.copyMaterial = fsMaterial(S.copyFrag, { tDiffuse: { value: null } });
+    this.fogMaterial = fsMaterial(S.fogFrag, {
+      uSkyTex: this.u.uSkyTex,
+      tScene: { value: null },
+      uInvViewProj: { value: new THREE.Matrix4() },
+      uCamPos: { value: new THREE.Vector3() },
+      uCamForward: { value: new THREE.Vector3() },
+      uSunDir: this.u.uLightDir,
+      uLightColor: this.u.uLightColor,
+      uFogDensity: { value: 0.0016 },
+      uFogFalloff: { value: 0.012 },
+      uUnderwater: { value: 0 },
+    });
     this.bloomDown = fsMaterial(S.bloomDownFrag, {
       tSrc: { value: null }, uTexel: { value: new THREE.Vector2() }, uFirst: { value: false },
     });
     this.bloomUp = fsMaterial(S.bloomUpFrag, {
-      tSrc: { value: null }, uTexel: { value: new THREE.Vector2() }, uRadius: { value: 1 },
+      tSrc: { value: null }, uTexel: { value: new THREE.Vector2() },
     }, { blending: THREE.AdditiveBlending, transparent: true });
     this.lumMaterial = fsMaterial(S.lumFrag, {
       tScene: { value: null }, tPrev: { value: null }, uDt: { value: 0.016 }, uReset: { value: true },
@@ -202,51 +200,45 @@ export class Pipeline {
       tRays: { value: null },
       uLightColor: { value: this.lightColor },
       uWaterAmbient: { value: new THREE.Vector3() },
-      uBloom: { value: 0.045 },
+      uBloom: { value: 0.04 },
       uRays: { value: 0 },
       uUnderwater: { value: 0 },
       uTime: this.u.uTime,
       uExposureBias: { value: 1.0 },
-      uResolution: { value: new THREE.Vector2() },
+      uVignette: { value: 0.55 },
+      uFlash: { value: 0 },
     });
 
     this.lumRT = [0, 1].map(() => hdrTarget(1, 1, { type: THREE.FloatType, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter }));
     this.lumIndex = 0;
 
-    this.sunCamera = new THREE.OrthographicCamera(-90, 90, 90, -90, 1, 700);
-    this.sunCamera.layers.set(0);
-
     this.size = new THREE.Vector2(1, 1);
     this.quality = null;
-    this.setQuality('high');
+    this._v = new THREE.Vector3();
+    this._m = new THREE.Matrix4();
+  }
+
+  setWater(mesh, heightTex, worldSize) {
+    mesh.material = this.waterMaterial;
+    this.waterMaterial.uniforms.uHeightTex.value = heightTex;
+    this.waterMaterial.uniforms.uWorldSize.value = worldSize;
+    this.waterScene.add(mesh);
   }
 
   setQuality(name) {
     const q = QUALITY[name];
     this.qualityName = name;
-    const changedShadow = !this.quality || this.quality.shadow !== q.shadow;
     const changedMsaa = !this.quality || this.quality.msaa !== q.msaa;
     this.quality = q;
-    if (changedShadow) {
-      this.shadowRT?.dispose();
-      this.shadowRT = new THREE.WebGLRenderTarget(q.shadow, q.shadow, {
-        type: THREE.UnsignedByteType,
-        format: THREE.RedFormat,
-        depthBuffer: true,
-      });
-      const dt = new THREE.DepthTexture(q.shadow, q.shadow);
-      dt.type = THREE.UnsignedIntType;
-      dt.compareFunction = THREE.LessEqualCompare;
-      dt.minFilter = THREE.LinearFilter;
-      dt.magFilter = THREE.LinearFilter;
-      this.shadowRT.depthTexture = dt;
-      this.u.uShadowMap.value = dt;
-      this.u.uShadowTexel.value = 1 / q.shadow;
+    const sh = this.sun.shadow;
+    if (sh.mapSize.x !== q.shadow) {
+      sh.mapSize.set(q.shadow, q.shadow);
+      sh.map?.dispose();
+      sh.map = null;
     }
-    this.u.uShadowSoft.value = q.soft;
     const d = q.shadowDist;
-    Object.assign(this.sunCamera, { left: -d, right: d, top: d, bottom: -d });
-    this.sunCamera.updateProjectionMatrix();
+    Object.assign(sh.camera, { left: -d, right: d, top: d, bottom: -d, near: 1, far: 800 });
+    sh.camera.updateProjectionMatrix();
     this.waterMaterial.uniforms.uSSRSteps.value = q.ssr;
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, q.pixelRatio));
     if (changedMsaa && this.sceneRT) { this.sceneRT.dispose(); this.sceneRT = null; }
@@ -262,6 +254,7 @@ export class Pipeline {
       this.sceneRT = hdrTarget(W, H, { depthBuffer: true, samples: this.quality.msaa });
     } else this.sceneRT.setSize(W, H);
     if (!this.copyRT) this.copyRT = hdrTarget(W, H); else this.copyRT.setSize(W, H);
+    if (!this.fogRT) this.fogRT = hdrTarget(W, H); else this.fogRT.setSize(W, H);
 
     this.bloomRTs?.forEach((r) => r.dispose());
     this.bloomRTs = [];
@@ -272,49 +265,51 @@ export class Pipeline {
     }
     const rw = Math.max(1, W >> 1), rh = Math.max(1, H >> 1);
     if (!this.raysRT) this.raysRT = hdrTarget(rw, rh); else this.raysRT.setSize(rw, rh);
-
     this.waterMaterial.uniforms.uResolution.value.set(W, H);
-    this.compositeMaterial.uniforms.uResolution.value.set(W, H);
   }
 
   setTimeOfDay(t, elapsed) {
     const a = t * Math.PI * 2;
     this.sunDir.set(Math.cos(a), Math.sin(a), 0.38).normalize();
     this.moonDir.copy(this.sunDir).negate();
-    const tmp = new THREE.Vector3();
+    const tmp = this._v;
     transmittance(this.sunDir, tmp);
     const sunF = smoothstep(-0.03, 0.04, this.sunDir.y);
     const moonF = smoothstep(-0.03, 0.04, this.moonDir.y);
     this.sunColor.copy(tmp).multiplyScalar(sunF);
     if (this.sunDir.y > 0) {
       this.lightDir.copy(this.sunDir);
-      this.lightColor.copy(tmp).multiplyScalar(8.0 * sunF);
+      this.lightColor.copy(tmp).multiplyScalar(SUN_INTENSITY * sunF);
     } else {
       this.lightDir.copy(this.moonDir);
       transmittance(this.moonDir, tmp);
-      this.lightColor.copy(tmp).multiply(new THREE.Vector3(0.55, 0.7, 1.0)).multiplyScalar(0.12 * moonF);
+      this.lightColor.copy(tmp).multiply(new THREE.Vector3(0.55, 0.7, 1.0)).multiplyScalar(0.12 * Math.PI * moonF);
     }
+    const lc = this.lightColor;
+    const li = Math.max(lc.x, lc.y, lc.z);
+    this.sun.intensity = li;
+    if (li > 0) this.sun.color.setRGB(lc.x / li, lc.y / li, lc.z / li, THREE.LinearSRGBColorSpace);
+    this.sun.castShadow = li > 1e-3;
     this.night = smoothstep(0.08, -0.18, this.sunDir.y);
     this.u.uTime.value = elapsed;
   }
 
   updateShadowCamera(center) {
-    const cam = this.sunCamera;
     const L = this.lightDir;
-    cam.position.copy(L).multiplyScalar(300);
-    cam.lookAt(0, 0, 0);
-    cam.updateMatrixWorld();
-    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(cam.quaternion);
-    const up = new THREE.Vector3(0, 1, 0).applyQuaternion(cam.quaternion);
-    const texel = (cam.right - cam.left) / this.quality.shadow;
+    const cam = this.sun.shadow.camera;
+    // Snap the shadow frustum to whole texels in light space to stop shimmering.
+    const up = Math.abs(L.y) > 0.99 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0);
+    const right = new THREE.Vector3().crossVectors(up, L).normalize();
+    const upL = new THREE.Vector3().crossVectors(L, right);
+    const texel = (cam.right - cam.left) / this.sun.shadow.mapSize.x;
     const r = Math.round(center.dot(right) / texel) * texel;
-    const u = Math.round(center.dot(up) / texel) * texel;
+    const u = Math.round(center.dot(upL) / texel) * texel;
     const f = center.dot(L);
-    const snapped = new THREE.Vector3().addScaledVector(right, r).addScaledVector(up, u).addScaledVector(L, f);
-    cam.position.copy(snapped).addScaledVector(L, 300);
-    cam.updateMatrixWorld();
-    cam.matrixWorldInverse.copy(cam.matrixWorld).invert();
-    this.u.uShadowMatrix.value.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse);
+    const snapped = new THREE.Vector3().addScaledVector(right, r).addScaledVector(upL, u).addScaledVector(L, f);
+    this.sun.target.position.copy(snapped);
+    this.sun.position.copy(snapped).addScaledVector(L, 400);
+    this.sun.target.updateMatrixWorld();
+    this.sun.updateMatrixWorld();
   }
 
   render(camera, dt, opts) {
@@ -323,42 +318,45 @@ export class Pipeline {
     this.frame++;
     r.autoClear = false;
 
-    // 1. Atmosphere -> small HDR equirect texture (also used for ambient + fog).
     this.quad.render(r, this.skyGenMaterial, this.skyRT);
-
-    // 2. Shadow map.
-    this.updateShadowCamera(camera.position);
-    if (this.lightColor.lengthSq() > 1e-6) {
-      r.setRenderTarget(this.shadowRT);
-      r.setClearColor(0xffffff, 1);
-      r.clear(true, true, false);
-      this.opaqueScene.overrideMaterial = this.shadowMaterial;
-      r.render(this.opaqueScene, this.sunCamera);
-      this.opaqueScene.overrideMaterial = null;
+    this.envAge += dt;
+    if (this.envAge > 1.5 || !this.envRT) {
+      this.envAge = 0;
+      this.envRT = this.pmrem.fromEquirectangular(this.skyRT.texture, this.envRT);
+      this.scene.environment = this.envRT.texture;
     }
 
-    // 3. Sky + opaque geometry into the HDR target. Alpha stores view distance.
+    this.updateShadowCamera(opts.shadowCenter || camera.position);
+
     camera.updateMatrixWorld();
-    const vp = new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
-    this.skyMaterial.uniforms.uInvViewProj.value.copy(vp).invert();
+    const vp = this._m.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+    const invVP = vp.clone().invert();
+    this.skyMaterial.uniforms.uInvViewProj.value.copy(invVP);
     this.skyMaterial.uniforms.uNight.value = this.night;
     r.setRenderTarget(this.sceneRT);
     r.setClearColor(0x000000, 0);
     r.clear(true, true, false);
     r.render(this.skyMesh, camera);
-    r.render(this.opaqueScene, camera);
-    r.render(this.overlayScene, camera);
+    r.render(this.scene, camera);
 
-    // 4. Water, which refracts/reflects a copy of the opaque scene.
     this.copyMaterial.uniforms.tDiffuse.value = this.sceneRT.texture;
     this.quad.render(r, this.copyMaterial, this.copyRT);
     this.waterMaterial.uniforms.uSceneTex.value = this.copyRT.texture;
     this.waterMaterial.uniforms.uProj.value.copy(camera.projectionMatrix);
     r.setRenderTarget(this.sceneRT);
     r.render(this.waterScene, camera);
+    r.render(this.fxScene, camera);
 
-    // 5. Bloom mip chain.
-    let src = this.sceneRT.texture;
+    const fu = this.fogMaterial.uniforms;
+    fu.tScene.value = this.sceneRT.texture;
+    fu.uInvViewProj.value.copy(invVP);
+    fu.uCamPos.value.copy(camera.position);
+    camera.getWorldDirection(fu.uCamForward.value);
+    fu.uUnderwater.value = opts.underwater ? 1 : 0;
+    this.quad.render(r, this.fogMaterial, this.fogRT);
+    const sceneTex = this.fogRT.texture;
+
+    let src = sceneTex;
     let sw = W, sh = H;
     for (let i = 0; i < this.bloomRTs.length; i++) {
       const u = this.bloomDown.uniforms;
@@ -370,7 +368,6 @@ export class Pipeline {
       sw = this.bloomRTs[i].width; sh = this.bloomRTs[i].height;
     }
 
-    // 6. Eye adaptation (reads a downsampled level before upsampling pollutes it).
     const prev = this.lumRT[this.lumIndex];
     const next = this.lumRT[1 - this.lumIndex];
     const lu = this.lumMaterial.uniforms;
@@ -390,7 +387,6 @@ export class Pipeline {
       this.quad.render(r, this.bloomUp, this.bloomRTs[i]);
     }
 
-    // 7. Screen-space god rays towards the sun (or moon).
     const lightPos = camera.position.clone().addScaledVector(this.lightDir, 1000).project(camera);
     const facing = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).dot(this.lightDir);
     let rays = 0;
@@ -398,24 +394,23 @@ export class Pipeline {
       const onScreen = 1 - smoothstep(0.9, 1.6, Math.max(Math.abs(lightPos.x), Math.abs(lightPos.y)));
       rays = onScreen * smoothstep(0.0, 0.35, facing) * (opts.underwater ? 0.3 : 1);
       const ru = this.raysMaterial.uniforms;
-      ru.tScene.value = this.sceneRT.texture;
+      ru.tScene.value = sceneTex;
       ru.uSunUV.value.set(lightPos.x * 0.5 + 0.5, lightPos.y * 0.5 + 0.5);
       ru.uAspect.value = W / H;
       ru.uFrame.value = this.frame % 64;
       this.quad.render(r, this.raysMaterial, this.raysRT);
     }
 
-    // 8. Composite, tonemap, grade.
     const cu = this.compositeMaterial.uniforms;
-    cu.tScene.value = this.sceneRT.texture;
+    cu.tScene.value = sceneTex;
     cu.tBloom.value = this.bloomRTs[0].texture;
     cu.tLum.value = next.texture;
     cu.tRays.value = this.raysRT.texture;
-    cu.uRays.value = rays * 1.4;
+    cu.uRays.value = rays * 1.2;
     cu.uUnderwater.value = opts.underwater ? 1 : 0;
-    const amb = new THREE.Vector3(0.02, 0.1, 0.13).multiplyScalar(0.4 + this.lightColor.y * 0.25 + (1 - this.night) * 0.4);
+    cu.uFlash.value = opts.flash || 0;
+    const amb = new THREE.Vector3(0.02, 0.1, 0.13).multiplyScalar(0.4 + this.lightColor.y * 0.08 + (1 - this.night) * 0.4);
     cu.uWaterAmbient.value.copy(amb);
-    this.waterMaterial.uniforms.uUnderwater.value = opts.underwater ? 1 : 0;
     this.quad.render(r, this.compositeMaterial, null);
   }
 }
