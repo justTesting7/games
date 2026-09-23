@@ -23,6 +23,8 @@ export class Audio {
     this.reverbSend.connect(this.reverb).connect(this.master);
 
     this.noise = this.noiseBuffer(2);
+    this.shots = [0, 1, 2, 3].map(() => this.renderGunshot(true));
+    this.farShots = [0, 1].map(() => this.renderGunshot(false));
     this.startAmbience();
   }
 
@@ -101,36 +103,83 @@ export class Audio {
     this.gunshotNow(side, 0, null);
   }
 
+  // A pistol report is broadband noise, not a tone: a very short crack, a
+  // blast that dies within ~80 ms, a low thump, and a bit of rumble, all
+  // saturated together. Any pitched sweep makes it sound like a laser.
+  renderGunshot(click) {
+    const ctx = this.ctx;
+    const sr = ctx.sampleRate;
+    const n = Math.floor(sr * 0.7);
+    const out = new Float32Array(n);
+    const parts = { crack: new Float32Array(n), blast: new Float32Array(n), thump: new Float32Array(n), rumble: new Float32Array(n) };
+    const k = (fc) => 1 - Math.exp((-2 * Math.PI * fc) / sr);
+    let lpCrack = 0, lpBlast = 0, lpBlast2 = 0, lpT1 = 0, lpT2 = 0, lpR1 = 0, lpR2 = 0;
+    for (let i = 0; i < n; i++) {
+      const t = i / sr;
+      const x = Math.random() * 2 - 1;
+      lpCrack += k(1800) * (x - lpCrack);
+      parts.crack[i] = (x - lpCrack) * Math.exp(-t / 0.0035);
+      const fc = 900 + 5200 * Math.exp(-t / 0.012);
+      lpBlast += k(fc) * (x - lpBlast);
+      lpBlast2 += k(fc) * (lpBlast - lpBlast2);
+      parts.blast[i] = lpBlast2 * (Math.exp(-t / 0.045) + 0.25 * Math.exp(-t / 0.12));
+      lpT1 += k(160) * (x - lpT1);
+      lpT2 += k(160) * (lpT1 - lpT2);
+      parts.thump[i] = lpT2 * Math.exp(-t / 0.07);
+      lpR1 += k(450) * (x - lpR1);
+      lpR2 += k(450) * (lpR1 - lpR2);
+      parts.rumble[i] = lpR2 * Math.exp(-t / 0.22) * Math.min(1, t / 0.01);
+    }
+    const norm = (a) => { let m = 0; for (const v of a) m = Math.max(m, Math.abs(v)); return m || 1; };
+    const mix = { crack: 0.75, blast: 1, thump: 1.1, rumble: 0.22 };
+    for (const key in parts) {
+      const g = mix[key] / norm(parts[key]);
+      const a = parts[key];
+      for (let i = 0; i < n; i++) out[i] += a[i] * g;
+    }
+    if (click) {
+      // The slide going back and slamming forward after the shot.
+      for (const [at, gain] of [[0.038, 0.2], [0.07, 0.14]]) {
+        let lp = 0;
+        const i0 = Math.floor(sr * at);
+        for (let i = i0; i < Math.min(n, i0 + sr * 0.02); i++) {
+          const x = Math.random() * 2 - 1;
+          lp += k(3000) * (x - lp);
+          out[i] += (x - lp) * gain * Math.exp(-(i - i0) / sr / 0.003);
+        }
+      }
+    }
+    let peak = 0;
+    for (let i = 0; i < n; i++) { out[i] = Math.tanh(out[i] * 1.8); peak = Math.max(peak, Math.abs(out[i])); }
+    const b = ctx.createBuffer(1, n, sr);
+    const d = b.getChannelData(0);
+    for (let i = 0; i < n; i++) d[i] = (out[i] / peak) * 0.95;
+    return b;
+  }
+
   gunshotNow(side, distance, panDir) {
     const ctx = this.ctx;
     const t = ctx.currentTime;
     const far = distance > 1;
-    const att = far ? Math.min(1, 6 / distance) : 1;
-    const pan = far ? Math.max(-0.9, Math.min(0.9, panDir * 0.9)) : side ? -0.15 : 0.15;
-    const pitch = 0.92 + Math.random() * 0.16;
-    const dull = far ? Math.max(0.25, 1 - distance / 120) : 1;
-    this.noiseBurst({ freq: 2400 * pitch * dull, q: 0.5, gain: 0.9 * att, attack: 0.001, release: 0.09, pan, send: far ? 1.6 : 1 });
-    const body = this.noiseBurst({ freq: 900 * pitch, q: 0.8, type: 'lowpass', gain: 0.8 * Math.sqrt(att), attack: 0.001, release: 0.32, pan, send: far ? 1.8 : 1.2 });
-    body.frequency.setValueAtTime(3000 * dull, t);
-    body.frequency.exponentialRampToValueAtTime(300, t + 0.3);
-    const o = ctx.createOscillator();
-    o.type = 'sine';
-    o.frequency.setValueAtTime(140 * pitch, t);
-    o.frequency.exponentialRampToValueAtTime(38, t + 0.18);
+    const att = far ? Math.min(1, 7 / distance) : 1;
+    const pan = far ? Math.max(-0.9, Math.min(0.9, panDir * 0.9)) : side ? -0.12 : 0.12;
+    const set = far ? this.farShots : this.shots;
+    const src = ctx.createBufferSource();
+    src.buffer = set[Math.floor(Math.random() * set.length)];
+    src.playbackRate.value = 0.95 + Math.random() * 0.1;
+    const f = ctx.createBiquadFilter();
+    f.type = 'lowpass';
+    f.frequency.value = far ? Math.max(900, 9000 - distance * 90) : 16000;
+    f.Q.value = 0.5;
     const g = ctx.createGain();
-    this.env(g.gain, t, 0.002, 0.9 * att, 0.22);
-    o.connect(g).connect(this.master);
-    o.start(t);
-    o.stop(t + 0.3);
-    if (far) return;
-    const c = ctx.createOscillator();
-    c.type = 'square';
-    c.frequency.value = 3200;
-    const cg = ctx.createGain();
-    this.env(cg.gain, t + 0.035, 0.001, 0.05, 0.03);
-    c.connect(cg).connect(this.master);
-    c.start(t + 0.03);
-    c.stop(t + 0.1);
+    g.gain.value = far ? 0.9 * att * Math.sqrt(att) : 1;
+    const p = ctx.createStereoPanner();
+    p.pan.value = pan;
+    src.connect(f).connect(g).connect(p).connect(this.master);
+    const s = ctx.createGain();
+    s.gain.value = far ? 0.9 * Math.sqrt(att) : 0.55;
+    p.connect(s).connect(this.reverbSend);
+    src.start(t);
   }
 
   impact(surface, distance) {
