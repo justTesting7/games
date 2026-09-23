@@ -91,7 +91,7 @@ export class Combat {
       victim.alive = false;
       victim.character.die(dir);
       if (attacker && attacker !== victim) attacker.kills++;
-      this.onKill?.(victim, attacker, { ...info, head: true });
+      this.onKill?.(victim, attacker, { ...info, head: true, dir });
       return;
     }
     victim.health = Math.max(0, victim.health - amount);
@@ -99,7 +99,7 @@ export class Combat {
       victim.alive = false;
       victim.character.die(dir);
       if (attacker && attacker !== victim) attacker.kills++;
-      this.onKill?.(victim, attacker, info);
+      this.onKill?.(victim, attacker, { ...info, dir });
     } else {
       victim.character.hitReact(dir);
       this.onDamage?.(victim, attacker, amount, dir, info);

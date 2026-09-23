@@ -222,9 +222,15 @@ export class Weapons {
     if (!shooter.isPlayer) this.checkNearMiss(muzzle, end, hit);
     if (!hit) return null;
     const hitDist = end.distanceTo(this.player.camera.position);
-    if (hit.head && hit.fighter) {
-      this.fx.headshot(end, dir, hit.normal, rifle ? 1.35 : 1);
-      this.audio.headshot(hitDist);
+    if (hit.fighter) {
+      if (hit.head) {
+        this.fx.headshot(end, dir, hit.normal, rifle ? 1.35 : 1);
+        this.audio.headshot(hitDist);
+      } else {
+        this.fx.bloodHit(end, dir, hit.normal, rifle ? 1.3 : 1);
+        this.audio.impact('flesh', hitDist);
+      }
+      this.sprayBehind(end, dir, hit.fighter, (hit.head ? 1 : 0.6) * (rifle ? 1.25 : 1));
     } else {
       this.fx.impact(end, hit.normal, hit.surface, dir);
       this.audio.impact(hit.surface, hitDist);
@@ -232,6 +238,27 @@ export class Weapons {
     if (hit.fighter) this.combat.damage(hit.fighter, shooter, hit.head ? def.head : def.body, dir, { head: hit.head, weapon: def.key });
     else if (hit.body || hit.target) hit.scored = this.world.props.hit(hit, end, dir, def.force);
     return hit;
+  }
+
+  // Exit spray lands on whatever is behind the victim, plus a spatter on the
+  // ground where the heavier drops come down.
+  sprayBehind(end, dir, victim, k) {
+    const decals = this.fx.decals;
+    const exit = end.clone().addScaledVector(dir, 0.35);
+    const reach = 2.5 + 2.5 * k;
+    const back = this.world.raycast(exit, dir, reach, victim);
+    if (back && !back.fighter && back.surface !== 'water') {
+      const p = exit.clone().addScaledVector(dir, back.t);
+      decals.splat(p, back.normal, dir, (0.45 + back.t * 0.2) * (0.6 + k * 0.5));
+    }
+    const flat = new THREE.Vector3(dir.x, 0, dir.z);
+    if (flat.lengthSq() < 1e-4) flat.set(1, 0, 0);
+    flat.normalize();
+    const land = Math.min(back ? back.t : reach, 0.5 + Math.random() * 1.4 * k);
+    const g = exit.clone().addScaledVector(flat, land);
+    const terrain = this.world.terrain;
+    g.y = terrain.heightAt(g.x, g.z);
+    if (g.y > 0.05) decals.splat(g, terrain.normalAt(g.x, g.z), flat, 0.55 + 0.6 * k * Math.random() + 0.3 * k);
   }
 
   listen(pos) {

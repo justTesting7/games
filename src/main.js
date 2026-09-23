@@ -248,6 +248,7 @@ async function init() {
     character.equipT = 1;
     weapons.live.forEach((g) => g.mesh.removeFromParent());
     weapons.live = [];
+    fx.decals.clear();
     spawnRivals();
     $('feed').innerHTML = '';
     round.state = 'countdown';
@@ -283,6 +284,11 @@ async function init() {
     }
   };
   combat.onKill = (victim, attacker, info) => {
+    if (info.dir) {
+      const flat = new THREE.Vector3(info.dir.x, 0, info.dir.z);
+      if (flat.lengthSq() > 1e-4) flat.normalize();
+      fx.decals.pool(victim.pos.clone().addScaledVector(flat, 0.75), info.head ? 1.9 : 1.5, 1.2);
+    }
     const how = `${WEAPONS[info.weapon]?.short || ''}${info.head ? ' · headshot' : ''}`;
     const by = attacker === victim ? '' : attacker ? tagName(attacker) : '';
     feed(`${by} <span class="gun">▸ ${how} ▸</span> ${tagName(victim)}`);

@@ -1,14 +1,18 @@
 import * as THREE from 'three';
+import { BloodDecals } from './blood.js';
 
 const particleVert = /* glsl */ `
 attribute vec4 iPos;
 attribute vec4 iColor;
 attribute vec4 iVel;
+attribute float iSeed;
 varying vec2 vUv;
 varying vec4 vColor;
+varying float vSeed;
 void main() {
   vUv = position.xy;
   vColor = iColor;
+  vSeed = iSeed;
   vec3 camRight = vec3(viewMatrix[0][0], viewMatrix[1][0], viewMatrix[2][0]);
   vec3 camUp = vec3(viewMatrix[0][1], viewMatrix[1][1], viewMatrix[2][1]);
   vec3 wp = iPos.xyz;
@@ -29,12 +33,36 @@ void main() {
 const particleFrag = /* glsl */ `
 varying vec2 vUv;
 varying vec4 vColor;
+varying float vSeed;
 uniform vec3 uLight;
 uniform vec3 uAmbient;
+#ifdef BLOOD
+float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float vnoise(vec2 p) {
+  vec2 i = floor(p), f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(hash(i), hash(i + vec2(1, 0)), f.x), mix(hash(i + vec2(0, 1)), hash(i + vec2(1, 1)), f.x), f.y);
+}
+float fbm(vec2 p) { return vnoise(p) * 0.55 + vnoise(p * 2.13 + 7.1) * 0.3 + vnoise(p * 4.37 + 3.3) * 0.15; }
+#endif
 void main() {
   float r = length(vUv);
   if (r > 1.0) discard;
-  #ifdef ADDITIVE
+  #ifdef BLOOD
+    // Seeds >= 2 are mist puffs; below that, liquid droplets / tissue.
+    if (vSeed >= 2.0) {
+      float n = fbm(vUv * 1.6 + vSeed * 13.7);
+      float a = smoothstep(0.18, 0.7, (1.0 - r) * (0.45 + n)) * vColor.a;
+      vec3 lit = vColor.rgb * (uAmbient * 1.1 + uLight * 0.3);
+      gl_FragColor = vec4(lit, a);
+    } else {
+      vec3 nrm = vec3(vUv, sqrt(max(0.0, 1.0 - r * r)));
+      float diff = 0.55 + 0.45 * nrm.z;
+      float spec = pow(max(0.0, dot(nrm, normalize(vec3(-0.4, 0.5, 0.77)))), 48.0);
+      vec3 lit = vColor.rgb * (uAmbient + uLight * 0.25) * diff + spec * (uAmbient * 0.9 + uLight * 0.06);
+      gl_FragColor = vec4(lit, smoothstep(1.0, 0.8, r) * vColor.a);
+    }
+  #elif defined(ADDITIVE)
     float a = pow(1.0 - r, 2.0);
     gl_FragColor = vec4(vColor.rgb * a * vColor.a, 0.0);
   #else
@@ -46,7 +74,7 @@ void main() {
 `;
 
 class ParticlePool {
-  constructor(max, additive, uniforms) {
+  constructor(max, additive, uniforms, defines = {}) {
     this.max = max;
     this.n = 0;
     const g = new THREE.InstancedBufferGeometry();
@@ -58,12 +86,17 @@ class ParticlePool {
     g.setAttribute('iPos', this.pos);
     g.setAttribute('iColor', this.col);
     g.setAttribute('iVel', this.vel);
+    this.seed = new THREE.InstancedBufferAttribute(new Float32Array(max), 1).setUsage(THREE.DynamicDrawUsage);
+    g.setAttribute('iSeed', this.seed);
     g.instanceCount = 0;
+    /** Optional ground height function; particles spawned with `land` die on contact and call `onLand`. */
+    this.ground = null;
+    this.onLand = null;
     const mat = new THREE.ShaderMaterial({
       vertexShader: particleVert,
       fragmentShader: particleFrag,
       uniforms,
-      defines: additive ? { ADDITIVE: 1 } : {},
+      defines: additive ? { ADDITIVE: 1, ...defines } : defines,
       transparent: true,
       depthWrite: false,
       // Alpha is left untouched because it holds scene depth.
@@ -88,11 +121,12 @@ class ParticlePool {
       size: o.size, grow: o.grow || 0, life: o.life, age: 0,
       r: o.color[0], g: o.color[1], b: o.color[2], a: o.alpha ?? 1,
       gravity: o.gravity ?? 0, drag: o.drag ?? 0, stretch: o.stretch || 0, fade: o.fade ?? 1,
+      seed: o.seed ?? Math.random(), vstretch: o.vstretch || 0, land: o.land || 0,
     });
   }
 
   update(dt) {
-    const P = this.pos.array, C = this.col.array, V = this.vel.array;
+    const P = this.pos.array, C = this.col.array, V = this.vel.array, S = this.seed.array;
     let n = 0;
     const alive = [];
     for (const p of this.p) {
@@ -106,19 +140,29 @@ class ParticlePool {
         p.vx *= k; p.vy = p.vy * k - p.gravity * dt; p.vz *= k;
         p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt;
         p.size += p.grow * dt;
+        if (p.land && this.ground && p.vy < 0) {
+          const h = this.ground(p.x, p.z);
+          if (p.y < h) {
+            alive.pop();
+            this.onLand?.(p, h);
+            continue;
+          }
+        }
       }
       const t = p.age / p.life;
       const a = p.a * (p.fade ? 1 - t : 1) * (p.grow > 0 ? Math.min(1, 0.3 + p.age * 20) : 1);
       P.set([p.x, p.y, p.z, p.size], n * 4);
       C.set([p.r, p.g, p.b, a], n * 4);
-      V.set([p.vx, p.vy, p.vz, p.stretch], n * 4);
+      const st = p.vstretch ? Math.min(0.3, Math.max(p.size, Math.hypot(p.vx, p.vy, p.vz) * p.vstretch)) : p.stretch;
+      V.set([p.vx, p.vy, p.vz, st], n * 4);
+      S[n] = p.seed;
       n++;
     }
     this.p = alive;
     this.geo.instanceCount = n;
-    for (const at of [this.pos, this.col, this.vel]) {
+    for (const at of [this.pos, this.col, this.vel, this.seed]) {
       at.clearUpdateRanges();
-      at.addUpdateRange(0, n * 4);
+      at.addUpdateRange(0, n * at.itemSize);
       at.needsUpdate = true;
     }
   }
@@ -137,6 +181,15 @@ const SURFACE = {
   concrete: { dust: [0.45, 0.42, 0.38], chunks: [0.38, 0.35, 0.32] },
 };
 
+const UP = new THREE.Vector3(0, 1, 0);
+const RIGHT = new THREE.Vector3(1, 0, 0);
+const BLOOD_DARK = [0.14, 0.004, 0.004];
+const BLOOD_FRESH = [0.24, 0.012, 0.01];
+const MIST = [0.3, 0.035, 0.03];
+const TISSUE = [0.26, 0.05, 0.045];
+const TISSUE_PALE = [0.46, 0.28, 0.24];
+const gauss = () => (Math.random() + Math.random() + Math.random() - 1.5) / 1.5;
+
 export class Effects {
   constructor(pipeline, terrain, audio) {
     this.pipeline = pipeline;
@@ -146,7 +199,13 @@ export class Effects {
     this.uniforms = uniforms;
     this.add = new ParticlePool(800, true, uniforms);
     this.alpha = new ParticlePool(1200, false, uniforms);
-    pipeline.fxScene.add(this.add.mesh, this.alpha.mesh);
+    this.blood = new ParticlePool(1500, false, uniforms, { BLOOD: 1 });
+    pipeline.fxScene.add(this.add.mesh, this.alpha.mesh, this.blood.mesh);
+    this.decals = new BloodDecals(pipeline.scene, terrain);
+    this.blood.ground = (x, z) => terrain.heightAt(x, z);
+    this.blood.onLand = (p, h) => {
+      if (h > 0.02 && Math.random() < 0.5) this.decals.drop(p.x, h, p.z, Math.min(0.22, Math.max(0.035, p.size * 9)));
+    };
 
     const casingGeo = new THREE.CylinderGeometry(0.0045, 0.0045, 0.019, 8).rotateZ(Math.PI / 2);
     const brass = new THREE.MeshStandardMaterial({ color: 0xd4a246, metalness: 1, roughness: 0.3 });
@@ -243,83 +302,77 @@ export class Effects {
     });
   }
 
-  // Exit-wound spray: blood mist, droplets and brain matter along the bullet path.
   headshot(pos, dir, normal, scale = 1) {
-    const k = scale;
-    const exit = dir.clone().normalize();
-    const back = exit.clone().negate();
-    const side = new THREE.Vector3().crossVectors(exit, Math.abs(exit.y) < 0.9 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0)).normalize();
-    const up = new THREE.Vector3().crossVectors(side, exit).normalize();
-    const origin = pos.clone().addScaledVector(normal, 0.02);
+    this.bloodBurst(pos, dir, normal, scale, true);
+  }
 
-    this.add.spawn({ pos: origin, size: 0.14 * k, life: 0.05, color: [120, 12, 8], fade: 1 });
-    for (let i = 0; i < 28 * k; i++) {
-      const cone = exit.clone()
-        .addScaledVector(side, (Math.random() - 0.5) * 1.1)
-        .addScaledVector(up, (Math.random() - 0.5) * 1.1)
-        .normalize();
-      const spd = (8 + Math.random() * 14) * k;
-      this.alpha.spawn({
-        pos: origin.clone().addScaledVector(cone, 0.04),
-        vel: cone.multiplyScalar(spd),
-        size: 0.015 + Math.random() * 0.035,
-        life: 0.35 + Math.random() * 0.45,
-        color: Math.random() < 0.35 ? [0.92, 0.1, 0.08] : [0.55, 0.04, 0.03],
-        alpha: 0.95, gravity: 11, drag: 0.8, fade: 0,
+  bloodHit(pos, dir, normal, scale = 1) {
+    this.bloodBurst(pos, dir, normal, scale, false);
+  }
+
+  // Wound ballistics, roughly: a little fine back-spatter at the entry, a
+  // fast cone of droplets and a short-lived mist cloud at the exit, plus
+  // tissue for head wounds. Liquid is dark and glossy, not bright red.
+  bloodBurst(pos, dir, normal, k, head) {
+    const B = this.blood;
+    const fwd = dir.clone().normalize();
+    const back = fwd.clone().negate();
+    const side = new THREE.Vector3().crossVectors(fwd, Math.abs(fwd.y) < 0.9 ? UP : RIGHT).normalize();
+    const up = new THREE.Vector3().crossVectors(side, fwd).normalize();
+    const entry = pos.clone().addScaledVector(normal, 0.01);
+    const exit = pos.clone().addScaledVector(fwd, head ? 0.2 : 0.38);
+    const cone = (axis, spread) => axis.clone()
+      .addScaledVector(side, gauss() * spread)
+      .addScaledVector(up, gauss() * spread)
+      .normalize();
+    const liquid = () => (Math.random() < 0.7 ? BLOOD_DARK : BLOOD_FRESH);
+
+    for (let i = 0; i < (head ? 14 : 8) * k; i++) {
+      B.spawn({
+        pos: entry, vel: cone(back, 0.55).multiplyScalar(1.5 + Math.random() * 3.5),
+        size: 0.003 + Math.random() * 0.006, vstretch: 0.01, life: 1.4,
+        color: liquid(), gravity: 9.8, drag: 1.2, fade: 0, land: 1,
       });
     }
-    for (let i = 0; i < 18 * k; i++) {
-      const mix = back.clone().lerp(exit, Math.random() * 0.85 + 0.15);
-      mix.addScaledVector(new THREE.Vector3().randomDirection(), 0.55).normalize();
-      this.alpha.spawn({
-        pos: origin,
-        vel: mix.multiplyScalar(4 + Math.random() * 7),
-        size: 0.04 + Math.random() * 0.07,
-        grow: 1.8,
-        life: 0.5 + Math.random() * 0.7,
-        color: [0.78, 0.06, 0.05],
-        alpha: 0.65,
-        drag: 2.5,
-        gravity: 2.5,
+    for (let i = 0; i < (head ? 70 : 30) * k; i++) {
+      const fast = Math.random();
+      B.spawn({
+        pos: exit.clone().addScaledVector(fwd, -0.05 + Math.random() * 0.08),
+        vel: cone(fwd, 0.18 + (1 - fast) * 0.35).multiplyScalar((3 + fast * 13) * (0.75 + k * 0.25)),
+        size: 0.003 + Math.random() * 0.011, vstretch: 0.012, life: 1.8,
+        color: liquid(), gravity: 9.8, drag: 0.9, fade: 0, land: 1,
       });
     }
-    for (let i = 0; i < 22 * k; i++) {
-      const mix = exit.clone().addScaledVector(new THREE.Vector3().randomDirection(), 0.75).normalize();
-      this.alpha.spawn({
-        pos: origin,
-        vel: mix.multiplyScalar(3 + Math.random() * 8),
-        size: 0.025 + Math.random() * 0.05,
-        life: 0.55 + Math.random() * 0.75,
-        color: Math.random() < 0.5 ? [0.82, 0.68, 0.58] : [0.72, 0.55, 0.48],
-        alpha: 1,
-        gravity: 10,
-        fade: 0,
+    for (let i = 0; i < (head ? 14 : 6) * k; i++) {
+      B.spawn({
+        pos: exit, vel: cone(fwd, 0.5).multiplyScalar(1.2 + Math.random() * 4).addScaledVector(UP, Math.random()),
+        size: 0.01 + Math.random() * 0.018, vstretch: 0.008, life: 2,
+        color: BLOOD_DARK, gravity: 9.8, drag: 0.4, fade: 0, land: 1,
       });
     }
-    for (let i = 0; i < 10 * k; i++) {
-      const mix = exit.clone().addScaledVector(side, (Math.random() - 0.5) * 2).normalize();
-      this.add.spawn({
-        pos: origin,
-        vel: mix.multiplyScalar(0.015 + Math.random() * 0.02),
-        size: 0.04 + Math.random() * 0.06,
-        stretch: 0.12 + Math.random() * 0.2,
-        life: 0.08 + Math.random() * 0.12,
-        color: [95, 8, 5],
-        fade: 0.6,
+    if (head) {
+      for (let i = 0; i < 10 * k; i++) {
+        B.spawn({
+          pos: exit, vel: cone(fwd, 0.6).multiplyScalar(2.5 + Math.random() * 7),
+          size: 0.007 + Math.random() * 0.016, vstretch: 0.004, life: 2,
+          color: Math.random() < 0.75 ? TISSUE : TISSUE_PALE, gravity: 9.8, drag: 0.5, fade: 0, land: 1,
+        });
+      }
+    }
+    for (let i = 0; i < (head ? 12 : 5) * k; i++) {
+      const at = exit.clone().addScaledVector(fwd, Math.random() * 0.3 * k);
+      B.spawn({
+        pos: at, vel: cone(fwd, 0.45).multiplyScalar(0.6 + Math.random() * 2.6 * k),
+        size: (0.05 + Math.random() * 0.07) * (head ? 1.2 : 0.8), grow: 0.45 + Math.random() * 0.5,
+        life: 0.6 + Math.random() * 1.1, color: MIST, alpha: 0.22 + Math.random() * 0.2,
+        drag: 3.5, gravity: 0.35, seed: 2 + Math.random(),
       });
     }
-    for (let i = 0; i < 8; i++) {
-      const v = exit.clone().multiplyScalar(6 + Math.random() * 10).addScaledVector(up, 2 + Math.random() * 4);
-      this.alpha.spawn({
-        pos: origin.clone().addScaledVector(exit, 0.15 * i * 0.08),
-        vel: v,
-        size: 0.12 + Math.random() * 0.18,
-        grow: 2.2,
-        life: 0.9 + Math.random() * 0.8,
-        color: [0.42, 0.03, 0.025],
-        alpha: 0.5,
-        drag: 3,
-        gravity: 0.5,
+    for (let i = 0; i < (head ? 4 : 2); i++) {
+      B.spawn({
+        pos: entry, vel: cone(back, 0.5).multiplyScalar(0.4 + Math.random()),
+        size: 0.03 + Math.random() * 0.03, grow: 0.3, life: 0.5 + Math.random() * 0.4,
+        color: MIST, alpha: 0.25, drag: 4, gravity: 0.3, seed: 2 + Math.random(),
       });
     }
   }
@@ -364,6 +417,8 @@ export class Effects {
   update(dt) {
     this.add.update(dt);
     this.alpha.update(dt);
+    this.blood.update(dt);
+    this.decals.update(dt);
     if (this.flash > 0) {
       this.flash -= dt;
       if (this.flash <= 0) this.pipeline.flashLight.intensity = 0;
