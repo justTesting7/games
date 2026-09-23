@@ -78,7 +78,8 @@ export class Player {
     const aiming = holdScope || this.aimHold > 0;
     this.aimHold = Math.max(0, this.aimHold - dt);
     this.time = (this.time || 0) + dt;
-    const wantScope = !!holdScope && sniping && this.character.weapon === 'rifle' && this.character.aimWeight > 0.85;
+    const reloading = this.character.action?.type === 'reload' || this.character.action?.type === 'pistolReload';
+    const wantScope = !reloading && !!holdScope && sniping && this.character.weapon === 'rifle' && this.character.aimWeight > 0.85;
     if (wantScope && !this.scoped) this.onScope?.();
     this.scoped = wantScope;
     this.scopeT = THREE.MathUtils.clamp((this.scopeT || 0) + (this.scoped ? dt / 0.16 : -dt / 0.12), 0, 1);
@@ -200,9 +201,11 @@ export class Player {
     const { terrain, veg } = this.world;
     const k = Math.min(1, dt * 10);
     const scoped = this.scoped;
-    const through = this.scopeT > 0.55;
-    this.camDist += ((through ? 0.04 : aiming ? 1.55 : 3.1) - this.camDist) * k;
-    this.shoulder += ((through ? 0.02 : aiming ? 0.6 : 0.5) - this.shoulder) * k;
+    const reloading = this.character.action?.type === 'reload' || this.character.action?.type === 'pistolReload';
+    const through = this.scopeT > 0.55 && !reloading;
+    this.reloadLook = (this.reloadLook || 0) + ((reloading ? 1 : 0) - (this.reloadLook || 0)) * Math.min(1, dt * 8);
+    this.camDist += ((through ? 0.04 : reloading ? 1.18 : aiming ? 1.55 : 3.1) - this.camDist) * k;
+    this.shoulder += ((through ? 0.02 : reloading ? 0.4 : aiming ? 0.6 : 0.5) - this.shoulder) * k;
     const fovGoal = through ? 7.5 : aiming ? 48 : sprinting ? 66 : 60;
     this.fov += (fovGoal - this.fov) * Math.min(1, dt * (through ? 11 : 6));
     if (Math.abs(cam.fov - this.fov) > 0.01) { cam.fov = this.fov; cam.updateProjectionMatrix(); }
@@ -221,7 +224,7 @@ export class Player {
       swayYaw = (Math.sin(t * 0.83) + 0.5 * Math.sin(t * 1.9 + 1.3)) * amp;
       swayPitch = (Math.sin(t * 1.21 + 0.7) + 0.4 * Math.sin(t * 2.6)) * amp * 0.8;
     }
-    const pitch = this.camPitch + this.recoilPitch + swayPitch;
+    const pitch = this.camPitch + this.recoilPitch + swayPitch - (this.reloadLook || 0) * 0.2;
     const yaw = this.camYaw + swayYaw;
     const dir = new THREE.Vector3(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch));
     const right = new THREE.Vector3(-Math.cos(this.camYaw), 0, Math.sin(this.camYaw));

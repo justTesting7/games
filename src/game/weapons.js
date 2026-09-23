@@ -112,10 +112,12 @@ export class Weapons {
     if (f.character.weapon !== def.key) return false;
     L.reloadT = def.reload;
     f.character.startAction(def.key === 'rifle' ? 'reload' : 'pistolReload', def.reload);
-    const plan = def.key === 'rifle'
-      ? [[0.3, 'boltBack'], [0.7, 'round'], [0.95, 'round'], [1.2, 'round'], [1.45, 'round'], [1.7, 'round'], [2.1, 'boltFwd']]
-      : [[0.2, 'magOut'], [1.0, 'magIn'], [1.45, 'slide']];
-    plan.forEach(([t, kind]) => setTimeout(() => { if (L.reloading) this.sound(f, kind); }, t * 1000));
+    f.character.reloadCues = def.key === 'rifle'
+      ? [[0.38, 'boltBack'], [0.8, 'round'], [1.1, 'round'], [1.4, 'round'], [1.7, 'round'], [2.0, 'round'], [2.32, 'boltFwd']]
+      : [[0.18, 'magOut'], [0.96, 'magIn'], [1.28, 'slide']];
+    f.character.reloadCueI = 0;
+    if (f.isPlayer) { this.player.sniperPending = false; this.sniperWasScoped = false; }
+    this.sound(f, 'reloadStart');
     return true;
   }
 
@@ -163,9 +165,24 @@ export class Weapons {
     return true;
   }
 
+  playReloadCues(f) {
+    const ch = f.character;
+    const a = ch.action;
+    if (!a || (a.type !== 'reload' && a.type !== 'pistolReload') || !ch.reloadCues) {
+      ch.reloadCues = null;
+      ch.reloadCueI = 0;
+      return;
+    }
+    while (ch.reloadCueI < ch.reloadCues.length && a.t >= ch.reloadCues[ch.reloadCueI][0]) {
+      this.sound(f, ch.reloadCues[ch.reloadCueI][1]);
+      ch.reloadCueI++;
+    }
+  }
+
   tick(f, dt) {
     const L = f.loadout;
     const ch = f.character;
+    this.playReloadCues(f);
     L.cooldown -= dt;
     if (L.reloading) {
       L.reloadT -= dt;

@@ -269,12 +269,37 @@ export class Audio {
     const click = (freq, gain, rel = 0.025, q = 4) => this.noiseBurst({ freq, q, gain: gain * att, attack: 0.001, release: rel, send: 0.1 });
     const scrape = (freq, gain, rel) => this.noiseBurst({ freq, q: 1.5, gain: gain * att, attack: 0.01, release: rel, send: 0.05 });
     switch (kind) {
-      case 'boltBack': click(2600, 0.3); scrape(1800, 0.12, 0.08); break;
-      case 'boltFwd': scrape(1500, 0.1, 0.06); setTimeout(() => click(3200, 0.35, 0.03), 60); break;
-      case 'round': click(4200, 0.18, 0.02); click(1800, 0.12, 0.03); break;
-      case 'magOut': click(2200, 0.25); scrape(900, 0.1, 0.1); break;
-      case 'magIn': click(1600, 0.35, 0.03); click(3800, 0.2, 0.02); break;
-      case 'slide': click(3000, 0.3); setTimeout(() => click(2400, 0.4, 0.03), 90); break;
+      case 'reloadStart':
+        this.noiseBurst({ freq: 220, q: 0.7, type: 'lowpass', gain: 0.28 * att, attack: 0.02, release: 0.28, send: 0.12 });
+        scrape(480, 0.22, 0.22);
+        click(1400, 0.16, 0.04);
+        break;
+      case 'boltBack':
+        click(2100, 0.48); scrape(1300, 0.24, 0.12);
+        this.tone(320 + Math.random() * 40, 0.05, 0.08 * att, 'triangle');
+        break;
+      case 'boltFwd':
+        scrape(1100, 0.2, 0.09);
+        setTimeout(() => { click(2600, 0.55, 0.045); this.noiseBurst({ freq: 180, q: 0.6, type: 'lowpass', gain: 0.28 * att, attack: 0.004, release: 0.14, send: 0.1 }); }, 50);
+        break;
+      case 'round':
+        click(3600, 0.32, 0.03); click(1500, 0.22, 0.045);
+        scrape(2200, 0.12, 0.05);
+        this.tone(2400 + Math.random() * 400, 0.03, 0.05 * att, 'triangle');
+        break;
+      case 'magOut':
+        click(1900, 0.4); scrape(700, 0.2, 0.14);
+        this.noiseBurst({ freq: 160, q: 0.8, type: 'lowpass', gain: 0.22 * att, attack: 0.008, release: 0.16 });
+        break;
+      case 'magIn':
+        click(1400, 0.48, 0.04); click(3200, 0.28, 0.03);
+        this.noiseBurst({ freq: 240, q: 0.7, type: 'lowpass', gain: 0.2 * att, attack: 0.004, release: 0.1 });
+        break;
+      case 'slide':
+        click(2800, 0.42);
+        setTimeout(() => click(2200, 0.5, 0.035), 80);
+        this.noiseBurst({ freq: 200, q: 0.6, type: 'lowpass', gain: 0.18 * att, attack: 0.004, release: 0.1 });
+        break;
       case 'dry': click(5000, 0.25, 0.015, 6); break;
       case 'equip': scrape(700, 0.12, 0.12); click(2600, 0.12); break;
       case 'scope': click(2100, 0.1, 0.03); this.noiseBurst({ freq: 280, q: 0.7, type: 'lowpass', gain: 0.12 * att, attack: 0.02, release: 0.16, send: 0.08 }); break;

@@ -197,6 +197,13 @@ function rotateBoneWorld(bone, q, tmp) {
 }
 
 const smooth = (k) => { const x = Math.min(1, Math.max(0, k)); return x * x * (3 - 2 * x); };
+const gate = (t, a, b) => {
+  const d = b - a;
+  if (d <= 0) return 0;
+  const u = (t - a) / d;
+  if (u <= 0 || u >= 1) return 0;
+  return smooth(Math.min(u / 0.28, (1 - u) / 0.28, 1));
+};
 const V = Array.from({ length: 8 }, () => new THREE.Vector3());
 const UP = new THREE.Vector3(0, 1, 0);
 
@@ -507,6 +514,7 @@ export class Character {
       const slideMesh = g.children.find((c) => c.name === slide);
       g.userData.slide = slideMesh;
       g.userData.slideRest = slideMesh ? slideMesh.position.clone() : null;
+      g.userData.mag = g.children.find((c) => c.name.includes('magazine'));
       g.matrixAutoUpdate = false;
       return g;
     });
@@ -584,6 +592,7 @@ export class Character {
     this.drawn = 0;
     this.root.rotation.set(0, this.root.rotation.y, 0);
     this.actions.fall.timeScale = 1;
+    this.pistols?.forEach((p) => { if (p.userData.mag) p.userData.mag.visible = true; });
   }
 
   updateDead(dt) {
@@ -768,7 +777,12 @@ export class Character {
         f.applyAxisAngle(new THREE.Vector3().crossVectors(f, UP).normalize(), kick * 0.16).normalize();
       }
       let roll = 0;
-      if (a?.type === 'reload') roll = 0.55 * smooth(Math.min(a.t / 0.3, (a.dur - a.t) / 0.3, 1));
+      if (a?.type === 'reload') {
+        const rk = smooth(Math.min(a.t / 0.22, (a.dur - a.t) / 0.28, 1));
+        butt.copy(sh).addScaledVector(left, 0.16).addScaledVector(UP, -0.16).addScaledVector(fwd, 0.18);
+        f.copy(fwd).multiplyScalar(0.22).addScaledVector(left, 0.92).addScaledVector(UP, 0.22).normalize();
+        roll = 1.05 * rk;
+      }
       if (a?.type === 'bolt') roll = 0.18 * smooth(Math.min(a.t / 0.15, (a.dur - a.t) / 0.2, 1));
       const u = UP.clone().addScaledVector(f, -UP.dot(f)).normalize().applyAxisAngle(f, -roll);
       const r = new THREE.Vector3().crossVectors(f, u);
@@ -798,13 +812,23 @@ export class Character {
         hand.y += open * 0.02;
       } else if (a?.type === 'reload') {
         const t = a.t;
-        const toBolt = smooth((t - 0.1) / 0.2) * (1 - smooth((t - 0.5) / 0.15)) + smooth((t - 1.85) / 0.15) * (1 - smooth((t - 2.25) / 0.2));
-        const toMag = smooth((t - 0.5) / 0.15) * (1 - smooth((t - 1.75) / 0.15));
-        open = smooth((t - 0.3) / 0.15) * (1 - smooth((t - 2.0) / 0.15));
-        off = Math.max(toBolt, toMag);
-        hand = RIFLE.grip.clone().lerp(RIFLE.bolt, toBolt).lerp(RIFLE.magwell, toMag);
-        hand.x -= open * 0.085 * toBolt;
-        if (toMag > 0.5) hand.y -= Math.max(0, Math.sin(((t - 0.65) / 1.1) * Math.PI * 5)) * 0.035;
+        const bolt1 = gate(t, 0.26, 0.7);
+        const bolt2 = gate(t, 2.12, 2.62);
+        open = smooth((t - 0.36) / 0.18) * (1 - smooth((t - 2.28) / 0.16));
+        hand = RIFLE.grip.clone();
+        const boltPull = Math.max(bolt1, bolt2);
+        if (boltPull > 0.01) {
+          hand.lerp(new THREE.Vector3(RIFLE.bolt.x - open * 0.09, RIFLE.bolt.y + 0.02, RIFLE.bolt.z), boltPull);
+        }
+        const pouch = new THREE.Vector3(-0.16, -0.42, 0.2);
+        const port = RIFLE.magwell.clone();
+        for (const s of [0.74, 1.04, 1.34, 1.64, 1.94]) {
+          if (t < s || t >= s + 0.28) continue;
+          const u = (t - s) / 0.28;
+          if (u < 0.42) hand.copy(RIFLE.grip).lerp(pouch, smooth(u / 0.42));
+          else hand.copy(pouch).lerp(port, smooth((u - 0.42) / 0.58));
+        }
+        off = Math.max(boltPull, t > 0.72 && t < 2.22 ? 1 : 0);
       }
       this.boltOpen = open;
       const M = rifle.matrix;
@@ -912,6 +936,11 @@ export class Character {
     const w = this.aimWeight;
     const t = this.tmp;
     const B = this.bones;
+    if (this.action?.type === 'reload' || this.action?.type === 'pistolReload') {
+      const { fwd } = this.bodyAxes();
+      this.aimTarget.copy(this.root.position).addScaledVector(fwd, 0.45);
+      this.aimTarget.y += 1.05;
+    }
     const chest = B.Spine2.getWorldPosition(t.d);
     const dir = new THREE.Vector3().subVectors(this.aimTarget, chest).normalize();
     this.aimDir.copy(dir);
@@ -921,7 +950,8 @@ export class Character {
     const flat = new THREE.Vector3(dir.x, 0, dir.z).normalize();
     const yawErr = Math.atan2(fwd.x * flat.z - fwd.z * flat.x, fwd.dot(flat));
     const pitch = Math.asin(THREE.MathUtils.clamp(dir.y, -1, 1));
-    const lookW = Math.max(w, 0.35);
+    const lookingGun = this.action?.type === 'reload' || this.action?.type === 'pistolReload';
+    const lookW = lookingGun ? 0.82 : Math.max(w, 0.35);
     const right = new THREE.Vector3().crossVectors(new THREE.Vector3(0, 1, 0), flat).normalize();
     for (const [name, share] of [['Spine', 0.2], ['Spine1', 0.3], ['Spine2', 0.3]]) {
       const qy = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), -yawErr * share * w);
@@ -941,6 +971,7 @@ export class Character {
       rotateBoneWorld(head, q, t);
     }
 
+    if (this.action?.type === 'pistolReload') { this.applyPistolReload(); return; }
     if (w < 0.01 || this.weapon !== 'pistols') return;
     // Recoil pushes the firing shoulder back and twists the chest slightly.
     const kick = this.recoil[0] - this.recoil[1];
@@ -974,6 +1005,29 @@ export class Character {
         rotateBoneWorld(hand, new THREE.Quaternion().setFromAxisAngle(pitchAxis, r * 0.6), t);
       }
     });
+  }
+
+  applyPistolReload() {
+    const a = this.action;
+    const t = a.t;
+    const B = this.bones;
+    const { fwd, left, right } = this.bodyAxes();
+    const dip = gate(t, 0.12, 0.88);
+    const rack = gate(t, 1.18, 1.52);
+    [['Right', right], ['Left', left]].forEach(([side, out]) => {
+      const sh = B[`${side}Arm`].getWorldPosition(new THREE.Vector3());
+      const ready = sh.clone().addScaledVector(fwd, 0.32).addScaledVector(UP, -0.06).addScaledVector(out, 0.08);
+      const hip = sh.clone().addScaledVector(UP, -0.48).addScaledVector(out, 0.1).addScaledVector(fwd, 0.06);
+      const target = ready.clone().lerp(hip, dip);
+      solveArm(B, side, target,
+        sh.clone().addScaledVector(UP, -0.55).addScaledVector(out, 0.25),
+        fwd.clone().addScaledVector(UP, -0.35).normalize(), out, 1, this.tmp);
+    });
+    this.pistols.forEach((p) => {
+      const mag = p.userData.mag;
+      if (mag) mag.visible = t < 0.18 || t > 0.92;
+    });
+    this.reloadRack = rack;
   }
 
   updateFeet(dt, s) {
@@ -1077,9 +1131,16 @@ export class Character {
       }
       p.matrixWorld.copy(p.matrix);
       const sl = p.userData.slide;
+      const mag = p.userData.mag;
+      const pistolReload = this.action?.type === 'pistolReload';
+      if (mag && !pistolReload) mag.visible = true;
       if (sl && p.userData.slideRest) {
-        sl.userData.kick = Math.max(0, (sl.userData.kick || 0) - dt * 12);
-        sl.position.copy(p.userData.slideRest).x -= Math.min(1, sl.userData.kick) * 0.03;
+        if (pistolReload) {
+          sl.position.copy(p.userData.slideRest).x -= (this.reloadRack || 0) * 0.038;
+        } else {
+          sl.userData.kick = Math.max(0, (sl.userData.kick || 0) - dt * 12);
+          sl.position.copy(p.userData.slideRest).x -= Math.min(1, sl.userData.kick) * 0.03;
+        }
       }
       p.children.forEach((c) => c.updateMatrixWorld(true));
     });
