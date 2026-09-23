@@ -20,6 +20,11 @@ export const PERSONAS = [
     personality: 'a patient sharpshooter who fights from cover at medium range and retreats when hurt',
     accuracy: 0.8, fireInterval: 0.34, reaction: 0.55,
   },
+  {
+    id: 'novak', name: 'Novak', outfit: 'olive', color: '#c8d46a',
+    personality: 'a demolitionist who spams grenades to flush enemies from cover, then picks them off at medium range',
+    accuracy: 0.95, fireInterval: 0.28, reaction: 0.45, grenadier: true,
+  },
 ];
 
 export const TACTICS = {
@@ -64,7 +69,7 @@ export class Rival {
     this.aimErrGoal = new THREE.Vector3();
     this.lookPoint = new THREE.Vector3();
     this.fighter = combat.add({ id: persona.id, name: persona.name, character, pos: this.pos, color: persona.color });
-    this.fighter.loadout = new Loadout(2);
+    this.fighter.loadout = new Loadout(persona.grenadier ? 3 : 2);
     this.cols = [];
     this.memory = new Map();
     this.reset();
@@ -248,7 +253,10 @@ export class Rival {
     if (L.has('rifle')) weapons.rifle = GUNS.rifle;
     const tp = this.threatPos();
     const td = tp ? tp.distanceTo(this.pos) : Infinity;
-    if (L.grenades > 0 && td > 8 && td < 30 && !danger) weapons.grenade = GUNS.grenade;
+    if (L.grenades > 0 && !danger) {
+      const inRange = td > (this.persona.grenadier ? 5 : 8) && td < (this.persona.grenadier ? 38 : 30);
+      if (inRange) weapons.grenade = this.persona.grenadier ? `${GUNS.grenade} (your specialty — use often)` : GUNS.grenade;
+    }
     if (Object.keys(weapons).length > 1) {
       questions.weapon = {
         type: 'choice',
@@ -299,6 +307,11 @@ export class Rival {
       choice = d > 22 && L.has('rifle') ? 'rifle' : L.has('pistols') ? 'pistols' : 'rifle';
       const hidden = this.target && !this.seen(this.target).visible && this.seen(this.target).lastT > -50;
       if (offered.grenade && hidden && Math.random() < 0.3) choice = 'grenade';
+    }
+    if (this.persona.grenadier && offered.grenade && this.fighter.loadout.grenades > 0) {
+      const d = this.target ? this.threatPos()?.distanceTo(this.pos) ?? 20 : 20;
+      const hidden = this.target && !this.seen(this.target).visible;
+      if (d > 5 && d < 38 && (hidden || Math.random() < 0.62)) choice = 'grenade';
     }
     if (choice === 'grenade') {
       this.want = 'grenade';
@@ -487,7 +500,10 @@ export class Rival {
         const from = this.pos.clone().setY(this.pos.y + 1.75);
         const spot = this.throwAt.clone().add(new THREE.Vector3(gauss() * 1.4, 0, gauss() * 1.4));
         const lob = !(this.target && this.seen(this.target).visible);
-        L.throwVel.copy(Weapons.aimThrow(from, spot, WEAPONS.grenade.speed, lob));
+        const dist = from.distanceTo(spot);
+        const charge = THREE.MathUtils.clamp((dist - 6) / 28, 0.15, 1);
+        const speed = THREE.MathUtils.lerp(WEAPONS.grenade.speedMin, WEAPONS.grenade.speedMax, charge);
+        L.throwVel.copy(Weapons.aimThrow(from, spot, speed, lob));
         if (this.weapons.trigger(f, this.aimPoint)) { this.throwAt = null; this.want = this.gun; }
       }
     }

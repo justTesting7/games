@@ -31,7 +31,7 @@ The first `npm run dev` (or `npm run build`) downloads about 100 MB of third-par
 | C | Toggle walk / jog |
 | Space | Jump |
 | Right mouse | Aim: pistols over the shoulder, rifle scope, or the grenade throw arc |
-| Left mouse | Fire or throw (also raises the gun from the hip) |
+| Left mouse | Fire; with grenades, **hold** to throw farther, **tap** for a short toss (arc preview while holding) |
 | 1 / 2 / 3, wheel, Q | Dual pistols / bolt-action rifle / stick grenades |
 | R | Reload (restarts the round once it is over) |
 | Enter | Restart the round |

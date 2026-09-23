@@ -31,6 +31,8 @@ html, body {
   background: #fff; border-radius: 50%; box-shadow: 0 0 2px #000;
 }
 #crosshair.idle { opacity: 0.35; }
+#crosshair.grenade { opacity: 1; }
+#crosshair.grenade b { box-shadow: 0 0 8px rgba(255, 170, 60, 0.9); background: #ffb347; }
 #hitmarker {
   position: absolute; left: 50%; top: 50%; width: 22px; height: 22px;
   transform: translate(-50%, -50%) rotate(45deg); opacity: 0;
@@ -49,6 +51,28 @@ html, body {
   box-shadow: 0 0 12px rgba(255, 80, 40, 0.85);
 }
 #crosshair.enemy i, #crosshair.enemy b { background: #ff5a4a; }
+
+#grenadecharge {
+  position: absolute; left: 50%; top: calc(50% + 52px); transform: translateX(-50%);
+  width: 160px; opacity: 0; pointer-events: none; text-align: center; transition: opacity 0.12s;
+}
+#grenadecharge.show { opacity: 1; }
+#grenadecharge i {
+  display: block; height: 7px; margin-bottom: 5px; border-radius: 4px;
+  background: rgba(0, 0, 0, 0.45); box-shadow: 0 0 0 1px rgba(255, 220, 120, 0.25);
+  overflow: hidden; position: relative;
+}
+#grenadecharge i::after {
+  content: ''; position: absolute; inset: 0 auto 0 0; width: var(--pct, 0%);
+  background: linear-gradient(90deg, #ffe08a, #ff6a2a);
+  box-shadow: 0 0 10px rgba(255, 120, 40, 0.75);
+  transition: width 0.05s linear;
+}
+#grenadecharge.full i::after { box-shadow: 0 0 16px rgba(255, 90, 30, 1); }
+#grenadecharge small {
+  font-size: 10px; letter-spacing: 2px; text-transform: uppercase; opacity: 0.85;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.9);
+}
 
 #health, #weapon, #round {
   position: absolute; display: flex; flex-direction: column;

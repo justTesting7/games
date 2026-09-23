@@ -12,7 +12,8 @@ export const WEAPONS = {
   },
   grenade: {
     key: 'grenade', name: 'Stick grenades', short: 'grenade', slot: 3,
-    count: 3, fuse: 3.4, radius: 8, damage: 120, speed: 16,
+    count: 3, fuse: 3.4, radius: 8, damage: 120,
+    speed: 16, speedMin: 7, speedMax: 24, chargeMax: 1.35,
   },
 };
 export const SLOTS = ['pistols', 'rifle', 'grenade'];
@@ -62,6 +63,8 @@ export class Weapons {
     this.onExplosion = null;
     this.live = [];
     this.template = null;
+    this.grenadeCharge = 0;
+    this.chargingGrenade = false;
 
     const n = 64;
     const geo = new THREE.BufferGeometry();
@@ -70,6 +73,8 @@ export class Weapons {
     this.arc.frustumCulled = false;
     this.arc.visible = false;
     this.marker = new THREE.Mesh(new THREE.RingGeometry(0.35, 0.45, 32).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: new THREE.Color(2.2, 1.9, 1.3) }));
+    this.markerMat = this.marker.material;
+    this.arcMat = this.arc.material;
     this.marker.visible = false;
     fx.pipeline.scene.add(this.arc, this.marker);
   }
@@ -81,6 +86,7 @@ export class Weapons {
   equip(f, key) {
     const L = f.loadout;
     if (key === L.current || !L.has(key)) return false;
+    if (f.isPlayer) { this.chargingGrenade = false; this.grenadeCharge = 0; }
     L.current = key;
     L.reloadT = 0;
     L.autoReload = 0;
@@ -383,12 +389,33 @@ export class Weapons {
     this.queued = Math.max(0, this.queued - dt);
 
     if (L.current === 'grenade') {
-      const vel = this.playerThrowVelocity();
-      L.throwVel.copy(vel);
-      if (this.queued > 0) this.player.aimHold = Math.max(this.player.aimHold, 0.9);
-      if (this.queued > 0 && this.player.facingError < 0.4 && this.trigger(f, this.player.aimPoint)) this.queued = 0;
-      this.updateArc(input.aim && ch.weapon === 'grenade' && L.grenades > 0 && !ch.action, vel);
+      const gdef = WEAPONS.grenade;
+      const canToss = ch.weapon === 'grenade' && L.grenades > 0 && !ch.action && ch.equipT >= 1;
+      if (input.fire && canToss) {
+        this.chargingGrenade = true;
+        this.grenadeCharge = Math.min(1, this.grenadeCharge + dt / gdef.chargeMax);
+        this.player.aimHold = Math.max(this.player.aimHold, 1.4);
+      } else if (this.chargingGrenade && !input.fire) {
+        const charge = Math.max(0.06, this.grenadeCharge);
+        const speed = THREE.MathUtils.lerp(gdef.speedMin, gdef.speedMax, charge);
+        L.throwVel.copy(this.playerThrowVelocity(speed));
+        if (this.player.facingError < 0.45) this.trigger(f, this.player.aimPoint);
+        this.chargingGrenade = false;
+        this.grenadeCharge = 0;
+      } else if (!input.fire) {
+        this.chargingGrenade = false;
+        this.grenadeCharge = Math.max(0, this.grenadeCharge - dt * 4);
+      }
+      const preview = this.chargingGrenade ? this.grenadeCharge : (input.aim ? 0.45 : 0.12);
+      const previewSpeed = THREE.MathUtils.lerp(gdef.speedMin, gdef.speedMax, preview);
+      L.throwVel.copy(this.playerThrowVelocity(previewSpeed));
+      ch.grenadeWindup = this.chargingGrenade ? this.grenadeCharge : 0;
+      const showArc = canToss && (this.chargingGrenade || input.aim);
+      this.updateArc(showArc, L.throwVel, this.chargingGrenade ? this.grenadeCharge : preview);
     } else {
+      this.chargingGrenade = false;
+      this.grenadeCharge = 0;
+      this.character.grenadeWindup = 0;
       this.updateArc(false);
       const firing = (def.auto && input.fire) || this.queued > 0;
       if (firing) {
@@ -410,18 +437,23 @@ export class Weapons {
     this.tick(f, dt);
   }
 
-  playerThrowVelocity() {
+  playerThrowVelocity(speed = WEAPONS.grenade.speed) {
     const d = new THREE.Vector3();
     this.player.camera.getWorldDirection(d);
-    d.y += 0.28;
-    d.normalize().multiplyScalar(WEAPONS.grenade.speed);
-    return d.addScaledVector(this.player.vel, 0.5);
+    d.y += 0.22 + 0.14 * ((speed - WEAPONS.grenade.speedMin) / (WEAPONS.grenade.speedMax - WEAPONS.grenade.speedMin));
+    d.normalize().multiplyScalar(speed);
+    return d.addScaledVector(this.player.vel, 0.35 + 0.25 * (speed / WEAPONS.grenade.speedMax));
   }
 
-  updateArc(show, vel) {
+  updateArc(show, vel, charge = 0) {
     this.arc.visible = show;
     this.marker.visible = show;
     if (!show) return;
+    const c = THREE.MathUtils.clamp(charge, 0, 1);
+    const col = new THREE.Color().setHSL(0.12 - c * 0.08, 1, 0.45 + c * 0.25);
+    this.arcMat.color.copy(col).multiplyScalar(1.6 + c * 1.4);
+    this.markerMat.color.copy(col).multiplyScalar(2 + c * 2);
+    this.marker.scale.setScalar(0.85 + c * 1.15);
     const p = this.player.pos.clone().setY(this.player.pos.y + 1.75);
     const right = new THREE.Vector3(-Math.cos(this.player.yaw), 0, Math.sin(this.player.yaw));
     p.addScaledVector(right, 0.2);

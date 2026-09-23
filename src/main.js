@@ -214,7 +214,7 @@ async function init() {
       let at = null;
       for (let k = 0; k < 80 && !at; k++) {
         const spreadAll = k > 30 ? (Math.random() - 0.5) * Math.PI * 2 : 0;
-        const ang = player.yaw + (i ? -1 : 1) * (0.3 + Math.random() * 0.5) + spreadAll;
+        const ang = player.yaw + (i - (rivals.length - 1) / 2) * 0.55 + (Math.random() - 0.5) * 0.35 + spreadAll;
         const dist = 18 + Math.random() * 10;
         const x = p.x + Math.sin(ang) * dist, z = p.z + Math.cos(ang) * dist;
         const h = terrain.heightAt(x, z);
@@ -295,7 +295,7 @@ async function init() {
       banner('Eliminated', `${who} got you. Press R to fight again.`, 'show lost');
     } else if (rivals.every((r) => !r.fighter.alive) && player.fighter.alive) {
       round.state = 'over';
-      banner('Victory', 'You outlasted both rivals. Press R to fight again.', 'show won');
+      banner('Victory', `You outlasted all ${rivals.length} rivals. Press R to fight again.`, 'show won');
     }
   };
   weapons.onNearMiss = (miss) => audio.whiz(miss);
@@ -407,7 +407,7 @@ async function init() {
     input.restart = false;
     if (round.state === 'countdown') {
       round.t -= dt;
-      banner(round.t > 0 ? `${Math.ceil(round.t)}` : 'Fight', 'Two rivals are closing in. Last one standing wins.', 'show countdown');
+      banner(round.t > 0 ? `${Math.ceil(round.t)}` : 'Fight', `${rivals.length} rivals are closing in. Last one standing wins.`, 'show countdown');
       if (round.t <= -0.6) { round.state = 'fight'; banner('', '', ''); }
     }
 
@@ -441,9 +441,17 @@ async function init() {
     const L = player.fighter.loadout;
     const wdef = WEAPONS[L.current];
     $('ammo').textContent = L.current === 'grenade' ? `${L.grenades}` : `${L.mag[L.current]} / ${L.reserve[L.current]}`;
-    $('weaponname').textContent = L.reloading ? 'reloading…' : wdef.name;
+    $('weaponname').textContent = weapons.chargingGrenade ? 'pull back… release to throw'
+      : L.reloading ? 'reloading…' : wdef.name;
     $('weapon').classList.toggle('reloading', L.reloading);
     $('weapon').classList.toggle('empty', L.current !== 'grenade' && L.mag[L.current] === 0);
+    const gch = $('grenadecharge');
+    const charging = alive && L.current === 'grenade' && weapons.chargingGrenade;
+    gch.classList.toggle('show', charging);
+    gch.classList.toggle('full', charging && weapons.grenadeCharge > 0.98);
+    const gbar = gch.querySelector('i');
+    if (gbar) gbar.style.setProperty('--pct', charging ? `${(weapons.grenadeCharge * 100).toFixed(0)}%` : '0%');
+    $('crosshair').classList.toggle('grenade', charging);
     document.querySelectorAll('#slots b').forEach((el, i) => {
       const key = ['pistols', 'rifle', 'grenade'][i];
       el.classList.toggle('on', key === L.current);

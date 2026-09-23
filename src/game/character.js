@@ -52,6 +52,7 @@ export const OUTFITS = {
   adventurer: { top: [0.16, 0.42, 0.44], trousers: [0.30, 0.27, 0.17], boots: [0.36, 0.22, 0.12], hair: 0x2a1a10 },
   crimson: { top: [0.46, 0.06, 0.05], trousers: [0.09, 0.09, 0.1], boots: [0.16, 0.11, 0.08], hair: 0x0d0907 },
   ivory: { top: [0.5, 0.49, 0.45], trousers: [0.1, 0.13, 0.23], boots: [0.28, 0.2, 0.13], hair: 0x6b4a2a },
+  olive: { top: [0.22, 0.28, 0.14], trousers: [0.14, 0.16, 0.1], boots: [0.2, 0.16, 0.1], hair: 0x1a140e },
 };
 
 // Turns the stock outfit into a tank top, cargo trousers and leather boots
@@ -206,6 +207,7 @@ export class Character {
     this.weights = {};
     this.state = 'idle';
     this.aimWeight = 0;
+    this.grenadeWindup = 0;
     this.aimTarget = new THREE.Vector3();
     this.aimDir = new THREE.Vector3(0, 0, 1);
     this.recoil = [0, 0];
@@ -442,6 +444,7 @@ export class Character {
     this.boltOpen = 0;
     this.aimT = 0;
     this.aimWeight = 0;
+    this.grenadeWindup = 0;
     this.drawn = 0;
     this.root.rotation.set(0, this.root.rotation.y, 0);
     this.actions.fall.timeScale = 1;
@@ -458,6 +461,7 @@ export class Character {
     if (d.t > 0.7) this.actions.fall.timeScale = Math.max(0, this.actions.fall.timeScale - dt * 3);
     this.aimT = 0;
     this.aimWeight = 0;
+    this.grenadeWindup = 0;
     this.drawn = 0;
     this.mixer.update(dt);
     this.root.updateMatrixWorld(true);
@@ -693,6 +697,7 @@ export class Character {
     const aimK = this.aimWeight;
     let t = -1;
     if (a?.type === 'throw') t = (a.t / a.dur) * THROW.dur;
+    else if (this.grenadeWindup > 0) t = 0.04 + this.grenadeWindup * 0.26;
     else if (aimK > 0.01) t = 0.3 * aimK;
     if (t < 0) return;
     const { fwd, left, right } = this.bodyAxes();
