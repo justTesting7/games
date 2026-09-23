@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { GRID_N, GRID_SPACING, WORLD_SIZE, HALF_WORLD, CHUNK_SIZE, CHUNKS, WORLD_SEED } from './constants.js';
 import { heightSampleGLSL } from '../engine/shaders.js';
 import { loadTextureArray, VENDOR } from '../engine/assets.js';
+import { CITY } from './cityLayout.js';
 
 export const LAYERS = ['sand', 'grass', 'forest', 'rock'];
 
@@ -100,6 +101,9 @@ uniform highp sampler2DArray tArm;
 uniform float uWorldSize;
 uniform float uTime;
 uniform float uUrban;
+uniform float uStreetPitch;
+uniform float uBlockW;
+uniform float uStreetW;
 varying vec3 vWPos;
 ${heightSampleGLSL}
 
@@ -178,6 +182,37 @@ tAlb *= mix(1.0, 0.55, wet);
 float tRough = mix(tArmS.g, 0.22, wet);
 float tAO = mix(tArmS.r, 1.0, 0.3);
 tNrmW = normalize(mix(tNrmW, nW, wet * 0.6 + smoothstep(60.0, 300.0, dist) * 0.5));
+
+if (uUrban > 0.5) {
+  float pitch = uStreetPitch;
+  float halfStreet = uStreetW * 0.5;
+  float wx = vWPos.x, wz = vWPos.z;
+  float rx = abs(mod(wx, pitch)); rx = min(rx, pitch - rx);
+  float rz = abs(mod(wz, pitch)); rz = min(rz, pitch - rz);
+  float dNS = pitch * 0.5 - rx;
+  float dEW = pitch * 0.5 - rz;
+  float onNS = 1.0 - smoothstep(halfStreet - 0.2, halfStreet + 0.2, dNS);
+  float onEW = 1.0 - smoothstep(halfStreet - 0.2, halfStreet + 0.2, dEW);
+  float onRoad = max(onNS, onEW);
+  float inter = onNS * onEW;
+  tAlb *= mix(1.0, 0.78, onRoad * 0.9);
+  float midNS = 1.0 - smoothstep(0.05, 0.13, dNS);
+  float midEW = 1.0 - smoothstep(0.05, 0.13, dEW);
+  float dashZ = step(0.38, fract(wz * 0.2));
+  float dashX = step(0.38, fract(wx * 0.2));
+  float paintNS = midNS * (1.0 - inter) * dashZ * onNS;
+  float paintEW = midEW * (1.0 - inter) * dashX * onEW;
+  float edgeNS = (1.0 - smoothstep(0.07, 0.16, abs(dNS - (halfStreet - 0.55)))) * onNS * (1.0 - inter);
+  float edgeEW = (1.0 - smoothstep(0.07, 0.16, abs(dEW - (halfStreet - 0.55)))) * onEW * (1.0 - inter);
+  float zebraNS = onNS * (1.0 - inter) * (1.0 - smoothstep(halfStreet + 0.15, halfStreet + 3.4, dEW)) * step(0.42, fract(wx * 0.65));
+  float zebraEW = onEW * (1.0 - inter) * (1.0 - smoothstep(halfStreet + 0.15, halfStreet + 3.4, dNS)) * step(0.42, fract(wz * 0.65));
+  float yellow = max(paintNS, paintEW);
+  float white = max(max(zebraNS, zebraEW), max(edgeNS, edgeEW) * 0.65);
+  float paint = max(yellow, white) * 0.82;
+  tAlb = mix(tAlb, mix(vec3(0.84, 0.82, 0.74), vec3(0.82, 0.7, 0.18), yellow / max(paint, 1e-4)), paint);
+  tRough = mix(tRough, 0.5, paint);
+}
+
 diffuseColor.rgb *= tAlb;
 `;
 
@@ -216,6 +251,9 @@ export class Terrain {
       uWorldSize: { value: WORLD_SIZE },
       uTime: { value: 0 },
       uUrban: { value: urban ? 1 : 0 },
+      uStreetPitch: { value: CITY.pitch },
+      uBlockW: { value: CITY.blockW },
+      uStreetW: { value: CITY.streetW },
     };
 
     this.material = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, metalness: 0 });

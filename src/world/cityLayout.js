@@ -2,27 +2,50 @@ import { mulberry32, makeNoise } from './noise.js';
 import { GRID_N, GRID_SPACING, HALF_WORLD } from './constants.js';
 
 export const CITY = {
-  streetW: 11,
+  streetW: 16,
   blockW: 48,
-  pitch: 59,
+  pitch: 64,
+  sidewalkW: 3.5,
   halfBlocks: 4,
   baseY: 2.05,
-  curb: 0.14,
+  curb: 0.18,
   playRadius: 210,
 };
 
+const wrapDist = (v, period) => {
+  const r = ((v % period) + period) % period;
+  return Math.min(r, period - r);
+};
+
 export function cityCell(x, z) {
-  const { pitch, halfBlocks } = CITY;
+  const { pitch, halfBlocks, blockW, streetW, sidewalkW } = CITY;
   const bx = Math.floor(x / pitch + (halfBlocks + 0.5));
   const bz = Math.floor(z / pitch + (halfBlocks + 0.5));
   const lx = x - (bx - halfBlocks) * pitch - pitch * 0.5;
   const lz = z - (bz - halfBlocks) * pitch - pitch * 0.5;
   const ax = Math.abs(lx), az = Math.abs(lz);
-  const halfInner = CITY.blockW * 0.5;
-  const halfStreet = CITY.streetW * 0.5;
-  const onStreet = ax > halfInner || az > halfInner;
-  const onSidewalk = onStreet && (ax < halfInner + CITY.curb + 0.6 && az < halfInner + CITY.curb + 0.6);
-  return { bx, bz, lx, lz, onStreet, onSidewalk, halfInner };
+  const halfInner = blockW * 0.5;
+  const halfStreet = streetW * 0.5;
+  const insideX = ax <= halfInner;
+  const insideZ = az <= halfInner;
+  const onStreet = !insideX || !insideZ;
+  const fromCurbX = ax - halfInner;
+  const fromCurbZ = az - halfInner;
+  const onSidewalk = onStreet && (
+    (insideZ && fromCurbX > 0 && fromCurbX < sidewalkW)
+    || (insideX && fromCurbZ > 0 && fromCurbZ < sidewalkW)
+    || (!insideX && !insideZ && fromCurbX < sidewalkW && fromCurbZ < sidewalkW)
+  );
+  const distNS = pitch * 0.5 - wrapDist(x, pitch);
+  const distEW = pitch * 0.5 - wrapDist(z, pitch);
+  const onNS = distNS < halfStreet;
+  const onEW = distEW < halfStreet;
+  const intersection = onNS && onEW;
+  const onRoad = onStreet && !onSidewalk;
+  return {
+    bx, bz, lx, lz, ax, az, onStreet, onSidewalk, onRoad, onNS, onEW, intersection,
+    halfInner, distNS, distEW, fromCurbX, fromCurbZ,
+  };
 }
 
 const KIND = { plaza: 0, street: 1, intact: 2, damaged: 3, ruined: 4, lot: 5, crater: 6 };
@@ -182,21 +205,21 @@ export function cityHeightAt(x, z, layout, noise) {
   }
   const cell = cityCell(x, z);
   let h = baseY;
-  if (cell.onStreet && !cell.onSidewalk) h -= 0.06;
+  if (cell.onRoad) h -= 0.12;
   else if (cell.onSidewalk) h += curb;
 
   const blk = layout.blocks.find((b) => b.bx === cell.bx && b.bz === cell.bz);
-  if (blk?.kind === KIND.crater) {
+  if (blk?.kind === KIND.crater && !cell.onRoad) {
     const dx = x - blk.cx, dz = z - blk.cz;
     const d = Math.hypot(dx, dz);
     h -= Math.max(0, 1 - d / 16) * 2.8;
   }
-  if (blk?.kind === KIND.lot || blk?.kind === KIND.ruined) {
+  if ((blk?.kind === KIND.lot || blk?.kind === KIND.ruined) && !cell.onStreet) {
     const n = noise.fbm2(x * 0.08, z * 0.08, 3);
     h += (n * 0.5 + 0.5) * 0.9;
   }
   const rubble = noise.fbm2(x * 0.15 + 3, z * 0.15, 2) * 0.35;
-  h += rubble;
+  h += cell.onRoad ? rubble * 0.06 : cell.onSidewalk ? rubble * 0.12 : rubble;
   return h;
 }
 
@@ -204,7 +227,7 @@ export function cityBiomeAt(x, z, layout) {
   const cell = cityCell(x, z);
   const blk = layout.blocks.find((b) => b.bx === cell.bx && b.bz === cell.bz);
   let sand = 0, grass = 0, rock = 0, forest = 0;
-  if (cell.onStreet && !cell.onSidewalk) sand = 1;
+  if (cell.onRoad) sand = 1;
   else if (cell.onSidewalk) grass = 1;
   else if (blk?.kind === KIND.lot || blk?.kind === KIND.plaza) forest = 0.65 + (blk.kind === KIND.plaza ? 0.2 : 0);
   else if (blk?.kind === KIND.crater || blk?.kind === KIND.ruined) rock = 0.85;
