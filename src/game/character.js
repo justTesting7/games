@@ -893,17 +893,19 @@ export class Character {
     if (k < 0.01) return;
     const B = this.bones;
     if (!B.Hips) return;
-    B.Hips.position.y -= 0.38 * k;
+    B.Hips.position.y -= 0.78 * k;
     B.Hips.updateMatrixWorld(true);
     const right = this.bodyAxes().right;
-    const qThigh = new THREE.Quaternion().setFromAxisAngle(right, 0.92 * k);
-    const qShin = new THREE.Quaternion().setFromAxisAngle(right, -1.55 * k);
-    const qSpine = new THREE.Quaternion().setFromAxisAngle(right, 0.18 * k);
+    const qThigh = new THREE.Quaternion().setFromAxisAngle(right, 1.28 * k);
+    const qShin = new THREE.Quaternion().setFromAxisAngle(right, -2.15 * k);
+    const qSpine = new THREE.Quaternion().setFromAxisAngle(right, 0.48 * k);
+    const qSpine1 = new THREE.Quaternion().setFromAxisAngle(right, 0.22 * k);
     if (B.LeftUpLeg) rotateBoneWorld(B.LeftUpLeg, qThigh, this.tmp);
     if (B.RightUpLeg) rotateBoneWorld(B.RightUpLeg, qThigh, this.tmp);
     if (B.LeftLeg) rotateBoneWorld(B.LeftLeg, qShin, this.tmp);
     if (B.RightLeg) rotateBoneWorld(B.RightLeg, qShin, this.tmp);
     if (B.Spine) rotateBoneWorld(B.Spine, qSpine, this.tmp);
+    if (B.Spine1) rotateBoneWorld(B.Spine1, qSpine1, this.tmp);
   }
 
   applyAim(s) {

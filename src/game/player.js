@@ -3,7 +3,7 @@ import * as THREE from 'three';
 const GRAVITY = 16;
 const JUMP_V = 5.4;
 const RADIUS = 0.3;
-const SPEED = { walk: 1.7, jog: 3.9, sprint: 6.3, aim: 3.0, aimWalk: 1.6, crouch: 1.25 };
+const SPEED = { walk: 1.7, jog: 3.9, sprint: 6.3, aim: 3.0, aimWalk: 1.6, crouch: 0.95 };
 
 const wrapAngle = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 
@@ -148,7 +148,7 @@ export class Player {
       this.vel.z *= 0.2;
     }
 
-    const standH = 1.7 - this.crouchT * 0.68;
+    const standH = 1.7 - this.crouchT * 1.05;
     this.world.veg.colliders.resolveXZ(next, RADIUS, next.y, next.y + standH);
     this.world.props.collidePlayer(next, RADIUS, this.vel, standH);
     for (const f of this.world.combat.fighters) {
@@ -224,7 +224,7 @@ export class Player {
     const yaw = this.camYaw + swayYaw;
     const dir = new THREE.Vector3(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch));
     const right = new THREE.Vector3(-Math.cos(this.camYaw), 0, Math.sin(this.camYaw));
-    const eye = (through ? 1.64 : aiming ? 1.58 : 1.55) - this.crouchT * 0.55;
+    const eye = (through ? 1.64 : aiming ? 1.58 : 1.55) - this.crouchT * 0.92;
     const pivot = this.pos.clone().add(new THREE.Vector3(0, eye, 0));
     const smoothPivot = this.smoothPivot || pivot.clone();
     smoothPivot.x = pivot.x;
