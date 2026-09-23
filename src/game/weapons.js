@@ -58,6 +58,7 @@ export class Weapons {
     this.audio = audio;
     this.combat = combat;
     this.queued = 0;
+    this.sniperHeld = false;
     this.onHit = null;
     this.onNearMiss = null;
     this.onExplosion = null;
@@ -89,7 +90,7 @@ export class Weapons {
   equip(f, key) {
     const L = f.loadout;
     if (key === L.current || !L.has(key)) return false;
-    if (f.isPlayer) { this.chargingGrenade = false; this.grenadeCharge = 0; this.pendingThrow = 0; }
+    if (f.isPlayer) { this.chargingGrenade = false; this.grenadeCharge = 0; this.pendingThrow = 0; this.sniperHeld = false; }
     L.current = key;
     L.reloadT = 0;
     L.autoReload = 0;
@@ -415,7 +416,7 @@ export class Weapons {
     }
     if (input.reload) this.reload(f);
     const def = WEAPONS[L.current];
-    if (input.firePressed) this.queued = L.current === 'rifle' ? 1.1 : 0.5;
+    if (L.current !== 'rifle' && input.firePressed) this.queued = 0.5;
     this.queued = Math.max(0, this.queued - dt);
 
     if (L.current === 'grenade') {
@@ -455,13 +456,25 @@ export class Weapons {
       this.grenadeCharge = 0;
       this.character.grenadeWindup = 0;
       this.updateArc(false);
-      const firing = (def.auto && input.fire) || this.queued > 0;
+      if (L.current === 'rifle') {
+        // Hold left mouse to scope; the shot goes on release.
+        if (input.fire) {
+          this.player.aimHold = 1.2;
+          this.sniperHeld = true;
+        } else if (input.fireReleased && this.sniperHeld) {
+          this.sniperHeld = false;
+          this.queued = 1.2;
+        } else if (!input.fire) {
+          this.sniperHeld = false;
+        }
+      }
+      const firing = L.current === 'rifle'
+        ? this.queued > 0 && !input.fire
+        : (def.auto && input.fire) || this.queued > 0;
       if (firing) {
-        // Firing from the hip turns her to the target and raises the gun
-        // first; a quick click is remembered until it is up.
         this.player.aimHold = 1.2;
         const ready = ch.aimWeight > 0.8 && this.player.facingError < 0.35;
-        const spread = L.current === 'rifle' ? (this.player.scoped ? def.spread : def.hipSpread) : def.spread;
+        const spread = L.current === 'rifle' ? (this.player.scopeT > 0.4 ? def.spread : def.hipSpread) : def.spread;
         const side = L.side;
         if (ready && this.trigger(f, this.player.aimPoint, spread)) {
           this.queued = 0;

@@ -65,11 +65,13 @@ export class Player {
 
   update(dt, input) {
     const { terrain } = this.world;
-    const aiming = input.aim || this.aimHold > 0;
+    const weapon = this.fighter?.loadout.current;
+    const sniping = weapon === 'rifle';
+    const holdScope = sniping ? (input.fire || input.fireReleased) : input.aim;
+    const aiming = holdScope || this.aimHold > 0;
     this.aimHold = Math.max(0, this.aimHold - dt);
     this.time = (this.time || 0) + dt;
-    const weapon = this.fighter?.loadout.current;
-    const wantScope = !!input.aim && weapon === 'rifle' && this.character.weapon === 'rifle' && this.character.aimWeight > 0.85;
+    const wantScope = !!holdScope && sniping && this.character.weapon === 'rifle' && this.character.aimWeight > 0.85;
     if (wantScope && !this.scoped) this.onScope?.();
     this.scoped = wantScope;
     this.scopeT = THREE.MathUtils.clamp((this.scopeT || 0) + (this.scoped ? dt / 0.16 : -dt / 0.12), 0, 1);

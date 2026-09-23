@@ -108,7 +108,7 @@ canvas.addEventListener('mousedown', (e) => {
   if (e.button === 2) input.aim = true;
 });
 addEventListener('mouseup', (e) => {
-  if (e.button === 0) input.fire = false;
+  if (e.button === 0) { input.fire = false; input.fireReleased = true; }
   if (e.button === 2) input.aim = false;
 });
 addEventListener('contextmenu', (e) => e.preventDefault());
@@ -282,6 +282,8 @@ async function init() {
     character.equipT = 1;
     weapons.live.forEach((g) => g.mesh.removeFromParent());
     weapons.live = [];
+    weapons.queued = 0;
+    weapons.sniperHeld = false;
     fx.decals.clear();
     spawnRivals();
     $('feed').innerHTML = '';
@@ -464,6 +466,7 @@ async function init() {
     input.reload = false;
     weapons.updateGrenades(dt);
     input.firePressed = false;
+    input.fireReleased = false;
     const active = locked && (round.state === 'fight' || round.state === 'over');
     rivals.forEach((r) => r.update(dt, active));
     combat.update(dt);
@@ -484,7 +487,7 @@ async function init() {
     $('scope').classList.toggle('steady', scoped && player.holdingBreath);
     if (scoped) {
       $('scopedist').textContent = `${Math.round(player.aimPoint.distanceTo(player.pos))} m`;
-      $('scopehint').textContent = player.holdingBreath ? 'steady' : player.breath < 0.08 ? 'out of breath' : 'shift · hold breath';
+      $('scopehint').textContent = player.holdingBreath ? 'steady' : player.breath < 0.08 ? 'out of breath' : 'release to fire · shift steadies';
       $('breathbar').style.setProperty('--pct', `${(player.breath * 100).toFixed(0)}%`);
     }
     const L = player.fighter.loadout;
