@@ -18,6 +18,45 @@ const CLIPS = {
   fall: 'F_Falling_Idle_000',
 };
 
+const CLIPS_M = {
+  idle: 'm/M_Standing_Idle_001',
+  walk: 'm/M_Walk_001',
+  walkBack: 'm/M_Walk_Backwards_001',
+  walkLeft: 'm/M_Walk_Strafe_Left_002',
+  walkRight: 'm/M_Walk_Strafe_Right_002',
+  jog: 'm/M_Jog_001',
+  jogBack: 'm/M_Jog_Backwards_001',
+  jogLeft: 'm/M_Jog_Strafe_Left_001',
+  jogRight: 'm/M_Jog_Strafe_Right_001',
+  run: 'm/M_Run_001',
+  jumpJog: 'm/F_Jog_Jump_Small_001',
+  jumpRun: 'm/F_Run_Jump_001',
+  fall: 'm/F_Falling_Idle_000',
+};
+
+// Atlas regions are [x0, y0, x1, y1] in the 1024 texture. `logo` patches
+// copy plain cloth over the print: [sx, sy, w, h, dx, dy].
+const BODIES = {
+  f: {
+    avatar: 'Feminine_TPose', clips: CLIPS, braid: true,
+    logo: [[150, 790, 90, 60, 150, 715], [340, 790, 120, 70, 340, 705]],
+    top: [0, 512, 512, 1024], topGain: 1, topMax: 1,
+    trousers: [512, 0, 1024, 512],
+    boots: [768, 512, 1024, 768], boot: (l) => 0.35 + l * 0.9,
+    rough: [[0, 512, 512, 512, 0.82], [512, 0, 512, 512, 0.9], [768, 512, 256, 256, 0.5], [512, 512, 256, 256, 0.15]],
+  },
+  m: {
+    avatar: 'm/Masculine_TPose', clips: CLIPS_M, braid: false,
+    logo: [], logoFill: [[164, 708, 222, 746], [344, 710, 443, 772]],
+    top: [0, 512, 512, 1024], topGain: 5, topMax: 0.2,
+    trousers: [512, 0, 768, 256],
+    boots: [512, 256, 1024, 768], boot: (l) => 0.08 + l * 0.55,
+    rough: [[0, 512, 512, 512, 0.85], [512, 0, 256, 256, 0.9], [512, 256, 512, 512, 0.6], [768, 0, 256, 256, 0.15]],
+    head: [0, 0, 512, 512], hairRows: 300, skinSwatch: [768, 768, 896, 896], hairSwatch: [768, 896, 896, 1024],
+  },
+};
+const ATLAS_SKIN = [209, 145, 112];
+
 // Clip timing for jumps: when the feet leave and touch the ground again.
 export const JUMPS = {
   jumpJog: { start: 0.06, takeoff: 0.12, land: 0.5 },
@@ -55,42 +94,73 @@ export const OUTFITS = {
   olive: { top: [0.22, 0.28, 0.14], trousers: [0.14, 0.16, 0.1], boots: [0.2, 0.16, 0.1], hair: 0x1a140e },
 };
 
-// Turns the stock outfit into a tank top, cargo trousers and leather boots
-// in the outfit's colours, and removes the logo print.
-function recolorAtlas(image, outfit) {
+const hexRgb = (h) => [((h >> 16) & 255) / 255, ((h >> 8) & 255) / 255, (h & 255) / 255];
+
+// Recolours the stock outfit in the look's colours and removes the logo
+// print. Masculine bodies also get the photo face, its skin tone and hair.
+function recolorAtlas(image, look, body) {
+  const outfit = look.outfit;
   const c = document.createElement('canvas');
   c.width = c.height = 1024;
   const g = c.getContext('2d', { willReadFrequently: true });
   g.drawImage(image, 0, 0, 1024, 1024);
-  g.drawImage(c, 150, 790, 90, 60, 150, 715, 90, 60);
-  g.drawImage(c, 340, 790, 120, 70, 340, 705, 120, 70);
+  for (const [sx, sy, w, h, dx, dy] of body.logo) g.drawImage(c, sx, sy, w, h, dx, dy, w, h);
   const img = g.getImageData(0, 0, 1024, 1024);
   const d = img.data;
-  const region = (x0, y0, x1, y1, fn) => {
+  // Fills each box by blending the cloth just above and below it, per column.
+  for (const [x0, y0, x1, y1] of body.logoFill || []) {
+    for (let x = x0; x < x1; x++) {
+      const a = ((y0 - 1) * 1024 + x) * 4, b = (y1 * 1024 + x) * 4;
+      for (let y = y0; y < y1; y++) {
+        const f = (y - y0 + 1) / (y1 - y0 + 1);
+        const k = (y * 1024 + x) * 4;
+        for (let ch = 0; ch < 3; ch++) d[k + ch] = d[a + ch] * (1 - f) + d[b + ch] * f;
+      }
+    }
+  }
+  const region = ([x0, y0, x1, y1], fn) => {
     for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
       const k = (y * 1024 + x) * 4;
       const l = (d[k] + d[k + 1] + d[k + 2]) / (3 * 255);
-      const [r, gg, b] = fn(l, x, y);
+      const [r, gg, b] = fn(l, k);
       d[k] = Math.min(255, r * 255); d[k + 1] = Math.min(255, gg * 255); d[k + 2] = Math.min(255, b * 255);
     }
   };
-  region(0, 512, 512, 1024, (l) => {
+  const check = outfit.check;
+  region(body.top, (l, k) => {
     if (l < 0.03) return [0, 0, 0];
-    const t = Math.pow(l, 1.1);
-    const c = outfit.top;
+    const t = Math.pow(Math.min(1, Math.min(l, body.topMax) * body.topGain), 1.1);
+    let c = outfit.top;
+    if (check) {
+      const p = k >> 2;
+      const bands = (((p & 1023) >> 4) & 1) + (((p >> 10) >> 4) & 1);
+      c = bands === 2 ? c : bands === 1 ? c.map((v, i) => (v + check[i]) * 0.5) : check;
+    }
     return [c[0] * t + 0.02, c[1] * t + 0.03, c[2] * t + 0.04];
   });
-  region(512, 0, 1024, 512, (l) => {
+  region(body.trousers, (l) => {
     const t = 0.45 + l * 2.6;
     const c = outfit.trousers;
     return [c[0] * t, c[1] * t, c[2] * t];
   });
-  region(768, 512, 1024, 768, (l) => {
-    const t = 0.35 + l * 0.9;
+  region(body.boots, (l) => {
+    const t = body.boot(l);
     const c = outfit.boots;
     return [c[0] * t, c[1] * t, c[2] * t];
   });
+  if (body.head && look.face) {
+    const skin = look.face.skin;
+    const k = skin.map((v, i) => v / ATLAS_SKIN[i]);
+    const tint = (kk) => [d[kk] / 255 * k[0], d[kk + 1] / 255 * k[1], d[kk + 2] / 255 * k[2]];
+    const scalp = skin.map((v) => (v / 255) * 0.78);
+    const hair = look.bald ? scalp : hexRgb(look.hair);
+    const hairAt = (l) => (look.bald ? scalp : hair.map((v) => v * Math.min(2.2, 0.35 + l / 0.19 * 0.65)));
+    region(body.head, (l, kk) => (l < 0.3 && kk < body.hairRows * 4096 ? hairAt(l) : tint(kk)));
+    region(body.skinSwatch, (l, kk) => tint(kk));
+    region(body.hairSwatch, (l) => hairAt(l * 1.6));
+  }
   g.putImageData(img, 0, 0);
+  if (body.head && look.face) g.drawImage(look.face.image, 0, 0, 512, 512);
   const tex = new THREE.CanvasTexture(c);
   tex.flipY = false;
   tex.colorSpace = THREE.SRGBColorSpace;
@@ -101,10 +171,7 @@ function recolorAtlas(image, outfit) {
   const rg = rc.getContext('2d');
   const rough = (x, y, w, h, v) => { rg.fillStyle = `rgb(0,${Math.round(v * 255)},0)`; rg.fillRect(x / 4, y / 4, w / 4, h / 4); };
   rough(0, 0, 1024, 1024, 0.55);
-  rough(0, 512, 512, 512, 0.82);
-  rough(512, 0, 512, 512, 0.9);
-  rough(768, 512, 256, 256, 0.5);
-  rough(512, 512, 256, 256, 0.15);
+  for (const r of body.rough) rough(...r);
   const roughTex = new THREE.CanvasTexture(rc);
   roughTex.flipY = false;
   return { map: tex, roughnessMap: roughTex };
@@ -234,14 +301,12 @@ export class Character {
   }
 
   // Loads the model, clips and pistol once; every character clones them.
-  static async loadAssets(progress) {
-    const [avatar, pistolGltf, rifleGltf, grenadeGltf, ...anims] = await progress.task('Loading the adventurers', 6, () => Promise.all([
-      loadGLTF(rpmUrl('Feminine_TPose')),
-      loadGLTF(modelUrl('service_pistol')),
-      loadGLTF(modelUrl('bolt_action_rifle_7_62')),
-      loadGLTF(modelUrl('stick_grenade')),
-      ...Object.values(CLIPS).map((f) => loadGLTF(rpmUrl(f))),
-    ]));
+  static async loadBody(id) {
+    const def = BODIES[id];
+    const [avatar, ...anims] = await Promise.all([
+      loadGLTF(rpmUrl(def.avatar)),
+      ...Object.values(def.clips).map((f) => loadGLTF(rpmUrl(f))),
+    ]);
     const boneNames = new Set();
     let baseImage = null;
     avatar.scene.traverse((o) => {
@@ -249,18 +314,33 @@ export class Character {
       if (o.isSkinnedMesh) baseImage = o.material.map.image;
     });
     const clips = {}, speeds = {};
-    Object.keys(CLIPS).forEach((name, i) => {
+    Object.keys(def.clips).forEach((name, i) => {
       const { clip, speed } = processClip(anims[i].animations[0], name, boneNames);
       clips[name] = clip;
       speeds[name] = speed;
     });
     const normalMap = await avatar.parser.getDependency('texture', 0);
     normalMap.flipY = false;
-    return { scene: avatar.scene, pistolGltf, rifleGltf, grenadeGltf, clips, speeds, baseImage, normalMap };
+    return { scene: avatar.scene, clips, speeds, baseImage, normalMap };
   }
 
-  load(assets, outfit = OUTFITS.adventurer) {
-    this.model = cloneSkinned(assets.scene);
+  static async loadAssets(progress, bodyIds = ['f']) {
+    const [pistolGltf, rifleGltf, grenadeGltf, ...list] = await progress.task('Loading the fighters', 6, () => Promise.all([
+      loadGLTF(modelUrl('service_pistol')),
+      loadGLTF(modelUrl('bolt_action_rifle_7_62')),
+      loadGLTF(modelUrl('stick_grenade')),
+      ...bodyIds.map((id) => Character.loadBody(id)),
+    ]));
+    const bodies = {};
+    bodyIds.forEach((id, i) => { bodies[id] = list[i]; });
+    return { bodies, pistolGltf, rifleGltf, grenadeGltf };
+  }
+
+  // `look` is { body: 'f' | 'm', outfit, hair, bald, face: { image, skin } }.
+  load(assets, look) {
+    const def = BODIES[look.body || 'f'];
+    const body = assets.bodies[look.body || 'f'];
+    this.model = cloneSkinned(body.scene);
     this.root.add(this.model);
     this.bones = {};
     this.model.traverse((o) => {
@@ -268,8 +348,8 @@ export class Character {
       if (o.isSkinnedMesh) this.mesh = o;
     });
 
-    const normalMap = assets.normalMap;
-    const { map, roughnessMap } = recolorAtlas(assets.baseImage, outfit);
+    const normalMap = body.normalMap;
+    const { map, roughnessMap } = recolorAtlas(body.baseImage, look, def);
     this.mesh.material = new THREE.MeshStandardMaterial({
       map, normalMap, roughnessMap, roughness: 1, metalness: 0, normalScale: new THREE.Vector2(0.8, 0.8),
     });
@@ -278,20 +358,20 @@ export class Character {
     this.mesh.frustumCulled = false;
 
     this.mixer = new THREE.AnimationMixer(this.model);
-    Object.keys(CLIPS).forEach((name) => {
-      const action = this.mixer.clipAction(assets.clips[name]);
+    Object.keys(def.clips).forEach((name) => {
+      const action = this.mixer.clipAction(body.clips[name]);
       if (!LOOPING.has(name)) { action.setLoop(THREE.LoopOnce, 1); action.clampWhenFinished = true; }
       action.enabled = true;
       action.setEffectiveWeight(0);
       action.play();
       this.actions[name] = action;
-      this.speeds[name] = assets.speeds[name];
+      this.speeds[name] = body.speeds[name];
       this.weights[name] = 0;
     });
     this.weights.idle = 1;
     this.actions.idle.setEffectiveWeight(1);
 
-    this.buildBraid(outfit.hair);
+    if (def.braid) this.buildBraid(look.hair ?? look.outfit.hair);
     this.buildPistols(assets.pistolGltf);
     this.buildRifle(assets.rifleGltf);
     this.grenade = Character.grenadeModel(assets.grenadeGltf);
@@ -407,7 +487,8 @@ export class Character {
   }
 
   addTo(scene) {
-    scene.add(this.root, this.braid, this.rifle, this.grenade);
+    scene.add(this.root, this.rifle, this.grenade);
+    if (this.braid) scene.add(this.braid);
     this.pistols.forEach((p) => scene.add(p));
     this.holsters.forEach((h) => scene.add(h.holster, h.band));
   }
@@ -831,6 +912,7 @@ export class Character {
   }
 
   updateBraid(dt) {
+    if (!this.braid) return;
     const t = this.tmp;
     const head = this.bones.Head;
     head.updateMatrixWorld(true);

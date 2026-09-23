@@ -1,19 +1,21 @@
 import * as THREE from 'three';
 import { Pipeline } from './engine/pipeline.js';
-import { Progress } from './engine/assets.js';
+import { Progress, loadImage } from './engine/assets.js';
 import { generateHeightmap, loadTerrainTextures, Terrain } from './world/terrain.js';
 import { Grass } from './world/grass.js';
 import { Vegetation } from './world/vegetation.js';
 import { getMap } from './world/maps.js';
 import { City } from './world/city.js';
-import { Character, OUTFITS } from './game/character.js';
+import { Character } from './game/character.js';
 import { Player } from './game/player.js';
 import { Props } from './game/props.js';
 import { Effects } from './game/fx.js';
 import { Weapons, Loadout, WEAPONS } from './game/weapons.js';
 import { Audio } from './game/audio.js';
 import { Combat, MAX_HEALTH } from './game/combat.js';
-import { Rival, PERSONAS } from './game/rival.js';
+import { Rival } from './game/rival.js';
+import { byId, loadSelection, persona, resolveLooks } from './game/roster.js';
+import { setupRosterMenu } from './game/rosterMenu.js';
 import { Jev } from './game/jev.js';
 
 const $ = (id) => document.getElementById(id);
@@ -133,6 +135,11 @@ $('quality').onchange = (e) => {
   localStorage.setItem('relic-quality', e.target.value);
   if (world.veg && world.mapDef?.vegetation) { world.veg.scale = pipeline.quality.trees; world.veg.update(0, camera.position, true); }
 };
+const selection = loadSelection();
+const rosterMenu = setupRosterMenu(selection, $('roster'), () => {
+  $('play').textContent = rosterMenu.changed() ? 'Apply & reload' : 'Fight';
+});
+
 $('volume').oninput = (e) => audio.setVolume(e.target.value / 100);
 audio.setVolume($('volume').value / 100);
 
@@ -163,13 +170,16 @@ async function init() {
   world.props = props;
   let city = null;
   if (mapDef.id === 'city') city = new City(terrain, veg.colliders, pipeline);
-  const [, charAssets] = await Promise.all([
+  const fighters = [selection.player, ...selection.rivals].map(byId);
+  const bodies = [...new Set(fighters.map((e) => e.look.body))];
+  const [, charAssets, looks] = await Promise.all([
     mapDef.vegetation ? veg.load(progress) : Promise.resolve(),
-    Character.loadAssets(progress),
+    Character.loadAssets(progress, bodies),
+    resolveLooks(fighters, loadImage),
     mapDef.waterCamp ? props.load(progress) : Promise.resolve(),
     city ? city.load(progress) : Promise.resolve(),
   ]);
-  character.load(charAssets, OUTFITS.adventurer);
+  character.load(charAssets, looks[0]);
 
   const spawn = data.spawn;
   const facing = Math.atan2(data.peak.x - spawn.x, data.peak.z - spawn.z);
@@ -189,7 +199,7 @@ async function init() {
   character.addTo(pipeline.scene);
 
   const player = new Player(world, character, camera);
-  player.fighter = combat.add({ id: 'adventurer', name: 'You', character, pos: player.pos, isPlayer: true, color: '#f3dcb0' });
+  player.fighter = combat.add({ id: 'player', name: 'You', character, pos: player.pos, isPlayer: true, color: fighters[0].color });
   player.spawn(spawn.x, spawn.z, facing);
   const fx = new Effects(pipeline, terrain, audio);
   const weapons = new Weapons(world, player, character, fx, audio, combat);
@@ -197,11 +207,11 @@ async function init() {
   player.fighter.loadout = new Loadout(3);
   Object.assign(world, { grass, character, player, fx, weapons, data, city, mapDef });
 
-  const rivals = PERSONAS.map((p) => {
+  const rivals = fighters.slice(1).map((entry, i) => {
     const ch = new Character();
-    ch.load(charAssets, OUTFITS[p.outfit]);
+    ch.load(charAssets, looks[i + 1]);
     ch.addTo(pipeline.scene);
-    return new Rival(world, combat, weapons, jev, p, ch);
+    return new Rival(world, combat, weapons, jev, persona(entry), ch);
   });
   window.__game = { world, pipeline, camera, input, rivals, combat, jev };
 
@@ -301,7 +311,7 @@ async function init() {
       banner('Eliminated', `${who} got you. Press R to fight again.`, 'show lost');
     } else if (rivals.every((r) => !r.fighter.alive) && player.fighter.alive) {
       round.state = 'over';
-      banner('Victory', `You outlasted all ${rivals.length} rivals. Press R to fight again.`, 'show won');
+      banner('Victory', `You outlasted ${rivals.length > 1 ? `all ${rivals.length} rivals` : 'your rival'}. Press R to fight again.`, 'show won');
     }
   };
   weapons.onNearMiss = (miss) => audio.whiz(miss);
@@ -371,6 +381,7 @@ async function init() {
   $('play').classList.remove('hidden');
   menu.classList.remove('loading');
   $('play').onclick = () => {
+    if (rosterMenu.changed()) { rosterMenu.save(); location.reload(); return; }
     audio.start();
     canvas.requestPointerLock();
   };
@@ -413,7 +424,7 @@ async function init() {
     input.restart = false;
     if (round.state === 'countdown') {
       round.t -= dt;
-      banner(round.t > 0 ? `${Math.ceil(round.t)}` : 'Fight', `${rivals.length} rivals are closing in. Last one standing wins.`, 'show countdown');
+      banner(round.t > 0 ? `${Math.ceil(round.t)}` : 'Fight', `${rivals.length > 1 ? `${rivals.length} rivals are` : '1 rival is'} closing in. Last one standing wins.`, 'show countdown');
       if (round.t <= -0.6) { round.state = 'fight'; banner('', '', ''); }
     }
 

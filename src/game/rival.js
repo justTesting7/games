@@ -9,24 +9,6 @@ const UP = new THREE.Vector3(0, 1, 0);
 const wrapAngle = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 const gauss = () => (Math.random() + Math.random() + Math.random() - 1.5) / 0.5;
 
-export const PERSONAS = [
-  {
-    id: 'vasquez', name: 'Vasquez', outfit: 'crimson', color: '#ff6a55',
-    personality: 'a reckless brawler who loves close-range fights, pushes hard and rarely backs down',
-    accuracy: 1.1, fireInterval: 0.24, reaction: 0.4,
-  },
-  {
-    id: 'kade', name: 'Kade', outfit: 'ivory', color: '#8fc8ff',
-    personality: 'a patient sharpshooter who fights from cover at medium range and retreats when hurt',
-    accuracy: 0.8, fireInterval: 0.34, reaction: 0.55,
-  },
-  {
-    id: 'novak', name: 'Novak', outfit: 'olive', color: '#c8d46a',
-    personality: 'a demolitionist who spams grenades to flush enemies from cover, then picks them off at medium range',
-    accuracy: 0.95, fireInterval: 0.28, reaction: 0.45, grenadier: true,
-  },
-];
-
 export const TACTICS = {
   push: { label: 'pushing', text: 'close the distance on the target and shoot on the move' },
   strafe: { label: 'strafing', text: 'sidestep left and right at the current range while shooting' },
@@ -349,7 +331,8 @@ export class Rival {
     const d = this.target.pos.distanceTo(this.pos);
     if (me.health < 35) return cover && options.take_cover ? 'take_cover' : 'retreat';
     if (d > 28) return 'push';
-    if (cover && this.persona.id === 'kade' && Math.random() < 0.5) return 'take_cover';
+    if (cover && this.persona.prefersCover && Math.random() < 0.5) return 'take_cover';
+    if (this.persona.style === 'flanker' && options.flank && Math.random() < 0.5) return 'flank';
     return Math.random() < 0.6 ? 'strafe' : d > 14 ? 'hold' : 'push';
   }
 
