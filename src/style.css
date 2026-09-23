@@ -62,6 +62,37 @@ html, body {
 #jevstat { margin-top: 4px; font-size: 11px; font-style: normal; font-weight: 500; letter-spacing: 1px; opacity: 0.7; }
 #jevstat.off { color: #ffb08a; }
 
+#slots { display: flex; gap: 6px; margin-bottom: 6px; }
+#slots b {
+  font-size: 11px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase;
+  padding: 3px 7px; border-radius: 3px; background: rgba(0, 0, 0, 0.3); opacity: 0.55;
+}
+#slots b.on { opacity: 1; background: rgba(210, 161, 92, 0.55); }
+#slots b.off { opacity: 0.25; text-decoration: line-through; }
+#weapon.reloading #weaponname { color: #f3dcb0; }
+#weapon.empty #ammo { color: #ff6a55; }
+
+#scope {
+  position: absolute; inset: 0; opacity: 0; transition: opacity 0.08s;
+  background: radial-gradient(circle at center, transparent 0, transparent 38vh, rgba(0, 0, 0, 0.55) 39vh, #000 40.5vh);
+}
+#scope.show { opacity: 1; }
+#scope::before, #scope::after { content: ''; position: absolute; left: 50%; top: 50%; background: rgba(0, 0, 0, 0.85); }
+#scope::before { width: 80vh; height: 1px; transform: translate(-50%, -50%); }
+#scope::after { width: 1px; height: 80vh; transform: translate(-50%, -50%); }
+#scope i {
+  position: absolute; left: 50%; top: 50%; width: 4px; height: 4px; transform: translate(-50%, -50%);
+  border-radius: 50%; background: #d8261a; box-shadow: 0 0 4px rgba(255, 40, 20, 0.9);
+}
+
+#grenadewarn {
+  position: absolute; left: 50%; top: 60%; transform: translateX(-50%); opacity: 0;
+  font-size: 14px; font-weight: 700; letter-spacing: 3px; text-transform: uppercase; color: #ffb347;
+  text-shadow: 0 0 8px rgba(255, 90, 0, 0.8);
+}
+#grenadewarn.show { opacity: 1; animation: pulse 0.5s infinite alternate; }
+@keyframes pulse { from { opacity: 1; } to { opacity: 0.4; } }
+
 #damage {
   position: absolute; inset: 0; opacity: 0;
   background: radial-gradient(ellipse at center, rgba(120, 0, 0, 0) 45%, rgba(140, 0, 0, 0.55) 80%, rgba(90, 0, 0, 0.9) 100%);

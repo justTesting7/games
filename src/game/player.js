@@ -43,9 +43,9 @@ export class Player {
     this.camPos.copy(this.pos).add(new THREE.Vector3(0, 2, 0));
   }
 
-  kick(side) {
-    this.recoilPitch += 0.018;
-    this.shake = 0.12;
+  kick(side, strength = 1) {
+    this.recoilPitch += 0.018 * strength;
+    this.shake = Math.max(this.shake, 0.12 * Math.sqrt(strength));
     this.shakeSide = side ? -1 : 1;
   }
 
@@ -58,6 +58,9 @@ export class Player {
     const { terrain } = this.world;
     const aiming = input.aim || this.aimHold > 0;
     this.aimHold = Math.max(0, this.aimHold - dt);
+    this.time = (this.time || 0) + dt;
+    const weapon = this.fighter?.loadout.current;
+    this.scoped = !!input.aim && weapon === 'rifle' && this.character.weapon === 'rifle' && this.character.aimWeight > 0.85;
     if (input.toggleWalk) this.walkMode = !this.walkMode;
 
     const f = (input.forward ? 1 : 0) - (input.back ? 1 : 0);
@@ -157,7 +160,7 @@ export class Player {
     ch.root.position.copy(this.pos);
     ch.root.rotation.y = this.yaw;
 
-    this.updateCamera(dt, aiming, input.sprint && speed > 4.5);
+    this.updateCamera(dt, aiming, input.sprint && speed > 4.5, speed);
     this.updateAim();
 
     ch.update(dt, {
@@ -167,18 +170,30 @@ export class Player {
     return { speed, aiming };
   }
 
-  updateCamera(dt, aiming, sprinting) {
+  updateCamera(dt, aiming, sprinting, speed = 0) {
     const cam = this.camera;
     const { terrain, veg } = this.world;
     const k = Math.min(1, dt * 10);
-    this.camDist += ((aiming ? 1.55 : 3.1) - this.camDist) * k;
-    this.shoulder += ((aiming ? 0.6 : 0.5) - this.shoulder) * k;
-    this.fov += ((aiming ? 48 : sprinting ? 66 : 60) - this.fov) * Math.min(1, dt * 6);
+    const scoped = this.scoped;
+    this.camDist += ((scoped ? 1.2 : aiming ? 1.55 : 3.1) - this.camDist) * k;
+    this.shoulder += ((scoped ? 0.5 : aiming ? 0.6 : 0.5) - this.shoulder) * k;
+    if (scoped) this.fov = 13;
+    else this.fov += ((aiming ? 48 : sprinting ? 66 : 60) - this.fov) * Math.min(1, dt * 6);
     if (Math.abs(cam.fov - this.fov) > 0.01) { cam.fov = this.fov; cam.updateProjectionMatrix(); }
 
-    this.recoilPitch *= Math.exp(-dt * 10);
-    const pitch = this.camPitch + this.recoilPitch;
-    const dir = new THREE.Vector3(Math.sin(this.camYaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(this.camYaw) * Math.cos(pitch));
+    this.recoilPitch *= Math.exp(-dt * (scoped ? 6 : 10));
+    // Breathing and heartbeat sway the scope, more when moving or hurt.
+    let swayYaw = 0, swayPitch = 0;
+    if (scoped) {
+      const t = this.time;
+      const hurt = this.fighter ? 1 + (1 - this.fighter.health / 100) * 1.5 : 1;
+      const amp = (0.0022 + speed * 0.0025) * hurt;
+      swayYaw = (Math.sin(t * 0.83) + 0.5 * Math.sin(t * 1.9 + 1.3)) * amp;
+      swayPitch = (Math.sin(t * 1.21 + 0.7) + 0.4 * Math.sin(t * 2.6)) * amp * 0.8;
+    }
+    const pitch = this.camPitch + this.recoilPitch + swayPitch;
+    const yaw = this.camYaw + swayYaw;
+    const dir = new THREE.Vector3(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch));
     const right = new THREE.Vector3(-Math.cos(this.camYaw), 0, Math.sin(this.camYaw));
     const pivot = this.pos.clone().add(new THREE.Vector3(0, aiming ? 1.58 : 1.55, 0));
     const smoothPivot = this.smoothPivot || pivot.clone();

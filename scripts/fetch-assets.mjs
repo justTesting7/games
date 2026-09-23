@@ -17,7 +17,8 @@ const PH_TEXTURES = {
 const PH_MODELS = [
   'service_pistol', 'rock_moss_set_01', 'rock_moss_set_02', 'boulder_01',
   'namaqualand_boulder_02', 'fern_02', 'shrub_02', 'barrel_03',
-  'wooden_crate_01', 'dead_tree_trunk', 'tree_stump_01',
+  'wooden_crate_01', 'dead_tree_trunk', 'tree_stump_01', 'bolt_action_rifle_7_62',
+  'stick_grenade',
 ];
 const RPM = 'https://raw.githubusercontent.com/readyplayerme/animation-library/master/feminine/glb';
 const RPM_FILES = [
@@ -81,7 +82,7 @@ async function pool(tasks, n = 8) {
 }
 
 async function main() {
-  const marker = path.join(ROOT, '.complete-v1');
+  const marker = path.join(ROOT, '.complete-v2');
   if (await exists(marker)) {
     console.log('[assets] already downloaded');
     return;

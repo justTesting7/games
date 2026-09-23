@@ -163,26 +163,71 @@ export class Effects {
     this._s = new THREE.Vector3(1, 1, 1);
   }
 
-  muzzle(pos, dir) {
+  muzzle(pos, dir, scale = 1) {
     const add = this.add;
+    const k = scale;
     const tip = pos.clone().addScaledVector(dir, 0.02);
-    add.spawn({ pos: tip, size: 0.16 + Math.random() * 0.06, life: 0.07, color: [70, 42, 15], fade: 1 });
-    add.spawn({ pos: tip.clone().addScaledVector(dir, 0.14), vel: dir.clone().multiplyScalar(0.01), size: 0.05, stretch: 0.16, life: 0.06, color: [90, 55, 20] });
+    add.spawn({ pos: tip, size: (0.16 + Math.random() * 0.06) * k, life: 0.07, color: [70, 42, 15], fade: 1 });
+    add.spawn({ pos: tip.clone().addScaledVector(dir, 0.14 * k), vel: dir.clone().multiplyScalar(0.01), size: 0.05 * k, stretch: 0.16 * k, life: 0.06, color: [90, 55, 20] });
     for (let i = 0; i < 4; i++) {
       const d = dir.clone().add(new THREE.Vector3().randomDirection().multiplyScalar(0.6)).normalize();
-      add.spawn({ pos: tip.clone().addScaledVector(d, 0.06), vel: d.multiplyScalar(0.01), size: 0.025, stretch: 0.07, life: 0.05, color: [60, 34, 12] });
+      add.spawn({ pos: tip.clone().addScaledVector(d, 0.06 * k), vel: d.multiplyScalar(0.01), size: 0.025 * k, stretch: 0.07 * k, life: 0.05, color: [60, 34, 12] });
     }
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < 6 * k; i++) {
       this.alpha.spawn({
         pos: tip.clone().addScaledVector(dir, 0.04 * i),
-        vel: dir.clone().multiplyScalar(1.5 + Math.random() * 1.5).add(new THREE.Vector3(0, 0.35, 0)).add(new THREE.Vector3().randomDirection().multiplyScalar(0.3)),
-        size: 0.05, grow: 0.6, life: 0.8 + Math.random() * 0.6, color: [0.62, 0.62, 0.64], alpha: 0.3, drag: 3,
+        vel: dir.clone().multiplyScalar((1.5 + Math.random() * 1.5) * k).add(new THREE.Vector3(0, 0.35, 0)).add(new THREE.Vector3().randomDirection().multiplyScalar(0.3 * k)),
+        size: 0.05 * k, grow: 0.6 * k, life: 0.8 + Math.random() * 0.6, color: [0.62, 0.62, 0.64], alpha: 0.3, drag: 3,
       });
     }
     const fl = this.pipeline.flashLight;
     fl.position.copy(tip);
-    fl.intensity = 160;
+    fl.intensity = 160 * k * k;
     this.flash = 0.06;
+  }
+
+  explosion(pos, surface) {
+    const fl = this.pipeline.flashLight;
+    fl.position.copy(pos).y += 0.6;
+    fl.intensity = 9000;
+    this.flash = 0.12;
+    const up = new THREE.Vector3(0, 1, 0);
+    if (surface === 'water') {
+      for (let i = 0; i < 70; i++) {
+        const v = new THREE.Vector3((Math.random() - 0.5) * 4, 6 + Math.random() * 9, (Math.random() - 0.5) * 4);
+        this.alpha.spawn({ pos: pos.clone().setY(0.05), vel: v, size: 0.08 + Math.random() * 0.12, grow: 0.4, life: 1.2 + Math.random() * 0.8, color: [0.85, 0.9, 0.95], alpha: 0.85, gravity: 9.8, drag: 0.4 });
+      }
+      for (let i = 0; i < 12; i++) {
+        this.alpha.spawn({ pos: pos.clone().setY(0.3 + Math.random()), vel: new THREE.Vector3().randomDirection().multiplyScalar(2).setY(1.5), size: 0.6, grow: 1.5, life: 1.5 + Math.random(), color: [0.9, 0.93, 0.97], alpha: 0.5, drag: 2 });
+      }
+      return;
+    }
+    const s = SURFACE[this.terrain.heightAt(pos.x, pos.z) < 0.6 ? 'sand' : 'grass'];
+    for (let i = 0; i < 26; i++) {
+      const v = new THREE.Vector3().randomDirection().multiplyScalar(3 + Math.random() * 6);
+      v.y = Math.abs(v.y) * 0.8 + 1;
+      this.add.spawn({ pos: pos.clone().addScaledVector(up, 0.3), vel: v, size: 0.35 + Math.random() * 0.5, grow: 2.2, life: 0.18 + Math.random() * 0.25, color: [90, 38, 9], drag: 6 });
+    }
+    this.add.spawn({ pos: pos.clone().addScaledVector(up, 0.4), size: 2.2, life: 0.08, color: [160, 90, 30], fade: 1 });
+    for (let i = 0; i < 40; i++) {
+      const v = new THREE.Vector3().randomDirection().multiplyScalar(10 + Math.random() * 18);
+      v.y = Math.abs(v.y) + 2;
+      this.add.spawn({ pos: pos.clone().addScaledVector(up, 0.2), vel: v, size: 0.012, stretch: 0.3, life: 0.2 + Math.random() * 0.4, color: [60, 28, 7], gravity: 9.8 });
+    }
+    for (let i = 0; i < 30; i++) {
+      const v = new THREE.Vector3().randomDirection().multiplyScalar(1 + Math.random() * 3.5);
+      v.y = Math.abs(v.y) * 1.2 + 1.2;
+      this.alpha.spawn({ pos: pos.clone().addScaledVector(up, 0.4 + Math.random() * 0.5), vel: v, size: 0.7 + Math.random() * 0.8, grow: 1.4, life: 3.5 + Math.random() * 3, color: [0.16, 0.15, 0.14], alpha: 0.7, drag: 1.3, gravity: -0.25 });
+    }
+    for (let i = 0; i < 60; i++) {
+      const v = new THREE.Vector3().randomDirection().multiplyScalar(3 + Math.random() * 8);
+      v.y = Math.abs(v.y) * 1.5 + 2;
+      this.alpha.spawn({ pos: pos.clone().addScaledVector(up, 0.1), vel: v, size: 0.02 + Math.random() * 0.05, life: 1 + Math.random(), color: s.chunks, alpha: 1, gravity: 9.8, fade: 0 });
+    }
+    for (let i = 0; i < 14; i++) {
+      const v = new THREE.Vector3().randomDirection().multiplyScalar(4).setY(0.4);
+      this.alpha.spawn({ pos: pos.clone().addScaledVector(up, 0.15), vel: v, size: 0.4, grow: 2.5, life: 2 + Math.random() * 1.5, color: s.dust, alpha: 0.55, drag: 2 });
+    }
   }
 
   tracer(from, to) {

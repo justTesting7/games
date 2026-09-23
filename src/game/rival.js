@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { Loadout, WEAPONS, Weapons } from './weapons.js';
 
 const GRAVITY = 16;
 const JUMP_V = 5.0;
@@ -33,6 +34,16 @@ export const TACTICS = {
 
 const healthWord = (h) => (h > 70 ? 'healthy' : h > 40 ? 'wounded' : h > 15 ? 'badly wounded' : 'nearly dead');
 const rangeWord = (d) => (d < 6 ? 'point blank' : d < 14 ? 'close' : d < 30 ? 'medium range' : 'far away');
+const GUNS = {
+  pistols: 'dual pistols: fast fire, accurate only within about 20 m',
+  rifle: 'scoped bolt-action rifle: one slow, very powerful shot about every second, deadly at medium and long range, weak up close',
+  grenade: 'throw a grenade: flushes an enemy out of cover or punishes one standing still, 8-30 m away',
+};
+const ammoWord = (L, key) => {
+  if (key === 'grenade') return `${L.grenades} left`;
+  const total = L.mag[key] + L.reserve[key];
+  return total === 0 ? 'empty' : L.mag[key] === 0 ? 'magazine empty' : `${L.mag[key]} in the magazine, ${L.reserve[key]} spare`;
+};
 
 export class Rival {
   constructor(world, combat, weapons, jev, persona, character) {
@@ -53,6 +64,7 @@ export class Rival {
     this.aimErrGoal = new THREE.Vector3();
     this.lookPoint = new THREE.Vector3();
     this.fighter = combat.add({ id: persona.id, name: persona.name, character, pos: this.pos, color: persona.color });
+    this.fighter.loadout = new Loadout(2);
     this.cols = [];
     this.memory = new Map();
     this.reset();
@@ -81,6 +93,14 @@ export class Rival {
     this.lastProgress = this.pos.clone();
     this.progressT = 0;
     this.memory.clear();
+    this.gun = 'pistols';
+    this.want = 'pistols';
+    this.throwAt = null;
+    this.fighter.loadout.reset();
+    this.fighter.preferRifle = false;
+    this.character.setWeapon('pistols');
+    this.character.weapon = 'pistols';
+    this.character.equipT = 1;
   }
 
   spawn(x, z, yaw) {
@@ -171,11 +191,18 @@ export class Rival {
     else ['hunt', 'hold'].forEach(offer);
     if (cover) offer('take_cover');
 
+    const L = me.loadout;
+    const nearest = enemies.reduce((a, e) => Math.min(a, e.pos.distanceTo(this.pos)), Infinity);
+    const danger = this.grenadeDanger();
     const state = {
       you: {
         name: me.name,
         personality: this.persona.personality,
         health: healthWord(me.health),
+        weapon: WEAPONS[L.current].name,
+        ammo: { pistols: ammoWord(L, 'pistols'), rifle: ammoWord(L, 'rifle'), grenades: ammoWord(L, 'grenade') },
+        reloading: L.reloading ? 'yes' : 'no',
+        live_grenade_near_you: danger ? 'yes, run!' : 'no',
         under_fire: now - me.lastHitT < 2.5 ? `yes, just shot by ${me.lastAttacker?.name}` : 'no',
         current_tactic: TACTICS[this.tactic].label,
         nearest_cover: cover ? `a ${cover.type} ${Math.round(cover.spot.distanceTo(this.pos))} m away` : 'none nearby',
@@ -190,6 +217,7 @@ export class Rival {
           in_sight: m.visible ? 'yes' : m.lastT > -50 ? `no, last seen ${Math.round(now - m.lastT)} s ago` : 'no, never seen',
           distance: rangeWord(d),
           health: healthWord(e.health),
+          weapon: WEAPONS[e.loadout?.current || 'pistols'].name,
           aiming_at: target ? (target === me ? 'you' : target.name) : 'nobody',
           shot_you_recently: me.lastAttacker === e && now - me.lastHitT < 4 ? 'yes' : 'no',
         };
@@ -213,11 +241,26 @@ export class Rival {
       };
     }
 
+    const weapons = {};
+    if (L.has('pistols')) weapons.pistols = GUNS.pistols;
+    if (L.has('rifle')) weapons.rifle = GUNS.rifle;
+    const tp = this.threatPos();
+    const td = tp ? tp.distanceTo(this.pos) : Infinity;
+    if (L.grenades > 0 && td > 8 && td < 30 && !danger) weapons.grenade = GUNS.grenade;
+    if (Object.keys(weapons).length > 1) {
+      questions.weapon = {
+        type: 'choice',
+        instructions: `You are ${me.name}. The nearest enemy is ${rangeWord(nearest)}. Which weapon should you use right now?`,
+        criteria: weapons,
+      };
+    }
+
     this.thinking = true;
     const epoch = this.epoch;
     this.jev.ask(state, questions).then((ans) => {
       if (epoch !== this.epoch || !this.fighter.alive) return;
       this.decide(ans, options, enemies, cover);
+      this.chooseWeapon(ans?.weapon?.choice, weapons);
     }).finally(() => {
       if (epoch !== this.epoch) return;
       this.thinking = false;
@@ -245,6 +288,34 @@ export class Rival {
       this.confidence = 0;
       this.setTactic(this.localTactic(options, cover), cover);
     }
+  }
+
+  chooseWeapon(choice, offered) {
+    if (!choice || !offered[choice]) {
+      const d = this.target ? this.threatPos().distanceTo(this.pos) : 20;
+      const L = this.fighter.loadout;
+      choice = d > 22 && L.has('rifle') ? 'rifle' : L.has('pistols') ? 'pistols' : 'rifle';
+      const hidden = this.target && !this.seen(this.target).visible && this.seen(this.target).lastT > -50;
+      if (offered.grenade && hidden && Math.random() < 0.3) choice = 'grenade';
+    }
+    if (choice === 'grenade') {
+      this.want = 'grenade';
+      this.throwAt = this.threatPos()?.clone() || null;
+    } else {
+      this.gun = choice;
+      if (this.want !== 'grenade') this.want = choice;
+    }
+    this.fighter.preferRifle = this.gun === 'rifle';
+  }
+
+  // A live grenade within blast range that is not about to be thrown by us.
+  grenadeDanger() {
+    let best = null, bestD = WEAPONS.grenade.radius;
+    for (const g of this.weapons.live) {
+      const d = g.pos.distanceTo(this.pos);
+      if (d < bestD && g.fuse < WEAPONS.grenade.fuse - 0.25) { bestD = d; best = g; }
+    }
+    return best;
   }
 
   localTarget(alive) {
@@ -348,6 +419,15 @@ export class Rival {
         break;
     }
 
+    const danger = this.grenadeDanger();
+    if (danger) {
+      out.dir.set(this.pos.x - danger.pos.x, 0, this.pos.z - danger.pos.z).normalize();
+      out.speed = 5.8;
+      out.aim = false;
+      out.jump = danger.fuse < 0.6 && Math.random() < 0.3;
+    }
+    if (this.want === 'grenade' && this.throwAt) out.aim = true;
+
     // Personal space, and a way around whatever is blocking the path.
     for (const f of this.combat.fighters) {
       if (f === this.fighter || !f.alive) continue;
@@ -375,7 +455,7 @@ export class Rival {
     const mySpeed = Math.hypot(this.vel.x, this.vel.z);
     const theirSpeed = T.isPlayer ? Math.hypot(this.world.player.vel.x, this.world.player.vel.z) : 3;
     const settle = 1 + 1.4 * Math.exp(-m.sightT * 1.5);
-    const stance = this.tactic === 'hold' ? 0.65 : 1;
+    const stance = (this.tactic === 'hold' ? 0.65 : 1) * (this.character.weapon === 'rifle' ? 0.4 : 1);
     const sigma = 0.02 * d * this.persona.accuracy * settle * stance * (1 + mySpeed * 0.12 + theirSpeed * 0.06) + 0.05;
     this.errT -= dt;
     if (this.errT <= 0) {
@@ -385,22 +465,53 @@ export class Rival {
     this.aimErr.lerp(this.aimErrGoal, 1 - Math.exp(-dt * 10));
     const goal = chest.add(this.aimErr);
     if (!wish.aim) { const tp = this.threatPos(); goal.set(tp.x, tp.y + 1.3, tp.z); }
+    if (this.want === 'grenade' && this.throwAt) goal.copy(this.throwAt).setY(this.throwAt.y + 1.5);
     this.aimPoint.lerp(goal, 1 - Math.exp(-dt * 9));
+  }
+
+  // Switches to the wanted weapon, throws a pending grenade, and reloads
+  // when the magazine runs low with nobody in sight.
+  handleWeapons() {
+    const f = this.fighter;
+    const L = f.loadout;
+    const ch = this.character;
+    let want = this.want;
+    if (want === 'grenade' && (L.grenades <= 0 || !this.throwAt)) want = this.want = this.gun;
+    if (!L.has(want)) want = L.has(this.gun) ? this.gun : L.has('pistols') ? 'pistols' : 'rifle';
+    if (want !== L.current && !(L.current === 'grenade' && ch.action)) this.weapons.equip(f, want);
+    if (L.current === 'grenade' && ch.weapon === 'grenade' && ch.equipT >= 1 && !ch.action && this.throwAt) {
+      const facing = Math.atan2(this.throwAt.x - this.pos.x, this.throwAt.z - this.pos.z);
+      if (Math.abs(wrapAngle(facing - this.yaw)) < 0.25) {
+        const from = this.pos.clone().setY(this.pos.y + 1.75);
+        const spot = this.throwAt.clone().add(new THREE.Vector3(gauss() * 1.4, 0, gauss() * 1.4));
+        const lob = !(this.target && this.seen(this.target).visible);
+        L.throwVel.copy(Weapons.aimThrow(from, spot, WEAPONS.grenade.speed, lob));
+        if (this.weapons.trigger(f, this.aimPoint)) { this.throwAt = null; this.want = this.gun; }
+      }
+    }
+    const def = WEAPONS[L.current];
+    const visible = this.target && this.seen(this.target).visible;
+    if (def.mag && !visible && !L.reloading && !ch.action && L.mag[def.key] < def.mag * 0.5) this.weapons.reload(f);
   }
 
   shoot(dt, wish) {
     this.cooldown -= dt;
     const T = this.target;
-    if (!T || !wish.aim) return;
+    const L = this.fighter.loadout;
+    if (!T || !wish.aim || L.current === 'grenade') return;
     const m = this.seen(T);
-    if (!m.visible || m.sightT < this.persona.reaction) return;
+    const rifle = L.current === 'rifle';
+    if (!m.visible || m.sightT < this.persona.reaction + (rifle ? 0.3 : 0)) return;
     if (this.character.aimWeight < 0.85) return;
     const want = Math.atan2(this.aimPoint.x - this.pos.x, this.aimPoint.z - this.pos.z);
     if (Math.abs(wrapAngle(want - this.yaw)) > 0.3) return;
     if (this.burstPause > 0) { this.burstPause -= dt; return; }
     if (this.cooldown > 0) return;
-    this.weapons.shoot(this.fighter, this.side, this.aimPoint, 0.004);
-    this.side = 1 - this.side;
+    if (!this.weapons.trigger(this.fighter, this.aimPoint, rifle ? 0.0015 : 0.004)) return;
+    if (rifle) {
+      this.cooldown = 0.3 + Math.random() * 0.5;
+      return;
+    }
     this.cooldown = this.persona.fireInterval * (0.8 + Math.random() * 0.4);
     if (--this.burst <= 0) {
       this.burst = 3 + Math.floor(Math.random() * 4);
@@ -499,6 +610,7 @@ export class Rival {
       ch.update(dt, {});
       return;
     }
+    if (active) this.handleWeapons();
     let wish = { dir: new THREE.Vector3(), speed: 0, aim: false, jump: false };
     if (active) {
       this.perceive(dt);
@@ -534,6 +646,7 @@ export class Rival {
       jumpStarted, predictedAir: (2 * JUMP_V) / GRAVITY, aiming: wish.aim, aimPoint: this.lookPoint,
     });
     if (active) this.shoot(dt, wish);
+    this.weapons.tick(this.fighter, dt);
   }
 
   get label() { return TACTICS[this.tactic].label; }

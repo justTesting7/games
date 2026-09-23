@@ -128,6 +128,76 @@ function rotateBoneWorld(bone, q, tmp) {
   bone.updateMatrixWorld(true);
 }
 
+const smooth = (k) => { const x = Math.min(1, Math.max(0, k)); return x * x * (3 - 2 * x); };
+const V = Array.from({ length: 8 }, () => new THREE.Vector3());
+const UP = new THREE.Vector3(0, 1, 0);
+
+// Two-bone IK: puts the wrist on `target` with the elbow bending towards
+// `pole`, then points the fingers along `finger` and rolls the hand so the
+// pinky-to-index direction follows `lateral`.
+function solveArm(B, side, target, pole, finger, lateral, w, tmp) {
+  if (w <= 0.001) return;
+  const upper = B[`${side}Arm`], fore = B[`${side}ForeArm`], hand = B[`${side}Hand`];
+  const a = upper.getWorldPosition(V[0]);
+  const b = fore.getWorldPosition(V[1]);
+  const c = hand.getWorldPosition(V[2]);
+  const l1 = a.distanceTo(b), l2 = b.distanceTo(c);
+  const toT = V[3].subVectors(target, a);
+  const len = toT.length() || 1e-4;
+  const dir = toT.divideScalar(len);
+  const d = THREE.MathUtils.clamp(len, Math.abs(l1 - l2) + 0.01, (l1 + l2) * 0.999);
+  const cosA = THREE.MathUtils.clamp((l1 * l1 + d * d - l2 * l2) / (2 * l1 * d), -1, 1);
+  const sinA = Math.sqrt(1 - cosA * cosA);
+  const pn = V[4].subVectors(pole, a);
+  pn.addScaledVector(dir, -pn.dot(dir)).normalize();
+  const elbow = V[5].copy(a).addScaledVector(dir, cosA * l1).addScaledVector(pn, sinA * l1);
+  rotateBoneToward(upper, fore, V[6].subVectors(elbow, a).normalize(), w, tmp);
+  const eb = fore.getWorldPosition(V[1]);
+  const reach = V[7].copy(upper.getWorldPosition(V[0])).addScaledVector(dir, d);
+  rotateBoneToward(fore, hand, V[6].subVectors(reach, eb).normalize(), w, tmp);
+  const mid = B[`${side}HandMiddle1`];
+  if (!mid || !finger) return;
+  rotateBoneToward(hand, mid, finger, w, tmp);
+  const idx = B[`${side}HandIndex1`], pk = B[`${side}HandPinky1`];
+  if (!idx || !pk || !lateral) return;
+  const cur = V[3].subVectors(idx.getWorldPosition(V[3]), pk.getWorldPosition(V[4]));
+  const fd = V[5].copy(finger).normalize();
+  cur.addScaledVector(fd, -cur.dot(fd)).normalize();
+  const want = V[6].copy(lateral).addScaledVector(fd, -lateral.dot(fd)).normalize();
+  const ang = Math.atan2(V[7].crossVectors(cur, want).dot(fd), cur.dot(want));
+  rotateBoneWorld(hand, tmp.q.setFromAxisAngle(fd, ang * w), tmp);
+}
+
+// Points on the rifle, in its own space: +X towards the muzzle, +Y up, +Z to
+// the shooter's right. Hand points are where the wrist bone goes.
+const RIFLE = {
+  butt: new THREE.Vector3(-0.64, -0.045, 0),
+  grip: new THREE.Vector3(-0.45, -0.035, 0.04),
+  fore: new THREE.Vector3(-0.04, -0.045, -0.035),
+  bolt: new THREE.Vector3(-0.3, 0.0, 0.1),
+  magwell: new THREE.Vector3(-0.27, 0.12, 0.06),
+  muzzle: new THREE.Vector3(0.61, 0.058, 0),
+};
+
+// Wrist path for a throw, in body space (x right, y up, z forward) relative
+// to the right shoulder, keyed by the fraction of the throw.
+const THROW = { dur: 0.8, release: 0.42 };
+const THROW_PATH = [
+  [0, new THREE.Vector3(0.12, -0.25, 0.25)],
+  [0.3, new THREE.Vector3(0.14, 0.2, -0.3)],
+  [0.42, new THREE.Vector3(0.02, 0.32, 0.45)],
+  [0.62, new THREE.Vector3(-0.2, -0.3, 0.38)],
+  [0.8, new THREE.Vector3(0.12, -0.25, 0.25)],
+];
+function throwPoint(t, out) {
+  for (let i = 1; i < THROW_PATH.length; i++) {
+    const [t1, p1] = THROW_PATH[i];
+    const [t0, p0] = THROW_PATH[i - 1];
+    if (t <= t1) return out.copy(p0).lerp(p1, smooth((t - t0) / (t1 - t0)));
+  }
+  return out.copy(THROW_PATH[THROW_PATH.length - 1][1]);
+}
+
 export class Character {
   constructor() {
     this.root = new THREE.Group();
@@ -146,6 +216,14 @@ export class Character {
     this.jump = null;
     this.onFootstep = null;
     this.footDown = [true, true];
+    this.weapon = 'pistols';
+    this.nextWeapon = 'pistols';
+    this.equipT = 1;
+    this.action = null;
+    this.rifleKick = 0;
+    this.boltOpen = 0;
+    this.showGrenade = true;
+    this.released = false;
     this.tmp = {
       a: new THREE.Vector3(), b: new THREE.Vector3(), c: new THREE.Vector3(), d: new THREE.Vector3(),
       q: new THREE.Quaternion(), qi: new THREE.Quaternion(), q2: new THREE.Quaternion(), q3: new THREE.Quaternion(),
@@ -155,9 +233,11 @@ export class Character {
 
   // Loads the model, clips and pistol once; every character clones them.
   static async loadAssets(progress) {
-    const [avatar, pistolGltf, ...anims] = await progress.task('Loading the adventurers', 5, () => Promise.all([
+    const [avatar, pistolGltf, rifleGltf, grenadeGltf, ...anims] = await progress.task('Loading the adventurers', 6, () => Promise.all([
       loadGLTF(rpmUrl('Feminine_TPose')),
       loadGLTF(modelUrl('service_pistol')),
+      loadGLTF(modelUrl('bolt_action_rifle_7_62')),
+      loadGLTF(modelUrl('stick_grenade')),
       ...Object.values(CLIPS).map((f) => loadGLTF(rpmUrl(f))),
     ]));
     const boneNames = new Set();
@@ -174,7 +254,7 @@ export class Character {
     });
     const normalMap = await avatar.parser.getDependency('texture', 0);
     normalMap.flipY = false;
-    return { scene: avatar.scene, pistolGltf, clips, speeds, baseImage, normalMap };
+    return { scene: avatar.scene, pistolGltf, rifleGltf, grenadeGltf, clips, speeds, baseImage, normalMap };
   }
 
   load(assets, outfit = OUTFITS.adventurer) {
@@ -211,6 +291,42 @@ export class Character {
 
     this.buildBraid(outfit.hair);
     this.buildPistols(assets.pistolGltf);
+    this.buildRifle(assets.rifleGltf);
+    this.grenade = Character.grenadeModel(assets.grenadeGltf);
+    this.grenade.matrixAutoUpdate = false;
+  }
+
+  // A copy of the grenade with the handle's grip point at the origin.
+  static grenadeModel(gltf) {
+    const g = gltf.scene.clone(true);
+    g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+    const wrap = new THREE.Group();
+    g.position.y = 0.05;
+    wrap.add(g);
+    return wrap;
+  }
+
+  buildRifle(gltf) {
+    const rifle = gltf.scene.clone(true);
+    rifle.traverse((o) => {
+      if (!o.isMesh) return;
+      o.castShadow = true;
+      o.receiveShadow = true;
+    });
+    this.bolts = ['bolt_action_rifle_7_62_bolt_a', 'bolt_action_rifle_7_62_bolt_b']
+      .map((n) => rifle.getObjectByName(n)).filter(Boolean)
+      .map((o) => ({ o, rest: o.position.clone() }));
+    rifle.matrixAutoUpdate = false;
+    this.rifle = rifle;
+    // Slung diagonally across the back, measured in the bind pose.
+    this.model.updateMatrixWorld(true);
+    const spine = this.bones.Spine2;
+    const sp = spine.getWorldPosition(new THREE.Vector3());
+    const f = new THREE.Vector3(-0.55, 0.83, 0).normalize();
+    const z = new THREE.Vector3(0, 0, -1);
+    const y = new THREE.Vector3().crossVectors(z, f).normalize();
+    const world = new THREE.Matrix4().makeBasis(f, y, z).setPosition(sp.x, sp.y - 0.05, sp.z - 0.17);
+    this.rifleBack = spine.matrixWorld.clone().invert().multiply(world);
   }
 
   buildBraid(color) {
@@ -289,7 +405,7 @@ export class Character {
   }
 
   addTo(scene) {
-    scene.add(this.root, this.braid);
+    scene.add(this.root, this.braid, this.rifle, this.grenade);
     this.pistols.forEach((p) => scene.add(p));
     this.holsters.forEach((h) => scene.add(h.holster, h.band));
   }
@@ -321,6 +437,9 @@ export class Character {
   revive() {
     this.dead = null;
     this.flinch = 0;
+    this.action = null;
+    this.rifleKick = 0;
+    this.boltOpen = 0;
     this.aimT = 0;
     this.aimWeight = 0;
     this.drawn = 0;
@@ -344,6 +463,8 @@ export class Character {
     this.root.updateMatrixWorld(true);
     this.updateBraid(dt);
     this.updatePistols(dt);
+    this.placeRifle();
+    this.placeGrenade();
   }
 
   // Called by the controller every frame with the movement state.
@@ -419,24 +540,206 @@ export class Character {
     this.mixer.update(dt);
     this.root.updateMatrixWorld(true);
 
-    const aimGoal = s.aiming ? 1 : 0;
+    this.updateEquip(dt);
+    const act = this.action;
+    const busy = act && (act.type === 'reload' || act.type === 'pistolReload');
+    const aimGoal = s.aiming && this.weapon === this.nextWeapon && !busy ? 1 : 0;
     // Drawing takes about a fifth of a second with an eased arm swing; the
     // guns leave the holsters while the hands are still at the hips.
     this.aimT = THREE.MathUtils.clamp((this.aimT || 0) + (aimGoal ? dt / 0.2 : -dt / 0.35), 0, 1);
     const e = this.aimT;
     this.aimWeight = e * e * (3 - 2 * e);
-    this.drawn = this.aimT > 0.12 ? 1 : 0;
+    this.drawn = this.weapon === 'pistols' && (this.aimT > 0.12 || act?.type === 'pistolReload') ? 1 : 0;
     this.aimTarget.copy(s.aimPoint);
     this.recoil[0] *= Math.exp(-dt * 13);
     this.recoil[1] *= Math.exp(-dt * 13);
-    this.applyAim(s);
+    this.rifleKick *= Math.exp(-dt * 11);
     if (this.flinch > 0.01) {
       rotateBoneWorld(this.bones.Spine1, this.tmp.q.setFromAxisAngle(this.flinchAxis, this.flinch * 0.32), this.tmp);
       this.flinch *= Math.exp(-dt * 9);
     }
+    this.applyAim(s);
+    if (this.weapon === 'grenade') this.applyThrow(dt);
+    this.placeRifle(dt);
+    this.placeGrenade();
     this.updateFeet(dt, s);
     this.updateBraid(dt);
     this.updatePistols(dt);
+  }
+
+  // Switching puts the current weapon away before bringing out the next.
+  setWeapon(name) { this.nextWeapon = name; }
+
+  get ready() { return this.weapon === this.nextWeapon && this.equipT >= 1 && !this.action; }
+
+  startAction(type, dur) {
+    this.action = { type, t: 0, dur };
+    this.released = false;
+  }
+
+  updateEquip(dt) {
+    if (this.weapon !== this.nextWeapon) {
+      this.equipT -= dt / (this.weapon === 'pistols' ? 0.15 : 0.3);
+      if (this.weapon === 'pistols') this.aimT = Math.min(this.aimT || 0, this.equipT);
+      if (this.equipT <= 0) { this.weapon = this.nextWeapon; this.equipT = 0; this.action = null; }
+    } else {
+      this.equipT = Math.min(1, this.equipT + dt / (this.weapon === 'rifle' ? 0.45 : 0.25));
+    }
+    const a = this.action;
+    if (a) {
+      const before = a.t;
+      a.t += dt;
+      if (a.type === 'throw' && before < THROW.release * (a.dur / THROW.dur) && a.t >= THROW.release * (a.dur / THROW.dur)) this.released = true;
+      if (a.t >= a.dur) this.action = null;
+    }
+  }
+
+  bodyAxes() {
+    const fwd = V[0].set(0, 0, 1).applyQuaternion(this.root.quaternion).setY(0).normalize().clone();
+    const left = new THREE.Vector3(fwd.z, 0, -fwd.x);
+    return { fwd, left, right: left.clone().negate() };
+  }
+
+  // Rifle pose: slung on the back, carried at low ready, or shouldered and
+  // aimed, with both hands placed on it by IK.
+  placeRifle() {
+    const rifle = this.rifle;
+    const B = this.bones;
+    const back = this.tmp.m.multiplyMatrices(B.Spine2.matrixWorld, this.rifleBack);
+    const active = this.weapon === 'rifle' && !this.dead;
+    const e = active ? smooth(this.equipT) : 0;
+    if (e <= 0) {
+      rifle.matrix.copy(back);
+    } else {
+      const { fwd, left, right } = this.bodyAxes();
+      const sh = B.RightArm.getWorldPosition(new THREE.Vector3());
+      const a = this.action;
+      const w = this.aimWeight;
+      const butt1 = sh.clone().addScaledVector(left, 0.07).addScaledVector(UP, -0.06).addScaledVector(fwd, 0.04);
+      const f1 = new THREE.Vector3().subVectors(this.aimTarget, butt1).normalize();
+      const butt0 = sh.clone().addScaledVector(UP, -0.3).addScaledVector(fwd, 0.14).addScaledVector(left, 0.04);
+      const f0 = fwd.clone().multiplyScalar(0.82).addScaledVector(UP, -0.45).addScaledVector(left, 0.35).normalize();
+      const butt = butt0.lerp(butt1, w);
+      const f = f0.lerp(f1, w).normalize();
+      const kick = this.rifleKick;
+      if (kick > 1e-3) {
+        butt.addScaledVector(f, -kick * 0.08);
+        f.applyAxisAngle(new THREE.Vector3().crossVectors(f, UP).normalize(), kick * 0.16).normalize();
+      }
+      let roll = 0;
+      if (a?.type === 'reload') roll = 0.55 * smooth(Math.min(a.t / 0.3, (a.dur - a.t) / 0.3, 1));
+      if (a?.type === 'bolt') roll = 0.18 * smooth(Math.min(a.t / 0.15, (a.dur - a.t) / 0.2, 1));
+      const u = UP.clone().addScaledVector(f, -UP.dot(f)).normalize().applyAxisAngle(f, -roll);
+      const r = new THREE.Vector3().crossVectors(f, u);
+      const pos = butt.clone()
+        .addScaledVector(f, -RIFLE.butt.x).addScaledVector(u, -RIFLE.butt.y).addScaledVector(r, -RIFLE.butt.z);
+      const held = new THREE.Matrix4().makeBasis(f, u, r).setPosition(pos);
+      if (e < 1) {
+        const p0 = new THREE.Vector3(), q0 = new THREE.Quaternion(), p1 = new THREE.Vector3(), q1 = new THREE.Quaternion(), s = new THREE.Vector3();
+        back.decompose(p0, q0, s);
+        held.decompose(p1, q1, s);
+        rifle.matrix.compose(p0.lerp(p1, e), q0.slerp(q1, e), s.set(1, 1, 1));
+      } else {
+        rifle.matrix.copy(held);
+      }
+
+      // Bolt cycling and reloading move the right hand off the grip.
+      let hand = RIFLE.grip;
+      let open = 0;
+      let off = 0;
+      if (a?.type === 'bolt') {
+        const t = a.t / a.dur;
+        const reachK = smooth((t - 0.12) / 0.15) * (1 - smooth((t - 0.72) / 0.2));
+        off = reachK;
+        hand = RIFLE.grip.clone().lerp(RIFLE.bolt, reachK);
+        open = smooth((t - 0.3) / 0.14) * (1 - smooth((t - 0.5) / 0.14));
+        hand.x -= open * 0.085;
+        hand.y += open * 0.02;
+      } else if (a?.type === 'reload') {
+        const t = a.t;
+        const toBolt = smooth((t - 0.1) / 0.2) * (1 - smooth((t - 0.5) / 0.15)) + smooth((t - 1.85) / 0.15) * (1 - smooth((t - 2.25) / 0.2));
+        const toMag = smooth((t - 0.5) / 0.15) * (1 - smooth((t - 1.75) / 0.15));
+        open = smooth((t - 0.3) / 0.15) * (1 - smooth((t - 2.0) / 0.15));
+        off = Math.max(toBolt, toMag);
+        hand = RIFLE.grip.clone().lerp(RIFLE.bolt, toBolt).lerp(RIFLE.magwell, toMag);
+        hand.x -= open * 0.085 * toBolt;
+        if (toMag > 0.5) hand.y -= Math.max(0, Math.sin(((t - 0.65) / 1.1) * Math.PI * 5)) * 0.035;
+      }
+      this.boltOpen = open;
+      const M = rifle.matrix;
+      const rt = hand.clone().applyMatrix4(M);
+      const lt = RIFLE.fore.clone().applyMatrix4(M);
+      const ax = (x, y, z) => new THREE.Vector3().addScaledVector(f, x).addScaledVector(u, y).addScaledVector(r, z).normalize();
+      const iw = Math.min(1, e * 2.5);
+      const finger = ax(0.55, -0.65, -0.5).lerp(ax(0.6, 0.1, -0.4), off).normalize();
+      const lateral = ax(0.2, 0.8, 0).lerp(ax(0, 0.3, 0.9), off).normalize();
+      solveArm(B, 'Right', rt,
+        sh.clone().addScaledVector(UP, -0.6).addScaledVector(right, 0.45).addScaledVector(fwd, -0.15),
+        finger, lateral, iw, this.tmp);
+      const shL = B.LeftArm.getWorldPosition(new THREE.Vector3());
+      solveArm(B, 'Left', lt,
+        shL.clone().addScaledVector(UP, -0.7).addScaledVector(left, 0.15),
+        ax(0.45, 0.6, 0.65), f, iw, this.tmp);
+    }
+    rifle.matrixWorld.copy(rifle.matrix);
+    this.bolts.forEach((b) => { b.o.position.copy(b.rest); b.o.position.x -= this.boltOpen * 0.085; });
+    rifle.children.forEach((c) => c.updateMatrixWorld(true));
+  }
+
+  // Throwing swings the right arm back over the shoulder and through.
+  applyThrow() {
+    const a = this.action;
+    const B = this.bones;
+    const aimK = this.aimWeight;
+    let t = -1;
+    if (a?.type === 'throw') t = (a.t / a.dur) * THROW.dur;
+    else if (aimK > 0.01) t = 0.3 * aimK;
+    if (t < 0) return;
+    const { fwd, left, right } = this.bodyAxes();
+    const twist = t < 0.3 ? -0.45 * smooth(t / 0.3) : t < 0.62 ? -0.45 + 0.85 * smooth((t - 0.3) / 0.32) : 0.4 * (1 - smooth((t - 0.62) / 0.18));
+    rotateBoneWorld(B.Spine1, this.tmp.q.setFromAxisAngle(UP, twist * 0.6), this.tmp);
+    rotateBoneWorld(B.Spine2, this.tmp.q.setFromAxisAngle(UP, twist * 0.4), this.tmp);
+    const sh = B.RightArm.getWorldPosition(new THREE.Vector3());
+    const p = throwPoint(t, new THREE.Vector3());
+    const target = sh.clone().addScaledVector(right, p.x).addScaledVector(UP, p.y).addScaledVector(fwd, p.z);
+    const w = a?.type === 'throw' ? Math.min(1, (a.dur - a.t) / 0.15) : aimK;
+    solveArm(B, 'Right', target, sh.clone().addScaledVector(UP, -0.5).addScaledVector(right, 0.5), null, null, w, this.tmp);
+    // The free arm points at the target for balance.
+    const shL = B.LeftArm.getWorldPosition(new THREE.Vector3());
+    const reach = new THREE.Vector3().subVectors(this.aimTarget, shL).normalize().multiplyScalar(0.5).add(shL);
+    solveArm(B, 'Left', reach, shL.clone().addScaledVector(UP, -0.6).addScaledVector(left, 0.4), null, null, w * 0.8, this.tmp);
+  }
+
+  placeGrenade() {
+    const g = this.grenade;
+    const a = this.action;
+    const thrown = a?.type === 'throw' && a.t >= THROW.release * (a.dur / THROW.dur);
+    const show = this.weapon === 'grenade' && this.showGrenade && !this.dead && this.equipT > 0.3 && !thrown;
+    g.visible = show;
+    if (!show) return;
+    const B = this.bones;
+    if (!B.RightHandMiddle1 || !B.RightHandIndex1 || !B.RightHandPinky1) { g.visible = false; return; }
+    const hp = B.RightHand.getWorldPosition(new THREE.Vector3());
+    const fp = B.RightHandMiddle1.getWorldPosition(new THREE.Vector3());
+    const x = fp.clone().sub(hp).normalize();
+    const lat = B.RightHandIndex1.getWorldPosition(new THREE.Vector3()).sub(B.RightHandPinky1.getWorldPosition(new THREE.Vector3()));
+    const y = lat.addScaledVector(x, -lat.dot(x)).normalize();
+    const z = new THREE.Vector3().crossVectors(x, y);
+    const palm = hp.clone().lerp(fp, 0.75);
+    g.matrix.makeBasis(x, y, z).setPosition(palm);
+    g.matrixWorld.copy(g.matrix);
+    g.children.forEach((c) => c.updateMatrixWorld(true));
+  }
+
+  handPosition(out = new THREE.Vector3()) {
+    const mid = this.bones.RightHandMiddle1 || this.bones.RightHand;
+    return this.bones.RightHand.getWorldPosition(out).lerp(mid.getWorldPosition(V[1]), 0.75);
+  }
+
+  consumeRelease() {
+    if (!this.released) return false;
+    this.released = false;
+    return true;
   }
 
   setRate(name, speed) {
@@ -477,7 +780,7 @@ export class Character {
       rotateBoneWorld(head, q, t);
     }
 
-    if (w < 0.01) return;
+    if (w < 0.01 || this.weapon !== 'pistols') return;
     // Recoil pushes the firing shoulder back and twists the chest slightly.
     const kick = this.recoil[0] - this.recoil[1];
     const kickAll = this.recoil[0] + this.recoil[1];
@@ -626,6 +929,18 @@ export class Character {
 
   pistolAxis(i, out = new THREE.Vector3()) {
     return out.setFromMatrixColumn(this.pistols[i].matrixWorld, 0).normalize();
+  }
+
+  rifleMuzzle(out = new THREE.Vector3()) {
+    return out.copy(RIFLE.muzzle).applyMatrix4(this.rifle.matrixWorld);
+  }
+
+  rifleAxis(out = new THREE.Vector3()) {
+    return out.setFromMatrixColumn(this.rifle.matrixWorld, 0).normalize();
+  }
+
+  firedRifle() {
+    this.rifleKick = 1;
   }
 
   fired(i) {

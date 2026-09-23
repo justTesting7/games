@@ -28,9 +28,11 @@ The first `npm run dev` (or `npm run build`) downloads about 100 MB of third-par
 | Shift | Sprint |
 | C | Toggle walk / jog |
 | Space | Jump |
-| Right mouse | Aim (over-the-shoulder, both pistols raised) |
-| Left mouse | Fire (alternating pistols; also raises the guns from the hip) |
-| R | Restart the round |
+| Right mouse | Aim: pistols over the shoulder, rifle scope, or the grenade throw arc |
+| Left mouse | Fire or throw (also raises the gun from the hip) |
+| 1 / 2 / 3, wheel, Q | Dual pistols / bolt-action rifle / stick grenades |
+| R | Reload (restarts the round once it is over) |
+| Enter | Restart the round |
 | T (hold) | Fast-forward the time of day |
 | F3 | Performance stats |
 | Esc | Menu (graphics quality, time of day, sensitivity, volume) |
@@ -43,7 +45,14 @@ The first `npm run dev` (or `npm run build`) downloads about 100 MB of third-par
 - **Gameplay:** hitscan dual pistols with muzzle flashes, tracers, and impact dust, sparks and splashes that depend on the surface hit. Brass casings bounce on the ground. Barrels and crates react with rigid-body physics, and the targets fall when hit and reset. All sound is synthesized with WebAudio: gunshots with echo, ricochets, footsteps, wind and surf.
 
 - **Rivals:** Vasquez, a reckless brawler, and Kade, a patient sharpshooter, spawn 18-28 m from you, and everyone fights until one is left. Each rival sends Jev a small, semantic state about once a second. The state covers its own health, nearby cover, and each enemy's visibility, range, health and aim. Jev answers two choice questions, one for the tactic (push, strafe, hold, flank, take cover, retreat or hunt) and one for the target. Low-confidence answers do not override a plan that is still valid. The code handles all movement, cover finding, line of sight and aiming. Aim error grows with range and movement and settles over time, and fire comes in bursts after a reaction delay. Getting shot triggers an immediate rethink.
-- **Combat:** 100 health for everyone. Body shots do 9 damage and headshots 30. The HUD has hit reactions, falls on death, a damage vignette and direction indicator, bullet cracks for near misses, rival name tags that show their current Jev decision and confidence, and a kill feed.
+- **Weapons:**
+  - **Dual pistols:** 16 rounds with 96 spare. Body shots do 9 damage and headshots 30.
+  - **Bolt-action rifle** (Poly Haven, CC0): 5 rounds with 20 spare. Body shots do 55 damage and headshots 200, which always kills. The scope has breathing sway. The right hand works the bolt after every shot and the spent case flies out. Reloading loads the rounds one by one.
+  - **Stick grenades:** 3 for the player and 2 per rival. They bounce off terrain and trees on a 3.4 s fuse and do up to 120 damage within 8 m. Cover blocks most of the blast, and props are thrown clear.
+  - The rifle is carried at low ready and raised to the shoulder with two-bone arm IK, and it slings across the back when another weapon is out.
+  - Grenades are thrown with an over-the-shoulder arm swing. Right mouse shows the predicted throw arc.
+  - Jev also picks each rival's weapon. The rivals aim grenades with a ballistic solution, lob them over cover, and run from live grenades.
+- **Combat:** 100 health for everyone. The HUD has hit reactions, falls on death, a damage vignette and direction indicator, bullet cracks for near misses, rival name tags that show their current Jev decision and confidence, and a kill feed.
 
 ## Asset licenses
 

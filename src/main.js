@@ -8,7 +8,7 @@ import { Character, OUTFITS } from './game/character.js';
 import { Player } from './game/player.js';
 import { Props } from './game/props.js';
 import { Effects } from './game/fx.js';
-import { Weapons } from './game/weapons.js';
+import { Weapons, Loadout, WEAPONS } from './game/weapons.js';
 import { Audio } from './game/audio.js';
 import { Combat, MAX_HEALTH } from './game/combat.js';
 import { Rival, PERSONAS } from './game/rival.js';
@@ -88,7 +88,10 @@ addEventListener('keydown', (e) => {
   if (keymap[e.code]) input[keymap[e.code]] = true;
   if (e.code === 'Space') { input.jump = true; e.preventDefault(); }
   if (e.code === 'KeyC' && !e.repeat) input.toggleWalk = true;
-  if (e.code === 'KeyR' && !e.repeat) input.restart = true;
+  if (e.code === 'KeyR' && !e.repeat) input.reload = true;
+  if (e.code === 'Enter' && !e.repeat) input.restart = true;
+  if (/^Digit[1-3]$/.test(e.code)) input.slot = Number(e.code.slice(5));
+  if (e.code === 'KeyQ' && !e.repeat) input.cycle = 1;
   if (e.code === 'F3') { $('debug').classList.toggle('hidden'); e.preventDefault(); }
 });
 addEventListener('keyup', (e) => {
@@ -104,6 +107,10 @@ addEventListener('mouseup', (e) => {
   if (e.button === 2) input.aim = false;
 });
 addEventListener('contextmenu', (e) => e.preventDefault());
+addEventListener('wheel', (e) => {
+  if (document.pointerLockElement !== canvas || Math.abs(e.deltaY) < 1) return;
+  input.cycle = e.deltaY > 0 ? 1 : -1;
+}, { passive: true });
 addEventListener('blur', () => { for (const k in input) input[k] = false; });
 
 let timeOfDay = 0.09;
@@ -155,6 +162,8 @@ async function init() {
   player.spawn(spawn.x, spawn.z, facing);
   const fx = new Effects(pipeline, terrain, audio);
   const weapons = new Weapons(world, player, character, fx, audio, combat);
+  weapons.setGrenadeModel(charAssets.grenadeGltf);
+  player.fighter.loadout = new Loadout(3);
   Object.assign(world, { grass, character, player, fx, weapons, data });
 
   const rivals = PERSONAS.map((p) => {
@@ -201,6 +210,12 @@ async function init() {
       player.vel.set(0, 0, 0);
     }
     combat.reset(player.fighter);
+    player.fighter.loadout.reset();
+    character.setWeapon('pistols');
+    character.weapon = 'pistols';
+    character.equipT = 1;
+    weapons.live.forEach((g) => g.mesh.removeFromParent());
+    weapons.live = [];
     spawnRivals();
     $('feed').innerHTML = '';
     round.state = 'countdown';
@@ -235,20 +250,27 @@ async function init() {
       if (attacker) pointDamage(attacker);
     }
   };
-  combat.onKill = (victim, attacker, head) => {
-    feed(`${attacker ? tagName(attacker) : ''} <span class="gun">${head ? '⌖' : '▸'}</span> ${tagName(victim)}`);
+  combat.onKill = (victim, attacker, info) => {
+    const how = `${WEAPONS[info.weapon]?.short || ''}${info.head ? ' · headshot' : ''}`;
+    const by = attacker === victim ? '' : attacker ? tagName(attacker) : '';
+    feed(`${by} <span class="gun">▸ ${how} ▸</span> ${tagName(victim)}`);
     if (victim === player.fighter) {
       hurt = 1;
       audio.hurt(true);
       if (attacker) pointDamage(attacker);
       round.state = 'over';
-      banner('Eliminated', `${attacker ? attacker.name : 'A rival'} got you. Press R to fight again.`, 'show lost');
+      const who = attacker === victim ? 'Your own grenade' : attacker ? attacker.name : 'A rival';
+      banner('Eliminated', `${who} got you. Press R to fight again.`, 'show lost');
     } else if (rivals.every((r) => !r.fighter.alive) && player.fighter.alive) {
       round.state = 'over';
       banner('Victory', 'You outlasted both rivals. Press R to fight again.', 'show won');
     }
   };
   weapons.onNearMiss = (miss) => audio.whiz(miss);
+  weapons.onExplosion = (pos, dist) => {
+    player.shake = Math.max(player.shake, Math.min(0.9, 6 / Math.max(dist, 1)));
+    if (dist < 4 && player.fighter.alive) hurt = Math.max(hurt, 0.4);
+  };
 
   const tags = rivals.map((r) => {
     const el = document.createElement('div');
@@ -278,7 +300,7 @@ async function init() {
       t.el.style.transform = `translate(${((tagPos.x + 1) / 2) * innerWidth}px, ${((1 - tagPos.y) / 2) * innerHeight}px) translate(-50%, -100%)`;
       t.bar.style.width = `${(f.health / MAX_HEALTH) * 100}%`;
       t.info.textContent = !f.alive ? 'eliminated'
-        : `${t.r.label}${t.r.target ? ` → ${t.r.target.isPlayer ? 'you' : t.r.target.name}` : ''} · ${t.r.source === 'jev' ? `Jev ${Math.round(t.r.confidence * 100)}%` : 'local AI'}`;
+        : `${WEAPONS[f.loadout.current].short} · ${t.r.label}${t.r.target ? ` → ${t.r.target.isPlayer ? 'you' : t.r.target.name}` : ''} · ${t.r.source === 'jev' ? `Jev ${Math.round(t.r.confidence * 100)}%` : 'local AI'}`;
     }
   };
 
@@ -326,7 +348,7 @@ async function init() {
   });
   addEventListener('mousemove', (e) => {
     if (document.pointerLockElement !== canvas) return;
-    const sens = Number($('sens').value) * 0.00022 * (player.camDist < 2 ? 0.7 : 1);
+    const sens = Number($('sens').value) * 0.00022 * (player.scoped ? 0.22 : player.camDist < 2 ? 0.7 : 1);
     player.look(e.movementX * sens, e.movementY * sens);
   });
 
@@ -346,7 +368,10 @@ async function init() {
     pipeline.setTimeOfDay(timeOfDay, elapsed);
 
     const locked = document.pointerLockElement === canvas;
-    if (input.restart && (round.state === 'over' || round.state === 'fight')) startRound();
+    if ((input.restart || (input.reload && round.state === 'over')) && (round.state === 'over' || round.state === 'fight')) {
+      startRound();
+      input.reload = false;
+    }
     input.restart = false;
     if (round.state === 'countdown') {
       round.t -= dt;
@@ -358,7 +383,12 @@ async function init() {
     const state = player.update(dt, alive ? input : NO_INPUT);
     input.jump = false;
     input.toggleWalk = false;
-    if (alive && round.state !== 'countdown') weapons.update(dt, input.fire, input.firePressed);
+    if (alive && round.state !== 'countdown') weapons.update(dt, input);
+    else weapons.tick(player.fighter, dt);
+    input.slot = 0;
+    input.cycle = 0;
+    input.reload = false;
+    weapons.updateGrenades(dt);
     input.firePressed = false;
     const active = locked && (round.state === 'fight' || round.state === 'over');
     rivals.forEach((r) => r.update(dt, active));
@@ -373,7 +403,21 @@ async function init() {
 
     $('crosshair').classList.toggle('idle', !state.aiming);
     $('crosshair').classList.toggle('enemy', !!player.aimHit?.fighter);
-    $('crosshair').classList.toggle('hidden', !alive);
+    $('crosshair').classList.toggle('hidden', !alive || player.scoped);
+    $('scope').classList.toggle('show', alive && player.scoped);
+    const L = player.fighter.loadout;
+    const wdef = WEAPONS[L.current];
+    $('ammo').textContent = L.current === 'grenade' ? `${L.grenades}` : `${L.mag[L.current]} / ${L.reserve[L.current]}`;
+    $('weaponname').textContent = L.reloading ? 'reloading…' : wdef.name;
+    $('weapon').classList.toggle('reloading', L.reloading);
+    $('weapon').classList.toggle('empty', L.current !== 'grenade' && L.mag[L.current] === 0);
+    document.querySelectorAll('#slots b').forEach((el, i) => {
+      const key = ['pistols', 'rifle', 'grenade'][i];
+      el.classList.toggle('on', key === L.current);
+      el.classList.toggle('off', !L.has(key));
+    });
+    const near = weapons.live.some((g) => g.pos.distanceTo(player.pos) < WEAPONS.grenade.radius && g.owner !== player.fighter);
+    $('grenadewarn').classList.toggle('show', alive && near);
     if (hitTimer > 0) { hitTimer -= dt; if (hitTimer <= 0) $('hitmarker').classList.remove('show'); }
     const hp = player.fighter.health;
     $('hpbar').style.width = `${(hp / MAX_HEALTH) * 100}%`;

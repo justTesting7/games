@@ -25,6 +25,9 @@ export class Audio {
     this.noise = this.noiseBuffer(2);
     this.shots = [0, 1, 2, 3].map(() => this.renderGunshot(true));
     this.farShots = [0, 1].map(() => this.renderGunshot(false));
+    const rifle = { blastT: 0.075, thumpF: 110, thumpT: 0.12, rumbleT: 0.55, len: 1.4, mix: { crack: 1, thump: 1.3, rumble: 0.4 } };
+    this.rifleShots = [0, 1, 2].map(() => this.renderGunshot(false, rifle));
+    this.boom = [0, 1].map(() => this.renderGunshot(false, { blastT: 0.16, thumpF: 70, thumpT: 0.35, rumbleT: 1.3, len: 3.2, mix: { crack: 0.6, blast: 1, thump: 1.6, rumble: 0.7 } }));
     this.startAmbience();
   }
 
@@ -94,22 +97,24 @@ export class Audio {
 
   // `distance` is 0 for the player's own guns; others are delayed by the
   // speed of sound, quieter, duller and panned to where they came from.
-  gunshot(side, distance = 0, panDir = null) {
+  gunshot(side, distance = 0, panDir = null, rifle = false) {
     if (!this.ctx) return;
     if (distance > 1) {
-      setTimeout(() => this.gunshotNow(side, distance, panDir), (distance / 343) * 1000);
+      setTimeout(() => this.gunshotNow(side, distance, panDir, rifle), (distance / 343) * 1000);
       return;
     }
-    this.gunshotNow(side, 0, null);
+    this.gunshotNow(side, 0, null, rifle);
   }
 
   // A pistol report is broadband noise, not a tone: a very short crack, a
   // blast that dies within ~80 ms, a low thump, and a bit of rumble, all
   // saturated together. Any pitched sweep makes it sound like a laser.
-  renderGunshot(click) {
+  // `o` scales the layers: a rifle has a longer, deeper blast and rumble.
+  renderGunshot(click, o = {}) {
+    const { blastT = 0.045, thumpF = 160, thumpT = 0.07, rumbleT = 0.22, len = 0.7, mix: mixO = {} } = o;
     const ctx = this.ctx;
     const sr = ctx.sampleRate;
-    const n = Math.floor(sr * 0.7);
+    const n = Math.floor(sr * len);
     const out = new Float32Array(n);
     const parts = { crack: new Float32Array(n), blast: new Float32Array(n), thump: new Float32Array(n), rumble: new Float32Array(n) };
     const k = (fc) => 1 - Math.exp((-2 * Math.PI * fc) / sr);
@@ -122,16 +127,16 @@ export class Audio {
       const fc = 900 + 5200 * Math.exp(-t / 0.012);
       lpBlast += k(fc) * (x - lpBlast);
       lpBlast2 += k(fc) * (lpBlast - lpBlast2);
-      parts.blast[i] = lpBlast2 * (Math.exp(-t / 0.045) + 0.25 * Math.exp(-t / 0.12));
-      lpT1 += k(160) * (x - lpT1);
-      lpT2 += k(160) * (lpT1 - lpT2);
-      parts.thump[i] = lpT2 * Math.exp(-t / 0.07);
+      parts.blast[i] = lpBlast2 * (Math.exp(-t / blastT) + 0.25 * Math.exp(-t / (blastT * 2.7)));
+      lpT1 += k(thumpF) * (x - lpT1);
+      lpT2 += k(thumpF) * (lpT1 - lpT2);
+      parts.thump[i] = lpT2 * Math.exp(-t / thumpT);
       lpR1 += k(450) * (x - lpR1);
       lpR2 += k(450) * (lpR1 - lpR2);
-      parts.rumble[i] = lpR2 * Math.exp(-t / 0.22) * Math.min(1, t / 0.01);
+      parts.rumble[i] = lpR2 * Math.exp(-t / rumbleT) * Math.min(1, t / 0.01);
     }
     const norm = (a) => { let m = 0; for (const v of a) m = Math.max(m, Math.abs(v)); return m || 1; };
-    const mix = { crack: 0.75, blast: 1, thump: 1.1, rumble: 0.22 };
+    const mix = { crack: 0.75, blast: 1, thump: 1.1, rumble: 0.22, ...mixO };
     for (const key in parts) {
       const g = mix[key] / norm(parts[key]);
       const a = parts[key];
@@ -157,13 +162,13 @@ export class Audio {
     return b;
   }
 
-  gunshotNow(side, distance, panDir) {
+  gunshotNow(side, distance, panDir, rifle) {
     const ctx = this.ctx;
     const t = ctx.currentTime;
     const far = distance > 1;
-    const att = far ? Math.min(1, 7 / distance) : 1;
-    const pan = far ? Math.max(-0.9, Math.min(0.9, panDir * 0.9)) : side ? -0.12 : 0.12;
-    const set = far ? this.farShots : this.shots;
+    const att = far ? Math.min(1, (rifle ? 12 : 7) / distance) : 1;
+    const pan = far ? Math.max(-0.9, Math.min(0.9, panDir * 0.9)) : rifle ? 0.05 : side ? -0.12 : 0.12;
+    const set = rifle ? this.rifleShots : far ? this.farShots : this.shots;
     const src = ctx.createBufferSource();
     src.buffer = set[Math.floor(Math.random() * set.length)];
     src.playbackRate.value = 0.95 + Math.random() * 0.1;
@@ -220,6 +225,51 @@ export class Audio {
     p.connect(this.reverbSend);
     o.start(t);
     o.stop(t + 0.5);
+  }
+
+  explosion(distance, panDir, underwater) {
+    if (!this.ctx) return;
+    setTimeout(() => {
+      const ctx = this.ctx;
+      const att = Math.min(1, 14 / Math.max(distance, 1));
+      const src = ctx.createBufferSource();
+      src.buffer = this.boom[Math.floor(Math.random() * this.boom.length)];
+      src.playbackRate.value = (underwater ? 0.7 : 0.9) + Math.random() * 0.1;
+      const f = ctx.createBiquadFilter();
+      f.type = 'lowpass';
+      f.frequency.value = underwater ? 500 : Math.max(700, 12000 - distance * 120);
+      const g = ctx.createGain();
+      g.gain.value = 1.3 * att;
+      const p = ctx.createStereoPanner();
+      p.pan.value = Math.max(-0.8, Math.min(0.8, panDir * 0.8));
+      src.connect(f).connect(g).connect(p).connect(this.master);
+      const s = ctx.createGain();
+      s.gain.value = 1.2 * Math.sqrt(att);
+      p.connect(s).connect(this.reverbSend);
+      src.start();
+      if (underwater) this.noiseBurst({ freq: 1200, q: 0.5, gain: 0.5 * att, attack: 0.05, release: 1.2, send: 0.5 });
+    }, (distance / 343) * 1000);
+  }
+
+  // Gun handling and grenade noises: short filtered clicks and scrapes.
+  mech(kind, att = 1) {
+    if (!this.ctx || att < 0.02) return;
+    const click = (freq, gain, rel = 0.025, q = 4) => this.noiseBurst({ freq, q, gain: gain * att, attack: 0.001, release: rel, send: 0.1 });
+    const scrape = (freq, gain, rel) => this.noiseBurst({ freq, q: 1.5, gain: gain * att, attack: 0.01, release: rel, send: 0.05 });
+    switch (kind) {
+      case 'boltBack': click(2600, 0.3); scrape(1800, 0.12, 0.08); break;
+      case 'boltFwd': scrape(1500, 0.1, 0.06); setTimeout(() => click(3200, 0.35, 0.03), 60); break;
+      case 'round': click(4200, 0.18, 0.02); click(1800, 0.12, 0.03); break;
+      case 'magOut': click(2200, 0.25); scrape(900, 0.1, 0.1); break;
+      case 'magIn': click(1600, 0.35, 0.03); click(3800, 0.2, 0.02); break;
+      case 'slide': click(3000, 0.3); setTimeout(() => click(2400, 0.4, 0.03), 90); break;
+      case 'dry': click(5000, 0.25, 0.015, 6); break;
+      case 'equip': scrape(700, 0.12, 0.12); click(2600, 0.12); break;
+      case 'pin': click(3500, 0.15, 0.02); scrape(2400, 0.08, 0.06); break;
+      case 'throw': this.noiseBurst({ freq: 500, q: 0.8, gain: 0.25 * att, attack: 0.04, release: 0.2 }); break;
+      case 'bounce': this.noiseBurst({ freq: 600, q: 1.8, type: 'bandpass', gain: 0.5 * att, attack: 0.001, release: 0.06 }); click(2300, 0.15, 0.03); break;
+      default: break;
+    }
   }
 
   // Supersonic crack of a bullet passing close by.

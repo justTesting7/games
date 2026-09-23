@@ -263,9 +263,9 @@ export class Props {
     return best;
   }
 
-  hit(result, point, dir) {
+  hit(result, point, dir, force = 4.5) {
     if (result.body) {
-      result.body.applyImpulse(dir.clone().multiplyScalar(4.5), point);
+      result.body.applyImpulse(dir.clone().multiplyScalar(force), point);
     } else if (result.target) {
       const tg = result.target;
       tg.down = 5;
@@ -274,6 +274,25 @@ export class Props {
       return true;
     }
     return false;
+  }
+
+  // Throws nearby props away from an explosion and knocks targets down.
+  blast(pos, radius, strength) {
+    for (const b of this.bodies) {
+      const d = b.pos.clone().sub(pos);
+      const dist = d.length();
+      if (dist > radius) continue;
+      const k = 1 - dist / radius;
+      d.y = Math.abs(d.y) + 0.6;
+      d.normalize();
+      const at = b.pos.clone().add(new THREE.Vector3().randomDirection().multiplyScalar(0.15));
+      b.applyImpulse(d.multiplyScalar(strength * k * 8), at);
+    }
+    for (const tg of this.targets) {
+      if (tg.down > 0) continue;
+      const c = new THREE.Vector3().setFromMatrixPosition(tg.board.matrixWorld);
+      if (c.distanceTo(pos) < radius * 0.6) { tg.down = 5; tg.vel = -9; }
+    }
   }
 
   // Keeps the player out of props and lets her shove them a little.

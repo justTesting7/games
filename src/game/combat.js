@@ -1,7 +1,6 @@
 import * as THREE from 'three';
 
 export const MAX_HEALTH = 100;
-export const DAMAGE = { body: 9, head: 30 };
 const BODY_R = 0.25;
 const HEAD_R = 0.14;
 
@@ -82,9 +81,9 @@ export class Combat {
     return best;
   }
 
-  damage(victim, attacker, head, dir) {
-    if (!victim.alive) return;
-    const amount = head ? DAMAGE.head : DAMAGE.body;
+  // `info` is { head, weapon } and is passed on to the callbacks.
+  damage(victim, attacker, amount, dir, info = {}) {
+    if (!victim.alive || amount <= 0) return;
     victim.health = Math.max(0, victim.health - amount);
     victim.lastAttacker = attacker;
     victim.lastHitT = this.time;
@@ -92,10 +91,30 @@ export class Combat {
       victim.alive = false;
       victim.character.die(dir);
       if (attacker && attacker !== victim) attacker.kills++;
-      this.onKill?.(victim, attacker, head);
+      this.onKill?.(victim, attacker, info);
     } else {
       victim.character.hitReact(dir);
-      this.onDamage?.(victim, attacker, amount, dir, head);
+      this.onDamage?.(victim, attacker, amount, dir, info);
+    }
+  }
+
+  // Blast damage falls off with distance and is mostly stopped by cover.
+  explode(world, pos, radius, maxDamage, attacker) {
+    for (const f of this.fighters) {
+      if (!f.alive) continue;
+      const c = this.chest(f);
+      const to = c.clone().sub(pos);
+      const d = to.length();
+      if (d > radius) continue;
+      to.divideScalar(d || 1);
+      const from = pos.clone().addScaledVector(to, 0.05).setY(pos.y + 0.15);
+      const dir = c.clone().sub(from);
+      const len = dir.length();
+      dir.divideScalar(len || 1);
+      const hit = world.raycast(from, dir, len, null);
+      const covered = hit && !hit.fighter && hit.t < len - 0.3;
+      const k = Math.pow(1 - d / radius, 1.4);
+      this.damage(f, attacker, Math.round(maxDamage * k * (covered ? 0.25 : 1)), to, { weapon: 'grenade' });
     }
   }
 
