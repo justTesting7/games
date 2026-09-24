@@ -1,0 +1,26 @@
+{
+  "name": "relic-isle",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A photoreal third-person island adventure for the browser",
+  "type": "module",
+  "scripts": {
+    "predev": "node scripts/fetch-assets.mjs",
+    "dev": "vite",
+    "prebuild": "node scripts/fetch-assets.mjs",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/justTesting7/games.git"
+  },
+  "license": "ISC",
+  "dependencies": {
+    "@dgreenheck/ez-tree": "^1.1.0",
+    "three": "^0.186.0"
+  },
+  "devDependencies": {
+    "vite": "^8.3.0"
+  }
+}
