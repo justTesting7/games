@@ -5,6 +5,8 @@ const GRAVITY = 16;
 const JUMP_V = 5.0;
 const RADIUS = 0.3;
 const UP = new THREE.Vector3(0, 1, 0);
+const SHELTER_SPRINT = 6.3;
+const EXPOSE_LIMIT = 1.15;
 
 const wrapAngle = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 const gauss = () => (Math.random() + Math.random() + Math.random() - 1.5) / 0.5;
@@ -14,7 +16,7 @@ export const TACTICS = {
   strafe: { label: 'strafing', text: 'sidestep left and right at the current range while shooting' },
   hold: { label: 'holding', text: 'stand still and take slow, accurate shots' },
   flank: { label: 'flanking', text: 'circle around the target to attack from the side' },
-  take_cover: { label: 'taking cover', text: 'run behind the nearest tree or rock, then peek out and shoot' },
+  take_cover: { label: 'taking cover', text: 'sprint to solid cover first, then peek and shoot from safety' },
   retreat: { label: 'retreating', text: 'back away from the target while returning fire' },
   hunt: { label: 'hunting', text: 'move towards where an enemy was last seen to find them' },
 };
@@ -75,6 +77,11 @@ export class Rival {
     this.flankSide = Math.random() < 0.5 ? 1 : -1;
     this.errT = 0;
     this.cover = null;
+    this.reachedShelter = false;
+    this.exposedT = 0;
+    this.safeT = 0;
+    this.runningToShelter = false;
+    this.coverScanT = 0;
     this.stuckT = 0;
     this.detour = 0;
     this.lastProgress = this.pos.clone();
@@ -140,23 +147,114 @@ export class Rival {
     this.perceiveT -= dt;
   }
 
-  findCover(threat) {
+  coverSpot(c, threat) {
     const t = this.world.terrain;
-    const cols = this.world.veg.colliders.query(this.pos.x, this.pos.z, 24, this.cols);
-    let best = null, bestD = Infinity;
+    const pad = RADIUS + 0.42;
+    let sx, sz;
+    if (c.box) {
+      const cx = (c.x0 + c.x1) * 0.5, cz = (c.z0 + c.z1) * 0.5;
+      const ax = cx - threat.x, az = cz - threat.z;
+      if (Math.abs(ax) * (c.z1 - c.z0) >= Math.abs(az) * (c.x1 - c.x0)) {
+        const nx = ax >= 0 ? 1 : -1;
+        sx = nx > 0 ? c.x1 + pad : c.x0 - pad;
+        sz = THREE.MathUtils.clamp(this.pos.z, c.z0 + 0.35, c.z1 - 0.35);
+      } else {
+        const nz = az >= 0 ? 1 : -1;
+        sz = nz > 0 ? c.z1 + pad : c.z0 - pad;
+        sx = THREE.MathUtils.clamp(this.pos.x, c.x0 + 0.35, c.x1 - 0.35);
+      }
+    } else {
+      const away = new THREE.Vector3(c.x - threat.x, 0, c.z - threat.z);
+      if (away.lengthSq() < 1e-5) away.set(this.pos.x - c.x, 0, this.pos.z - c.z);
+      if (away.lengthSq() < 1e-5) away.set(1, 0, 0);
+      away.normalize();
+      sx = c.x + away.x * (c.r + pad);
+      sz = c.z + away.z * (c.r + pad);
+    }
+    if (!t.inBounds(sx, sz)) return null;
+    const h = t.heightAt(sx, sz);
+    if (h < 0.15) return null;
+    return new THREE.Vector3(sx, h, sz);
+  }
+
+  coverHides(spot, threat) {
+    const from = threat.clone().setY((threat.y || 0) + 1.55);
+    const to = spot.clone().setY(spot.y + 1.25);
+    const dir = to.sub(from);
+    const len = dir.length();
+    if (len < 0.4) return false;
+    dir.divideScalar(len);
+    const hit = this.world.raycast(from, dir, len - 0.2, this.fighter);
+    return !!(hit && !hit.fighter && hit.t < len - 0.3);
+  }
+
+  findCover(threat) {
+    if (!threat) return null;
+    const t = this.world.terrain;
+    const cols = this.world.veg.colliders.query(this.pos.x, this.pos.z, 32, this.cols);
+    let best = null, bestS = Infinity;
     for (const c of cols) {
-      const stand = c.y1 - t.heightAt(c.x, c.z);
-      const minH = (c.type === 'cover' || c.type === 'metal' || c.type === 'wood') ? 0.75 : 1.25;
-      if (c.r < 0.15 || stand < minH) continue;
-      const away = new THREE.Vector3(c.x - threat.x, 0, c.z - threat.z).normalize();
-      const spot = new THREE.Vector3(c.x, 0, c.z).addScaledVector(away, c.r + RADIUS + 0.35);
-      const h = t.heightAt(spot.x, spot.z);
-      if (h < 0.2) continue;
-      spot.y = h;
-      const d = spot.distanceTo(this.pos) + new THREE.Vector3(c.x - threat.x, 0, c.z - threat.z).length() * 0.15;
-      if (d < bestD) { bestD = d; best = { c, spot, type: c.type === 'wood' ? 'tree' : 'rock' }; }
+      const cx = c.box ? (c.x0 + c.x1) * 0.5 : c.x;
+      const cz = c.box ? (c.z0 + c.z1) * 0.5 : c.z;
+      const ground = t.heightAt(cx, cz);
+      const stand = c.y1 - ground;
+      const minH = (c.type === 'cover' || c.type === 'metal' || c.type === 'wood') ? 0.7 : 1.05;
+      if (stand < minH) continue;
+      if (!c.box && c.r < 0.2) continue;
+      if (c.box && Math.max(c.x1 - c.x0, c.z1 - c.z0) > 28) continue;
+      const spot = this.coverSpot(c, threat);
+      if (!spot) continue;
+      const d = spot.distanceTo(this.pos);
+      if (d > 28) continue;
+      const hides = this.coverHides(spot, threat);
+      const score = d + (hides ? 0 : 10) + d * 0.05;
+      if (score < bestS) {
+        bestS = score;
+        const kind = c.type === 'wood' ? 'tree' : c.type === 'metal' ? 'metal' : c.box ? 'cover' : 'rock';
+        best = { c, spot, type: kind };
+      }
     }
     return best;
+  }
+
+  isSheltered(threat) {
+    if (!threat) return true;
+    if (this.cover && this.pos.distanceTo(this.cover.spot) < 1.2) return true;
+    const from = threat.clone().setY((threat.y || 0) + 1.55);
+    const chest = this.combat.chest(this.fighter);
+    const dir = chest.clone().sub(from);
+    const len = dir.length();
+    if (len < 0.8) return false;
+    dir.divideScalar(len);
+    const hit = this.world.raycast(from, dir, len - 0.2, this.fighter);
+    return !!(hit && !hit.fighter && hit.t < len - 0.35);
+  }
+
+  shotsFlying() {
+    const now = this.combat.time;
+    return this.combat.fighters.some((f) => f.alive && now - (f.lastShotT ?? -99) < 2.0);
+  }
+
+  underFire() {
+    return this.combat.time - this.fighter.lastHitT < 2.4;
+  }
+
+  nearCover() {
+    return !!(this.cover?.spot && this.pos.distanceTo(this.cover.spot) < 2.2);
+  }
+
+  canFight() {
+    return this.reachedShelter && !this.runningToShelter;
+  }
+
+  shouldShelter() {
+    if (this.isSheltered(this.threatPos())) return false;
+    const seen = this.enemies().some((e) => this.seen(e).visible);
+    if (!this.reachedShelter && seen) return true;
+    if (this.underFire()) return true;
+    if (!this.shotsFlying()) return false;
+    if (!this.nearCover() || this.exposedT > EXPOSE_LIMIT) return true;
+    return false;
   }
 
   threatPos() {
@@ -178,7 +276,7 @@ export class Rival {
     const offer = (k) => { options[k] = TACTICS[k].text; };
     if (anyVisible) ['push', 'strafe', 'hold', 'flank', 'retreat'].forEach(offer);
     else ['hunt', 'hold'].forEach(offer);
-    if (cover) offer('take_cover');
+    if (cover || this.shouldShelter()) offer('take_cover');
 
     const L = me.loadout;
     const nearest = enemies.reduce((a, e) => Math.min(a, e.pos.distanceTo(this.pos)), Infinity);
@@ -216,7 +314,7 @@ export class Rival {
     const questions = {
       tactic: {
         type: 'choice',
-        instructions: `You are ${me.name}, ${this.persona.personality}. This is a pistol deathmatch on a forested island: everyone fights everyone and the last one standing wins. Pick your tactic for the next second, in character.`,
+        instructions: `You are ${me.name}, ${this.persona.personality}. Get to cover first, then fight from it. Do not stand in the open while shots are flying. Last one standing wins. Pick your tactic for the next second, in character.`,
         criteria: options,
       },
     };
@@ -269,6 +367,12 @@ export class Rival {
     if (!target) target = this.localTarget(alive);
     this.setTarget(target);
 
+    if (this.shouldShelter()) {
+      this.source = this.source === 'jev' ? 'jev' : 'local';
+      this.setTactic(cover ? 'take_cover' : 'retreat', cover);
+      return;
+    }
+
     const t = ans?.tactic;
     if (t && options[t.choice]) {
       this.source = 'jev';
@@ -295,12 +399,12 @@ export class Rival {
       const hidden = this.target && !this.seen(this.target).visible;
       if (d > 5 && d < 38 && (hidden || Math.random() < 0.62)) choice = 'grenade';
     }
-    if (choice === 'grenade') {
+    if (choice === 'grenade' && this.canFight()) {
       this.want = 'grenade';
       this.throwAt = this.threatPos()?.clone() || null;
     } else {
-      this.gun = choice;
-      if (this.want !== 'grenade') this.want = choice;
+      if (choice !== 'grenade') this.gun = choice;
+      if (this.want !== 'grenade') this.want = this.gun;
     }
     this.fighter.preferRifle = this.gun === 'rifle';
   }
@@ -327,13 +431,17 @@ export class Rival {
 
   localTactic(options, cover) {
     const me = this.fighter;
-    if (!this.target || !this.seen(this.target).visible) return 'hunt';
+    const visible = this.target && this.seen(this.target).visible;
+    if (this.shouldShelter()) return cover ? 'take_cover' : 'retreat';
+    if (!visible) return this.shotsFlying() && cover ? 'take_cover' : 'hunt';
     const d = this.target.pos.distanceTo(this.pos);
-    if (me.health < 35) return cover && options.take_cover ? 'take_cover' : 'retreat';
-    if (d > 28) return 'push';
-    if (cover && this.persona.prefersCover && Math.random() < 0.5) return 'take_cover';
-    if (this.persona.style === 'flanker' && options.flank && Math.random() < 0.5) return 'flank';
-    return Math.random() < 0.6 ? 'strafe' : d > 14 ? 'hold' : 'push';
+    if (me.health < 35) return cover ? 'take_cover' : 'retreat';
+    if (this.reachedShelter && this.isSheltered(this.threatPos())) {
+      if (this.persona.style === 'flanker' && options.flank && !this.shotsFlying() && Math.random() < 0.25) return 'flank';
+      return Math.random() < 0.55 ? 'hold' : 'strafe';
+    }
+    if (!this.shotsFlying() && !this.underFire() && d > 28) return 'push';
+    return cover ? 'take_cover' : 'hold';
   }
 
   setTarget(t) {
@@ -344,41 +452,109 @@ export class Rival {
   }
 
   setTactic(t, cover) {
+    if (t === 'take_cover') this.cover = cover || this.cover || this.findCover(this.threatPos() || this.pos);
     if (t === this.tactic) return;
     this.tactic = t;
     this.strafeDir = Math.random() < 0.5 ? 1 : -1;
     this.strafeT = 0.6 + Math.random();
     this.flankSide = Math.random() < 0.5 ? 1 : -1;
-    this.cover = t === 'take_cover' ? cover : null;
+    if (t !== 'take_cover' && !this.runningToShelter) this.cover = cover || this.cover;
+  }
+
+  updateShelter(dt, threat) {
+    this.coverScanT = (this.coverScanT || 0) - dt;
+    if (threat && (this.coverScanT <= 0 || !this.cover)) {
+      this.coverScanT = 0.22;
+      const found = this.findCover(threat);
+      if (found) this.cover = found;
+    }
+    const anySeen = this.enemies().some((e) => this.seen(e).visible);
+    const shots = this.underFire() || this.shotsFlying();
+    if (!anySeen && !shots) {
+      this.exposedT = 0;
+      if (this.safeT > 3.5) this.reachedShelter = false;
+    }
+    const sheltered = this.isSheltered(threat);
+    if (sheltered) {
+      this.safeT += dt;
+      this.exposedT = 0;
+      if (this.safeT > 0.2) {
+        this.reachedShelter = true;
+        this.runningToShelter = false;
+      }
+    } else {
+      this.exposedT += dt;
+      this.safeT = 0;
+    }
+    if (this.shouldShelter()) {
+      this.runningToShelter = true;
+      if (this.cover && this.tactic !== 'take_cover') this.setTactic('take_cover', this.cover);
+      else if (!this.cover && this.tactic !== 'retreat') this.setTactic('retreat');
+    }
+  }
+
+  steerToCover(out, tp, side, visible) {
+    let c = this.cover;
+    if (!c || !c.spot) {
+      c = this.findCover(tp);
+      this.cover = c;
+    }
+    if (!c) {
+      out.dir.set(this.pos.x - tp.x, 0, this.pos.z - tp.z);
+      if (out.dir.lengthSq() < 1e-6) out.dir.copy(side);
+      else out.dir.normalize();
+      out.speed = SHELTER_SPRINT;
+      out.aim = false;
+      return;
+    }
+    const spot = this.coverSpot(c.c, tp) || c.spot;
+    c.spot.copy(spot);
+    const toSpot = new THREE.Vector3(spot.x - this.pos.x, 0, spot.z - this.pos.z);
+    const ds = toSpot.length();
+    if (ds > 0.55) {
+      out.dir.copy(toSpot).divideScalar(ds);
+      out.speed = SHELTER_SPRINT;
+      out.aim = false;
+      this.runningToShelter = true;
+    } else {
+      this.runningToShelter = false;
+      this.reachedShelter = true;
+      out.aim = visible;
+      if (visible && this.safeT > 0.35 && !this.underFire()) {
+        out.dir.copy(side).multiplyScalar(this.strafeDir);
+        out.speed = 1.15;
+      }
+    }
   }
 
   // Turns the tactic into a movement wish for this frame.
   steer(dt) {
     const out = { dir: new THREE.Vector3(), speed: 0, aim: false, jump: false };
     const T = this.target;
-    if (!T) return out;
+    const tp = this.threatPos() || (T ? T.pos : null);
+    this.updateShelter(dt, tp);
+    if (!T || !tp) return out;
     const m = this.seen(T);
-    const tp = this.threatPos();
     const to = new THREE.Vector3(tp.x - this.pos.x, 0, tp.z - this.pos.z);
     const d = to.length() || 1;
     to.divideScalar(d);
     const side = new THREE.Vector3(to.z, 0, -to.x);
     const visible = m.visible;
-    out.aim = visible && d < 70;
+    out.aim = visible && d < 70 && this.canFight();
 
     this.strafeT -= dt;
     if (this.strafeT <= 0) { this.strafeDir *= -1; this.strafeT = 0.7 + Math.random() * 1.4; }
-    const underFire = this.combat.time - this.fighter.lastHitT < 1.5;
 
-    switch (this.tactic) {
+    if (this.runningToShelter || this.shouldShelter() || this.tactic === 'take_cover') {
+      this.steerToCover(out, tp, side, visible);
+    } else switch (this.tactic) {
       case 'push':
         if (d > 7) { out.dir.copy(to).addScaledVector(side, this.strafeDir * 0.35); out.speed = visible ? 3.6 : 4.8; }
         else { out.dir.copy(side).multiplyScalar(this.strafeDir); out.speed = 2.4; }
         break;
       case 'strafe':
         out.dir.copy(side).multiplyScalar(this.strafeDir).addScaledVector(to, d < 9 ? -0.4 : d > 26 ? 0.45 : 0);
-        out.speed = 2.9;
-        out.jump = underFire && Math.random() < dt * 0.8;
+        out.speed = 2.6;
         break;
       case 'hold':
         if (!visible) { out.dir.copy(side).multiplyScalar(this.strafeDir); out.speed = 1.4; }
@@ -389,31 +565,12 @@ export class Rival {
         break;
       case 'retreat':
         out.dir.copy(to).negate().addScaledVector(side, this.strafeDir * 0.5);
-        out.speed = visible ? 3.0 : 5.2;
+        out.speed = SHELTER_SPRINT;
         break;
-      case 'take_cover': {
-        const c = this.cover;
-        if (!c) { out.dir.copy(side).multiplyScalar(this.strafeDir); out.speed = 2.8; break; }
-        // Keep the obstacle between us and the threat as it moves.
-        const away = new THREE.Vector3(c.c.x - tp.x, 0, c.c.z - tp.z).normalize();
-        c.spot.set(c.c.x, 0, c.c.z).addScaledVector(away, c.c.r + RADIUS + 0.35);
-        const toSpot = new THREE.Vector3(c.spot.x - this.pos.x, 0, c.spot.z - this.pos.z);
-        const ds = toSpot.length();
-        if (ds > 0.6) {
-          out.dir.copy(toSpot).divideScalar(ds);
-          out.speed = ds > 3 ? 5.4 : 2.4;
-          out.aim = out.aim && ds < 5;
-        } else if (!visible && this.combat.time - m.lastT > 2) {
-          // Peek out sideways when the target has been hidden for a while.
-          out.dir.copy(side).multiplyScalar(this.strafeDir);
-          out.speed = 1.6;
-        }
-        break;
-      }
       case 'hunt':
       default:
         if (d > 4) { out.dir.copy(to); out.speed = d > 15 ? 4.6 : 3.2; }
-        out.aim = visible;
+        out.aim = visible && this.canFight() && !this.shouldShelter();
         break;
     }
 
@@ -424,7 +581,7 @@ export class Rival {
       out.aim = false;
       out.jump = danger.fuse < 0.6 && Math.random() < 0.3;
     }
-    if (this.want === 'grenade' && this.throwAt) out.aim = true;
+    if (this.want === 'grenade' && this.throwAt && this.canFight()) out.aim = true;
 
     // Personal space, and a way around whatever is blocking the path.
     for (const f of this.combat.fighters) {
@@ -475,9 +632,10 @@ export class Rival {
     const ch = this.character;
     let want = this.want;
     if (want === 'grenade' && (L.grenades <= 0 || !this.throwAt)) want = this.want = this.gun;
+    if (want === 'grenade' && !this.canFight()) want = this.gun;
     if (!L.has(want)) want = L.has(this.gun) ? this.gun : L.has('pistols') ? 'pistols' : 'rifle';
     if (want !== L.current && !(L.current === 'grenade' && ch.action)) this.weapons.equip(f, want);
-    if (L.current === 'grenade' && ch.weapon === 'grenade' && ch.equipT >= 1 && !ch.action && this.throwAt) {
+    if (this.canFight() && L.current === 'grenade' && ch.weapon === 'grenade' && ch.equipT >= 1 && !ch.action && this.throwAt) {
       const facing = Math.atan2(this.throwAt.x - this.pos.x, this.throwAt.z - this.pos.z);
       if (Math.abs(wrapAngle(facing - this.yaw)) < 0.25) {
         const from = this.pos.clone().setY(this.pos.y + 1.75);
@@ -499,7 +657,7 @@ export class Rival {
     this.cooldown -= dt;
     const T = this.target;
     const L = this.fighter.loadout;
-    if (!T || !wish.aim || L.current === 'grenade') return;
+    if (!T || !wish.aim || !this.canFight() || L.current === 'grenade') return;
     const m = this.seen(T);
     const rifle = L.current === 'rifle';
     if (!m.visible || m.sightT < this.persona.reaction + (rifle ? 0.3 : 0)) return;
