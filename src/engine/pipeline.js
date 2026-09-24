@@ -141,6 +141,10 @@ export class Pipeline {
     this.envRT = null;
 
     this.sun = new THREE.DirectionalLight(0xffffff, 1);
+    if (this.mobile) {
+      this.hemi = new THREE.HemisphereLight(0xb8c8dc, 0x3d4034, 0.45);
+      this.scene.add(this.hemi);
+    }
     this.sun.castShadow = true;
     this.sun.shadow.bias = -0.0004;
     this.sun.shadow.normalBias = 0.035;
@@ -234,9 +238,16 @@ export class Pipeline {
       uUnderwater: { value: 0 },
       uTime: this.u.uTime,
       uExposureBias: { value: 1.0 },
+      uAutoExposure: { value: 1 },
       uVignette: { value: 0.55 },
       uFlash: { value: 0 },
     });
+    if (this.mobile) {
+      this.compositeMaterial.uniforms.uAutoExposure.value = 0;
+      this.compositeMaterial.uniforms.uExposureBias.value = 0.72;
+      this.compositeMaterial.uniforms.uBloom.value = 0;
+      this.compositeMaterial.uniforms.uVignette.value = 0.4;
+    }
 
     this.lumRT = [0, 1].map(() => hdrTarget(1, 1, this.hdrType, { minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter }));
     this.lumIndex = 0;
@@ -255,7 +266,13 @@ export class Pipeline {
   }
 
   setQuality(name) {
-    const q = QUALITY[name];
+    const q = { ...QUALITY[name] };
+    if (this.mobile) {
+      q.shadow = Math.min(q.shadow, 512);
+      q.ssr = 0;
+      q.msaa = 0;
+      q.pixelRatio = Math.min(q.pixelRatio, 0.7);
+    }
     this.qualityName = name;
     const changedMsaa = !this.quality || this.quality.msaa !== q.msaa;
     this.quality = q;
@@ -277,7 +294,7 @@ export class Pipeline {
   resize(w, h) {
     w = Math.max(2, Math.round(w) || 2);
     h = Math.max(2, Math.round(h) || 2);
-    const cap = this.mobile ? 1280 : 3840;
+    const cap = this.mobile ? 960 : 3840;
     if (w > cap) { h = Math.max(2, Math.round(h * cap / w)); w = cap; }
     if (h > cap) { w = Math.max(2, Math.round(w * cap / h)); h = cap; }
     this.renderer.setSize(w, h, false);
@@ -292,13 +309,17 @@ export class Pipeline {
 
     this.bloomRTs?.forEach((r) => r.dispose());
     this.bloomRTs = [];
-    let bw = W, bh = H;
-    for (let i = 0; i < 6; i++) {
-      bw = Math.max(1, bw >> 1); bh = Math.max(1, bh >> 1);
-      this.bloomRTs.push(hdrTarget(bw, bh, this.hdrType));
+    if (!this.mobile) {
+      let bw = W, bh = H;
+      for (let i = 0; i < 6; i++) {
+        bw = Math.max(1, bw >> 1); bh = Math.max(1, bh >> 1);
+        this.bloomRTs.push(hdrTarget(bw, bh, this.hdrType));
+      }
+      const rw = Math.max(1, W >> 1), rh = Math.max(1, H >> 1);
+      if (!this.raysRT) this.raysRT = hdrTarget(rw, rh, this.hdrType); else this.raysRT.setSize(rw, rh);
+    } else if (!this.blackRT) {
+      this.blackRT = hdrTarget(2, 2, this.hdrType);
     }
-    const rw = Math.max(1, W >> 1), rh = Math.max(1, H >> 1);
-    if (!this.raysRT) this.raysRT = hdrTarget(rw, rh, this.hdrType); else this.raysRT.setSize(rw, rh);
     this.waterMaterial.uniforms.uResolution.value.set(W, H);
   }
 
@@ -319,9 +340,10 @@ export class Pipeline {
       transmittance(this.moonDir, tmp);
       this.lightColor.copy(tmp).multiply(new THREE.Vector3(0.55, 0.7, 1.0)).multiplyScalar(0.12 * Math.PI * moonF);
     }
+    if (this.mobile) this.lightColor.multiplyScalar(0.085);
     const lc = this.lightColor;
     const li = Math.max(lc.x, lc.y, lc.z);
-    this.sun.intensity = li;
+    this.sun.intensity = this.mobile ? Math.min(li, 1.6) : li;
     if (li > 0) this.sun.color.setRGB(lc.x / li, lc.y / li, lc.z / li, THREE.LinearSRGBColorSpace);
     this.sun.castShadow = li > 1e-3;
     this.night = smoothstep(0.08, -0.18, this.sunDir.y);
@@ -354,7 +376,9 @@ export class Pipeline {
 
     this.quad.render(r, this.skyGenMaterial, this.skyRT);
     this.envAge += dt;
-    if (this.envAge > (this.mobile ? 8 : 1.5) || !this.envRT) {
+    if (this.mobile) {
+      this.scene.environment = null;
+    } else if (this.envAge > 1.5 || !this.envRT) {
       this.envAge = 0;
       try {
         this.envRT = this.pmrem.fromEquirectangular(this.skyRT.texture, this.envRT);
@@ -394,56 +418,65 @@ export class Pipeline {
     this.quad.render(r, this.fogMaterial, this.fogRT);
     const sceneTex = this.fogRT.texture;
 
-    let src = sceneTex;
-    let sw = W, sh = H;
-    for (let i = 0; i < this.bloomRTs.length; i++) {
-      const u = this.bloomDown.uniforms;
-      u.tSrc.value = src;
-      u.uTexel.value.set(1 / sw, 1 / sh);
-      u.uFirst.value = i === 0;
-      this.quad.render(r, this.bloomDown, this.bloomRTs[i]);
-      src = this.bloomRTs[i].texture;
-      sw = this.bloomRTs[i].width; sh = this.bloomRTs[i].height;
-    }
-
-    const prev = this.lumRT[this.lumIndex];
-    const next = this.lumRT[1 - this.lumIndex];
-    const lu = this.lumMaterial.uniforms;
-    lu.tScene.value = this.bloomRTs[2].texture;
-    lu.tPrev.value = prev.texture;
-    lu.uDt.value = Math.min(dt, 0.1);
-    lu.uReset.value = this.firstFrame;
-    this.quad.render(r, this.lumMaterial, next);
-    this.lumIndex = 1 - this.lumIndex;
-    this.firstFrame = false;
-
-    for (let i = this.bloomRTs.length - 2; i >= 0; i--) {
-      const u = this.bloomUp.uniforms;
-      const s = this.bloomRTs[i + 1];
-      u.tSrc.value = s.texture;
-      u.uTexel.value.set(1 / s.width, 1 / s.height);
-      this.quad.render(r, this.bloomUp, this.bloomRTs[i]);
-    }
-
-    const lightPos = camera.position.clone().addScaledVector(this.lightDir, 1000).project(camera);
-    const facing = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).dot(this.lightDir);
+    let bloomTex = this.blackRT?.texture || sceneTex;
+    let lumTex = this.lumRT[0].texture;
+    let raysTex = this.blackRT?.texture || sceneTex;
     let rays = 0;
-    if (facing > 0 && lightPos.z < 1) {
-      const onScreen = 1 - smoothstep(0.9, 1.6, Math.max(Math.abs(lightPos.x), Math.abs(lightPos.y)));
-      rays = onScreen * smoothstep(0.0, 0.35, facing) * (opts.underwater ? 0.3 : 1);
-      const ru = this.raysMaterial.uniforms;
-      ru.tScene.value = sceneTex;
-      ru.uSunUV.value.set(lightPos.x * 0.5 + 0.5, lightPos.y * 0.5 + 0.5);
-      ru.uAspect.value = W / H;
-      ru.uFrame.value = this.frame % 64;
-      this.quad.render(r, this.raysMaterial, this.raysRT);
+
+    if (this.bloomRTs.length) {
+      let src = sceneTex;
+      let sw = W, sh = H;
+      for (let i = 0; i < this.bloomRTs.length; i++) {
+        const u = this.bloomDown.uniforms;
+        u.tSrc.value = src;
+        u.uTexel.value.set(1 / sw, 1 / sh);
+        u.uFirst.value = i === 0;
+        this.quad.render(r, this.bloomDown, this.bloomRTs[i]);
+        src = this.bloomRTs[i].texture;
+        sw = this.bloomRTs[i].width; sh = this.bloomRTs[i].height;
+      }
+
+      const prev = this.lumRT[this.lumIndex];
+      const next = this.lumRT[1 - this.lumIndex];
+      const lu = this.lumMaterial.uniforms;
+      lu.tScene.value = this.bloomRTs[2].texture;
+      lu.tPrev.value = prev.texture;
+      lu.uDt.value = Math.min(dt, 0.1);
+      lu.uReset.value = this.firstFrame;
+      this.quad.render(r, this.lumMaterial, next);
+      this.lumIndex = 1 - this.lumIndex;
+      lumTex = next.texture;
+
+      for (let i = this.bloomRTs.length - 2; i >= 0; i--) {
+        const u = this.bloomUp.uniforms;
+        const s = this.bloomRTs[i + 1];
+        u.tSrc.value = s.texture;
+        u.uTexel.value.set(1 / s.width, 1 / s.height);
+        this.quad.render(r, this.bloomUp, this.bloomRTs[i]);
+      }
+      bloomTex = this.bloomRTs[0].texture;
+
+      const lightPos = camera.position.clone().addScaledVector(this.lightDir, 1000).project(camera);
+      const facing = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).dot(this.lightDir);
+      if (facing > 0 && lightPos.z < 1 && this.raysRT) {
+        const onScreen = 1 - smoothstep(0.9, 1.6, Math.max(Math.abs(lightPos.x), Math.abs(lightPos.y)));
+        rays = onScreen * smoothstep(0.0, 0.35, facing) * (opts.underwater ? 0.3 : 1);
+        const ru = this.raysMaterial.uniforms;
+        ru.tScene.value = sceneTex;
+        ru.uSunUV.value.set(lightPos.x * 0.5 + 0.5, lightPos.y * 0.5 + 0.5);
+        ru.uAspect.value = W / H;
+        ru.uFrame.value = this.frame % 64;
+        this.quad.render(r, this.raysMaterial, this.raysRT);
+        raysTex = this.raysRT.texture;
+      }
     }
+    this.firstFrame = false;
 
     const cu = this.compositeMaterial.uniforms;
     cu.tScene.value = sceneTex;
-    cu.tBloom.value = this.bloomRTs[0].texture;
-    cu.tLum.value = next.texture;
-    cu.tRays.value = this.raysRT.texture;
+    cu.tBloom.value = bloomTex;
+    cu.tLum.value = lumTex;
+    cu.tRays.value = raysTex;
     cu.uRays.value = rays * 1.2;
     cu.uUnderwater.value = opts.underwater ? 1 : 0;
     cu.uFlash.value = opts.flash || 0;

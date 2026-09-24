@@ -281,7 +281,9 @@ export class Terrain {
       uPlazaRoad: { value: CITY.plazaRoad },
     };
 
-    this.material = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, metalness: 0 });
+    this.material = new THREE.MeshStandardMaterial({
+      color: 0x6b7a48, roughness: 1, metalness: 0, envMapIntensity: 0.2,
+    });
     this.material.onBeforeCompile = (shader) => {
       Object.assign(shader.uniforms, this.uniforms);
       shader.vertexShader = terrainVertexPars + shader.vertexShader
