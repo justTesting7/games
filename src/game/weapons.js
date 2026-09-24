@@ -492,7 +492,7 @@ export class Weapons {
       this.character.grenadeWindup = 0;
       this.updateArc(false);
       if (L.current === 'rifle') {
-        // Hold left mouse to scope; the shot goes on release.
+        // Hold Space to scope; the shot goes on release.
         if (input.fire) {
           this.player.aimHold = 1.2;
           this.sniperHeld = true;

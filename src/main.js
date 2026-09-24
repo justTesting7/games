@@ -91,7 +91,14 @@ const input = { forward: false, back: false, left: false, right: false, sprint: 
 const keymap = { KeyW: 'forward', ArrowUp: 'forward', KeyS: 'back', ArrowDown: 'back', KeyA: 'left', ArrowLeft: 'left', KeyD: 'right', ArrowRight: 'right', ShiftLeft: 'sprint', ShiftRight: 'sprint', ControlLeft: 'crouch', ControlRight: 'crouch', KeyT: 'fastTime' };
 addEventListener('keydown', (e) => {
   if (keymap[e.code]) input[keymap[e.code]] = true;
-  if (e.code === 'Space') { input.jump = true; e.preventDefault(); }
+  if (e.code === 'Space') {
+    e.preventDefault();
+    if (document.pointerLockElement === canvas) {
+      input.fire = true;
+      if (!e.repeat) input.firePressed = true;
+    }
+  }
+  if (e.code === 'KeyF' && !e.repeat) input.jump = true;
   if (e.code === 'KeyC' && !e.repeat) input.toggleCrouch = true;
   if (e.code === 'KeyV' && !e.repeat) input.toggleWalk = true;
   if (e.code === 'KeyR' && !e.repeat) input.reload = true;
@@ -102,14 +109,13 @@ addEventListener('keydown', (e) => {
 });
 addEventListener('keyup', (e) => {
   if (keymap[e.code]) input[keymap[e.code]] = false;
+  if (e.code === 'Space') { input.fire = false; input.fireReleased = true; }
 });
 canvas.addEventListener('mousedown', (e) => {
   if (document.pointerLockElement !== canvas) return;
-  if (e.button === 0) { input.fire = true; input.firePressed = true; }
   if (e.button === 2) input.aim = true;
 });
 addEventListener('mouseup', (e) => {
-  if (e.button === 0) { input.fire = false; input.fireReleased = true; }
   if (e.button === 2) input.aim = false;
 });
 addEventListener('contextmenu', (e) => e.preventDefault());
