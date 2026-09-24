@@ -129,7 +129,6 @@ export class SuicideDrone {
     this.mesh.visible = true;
     this.mesh.position.copy(pos);
     this.audio.droneStart();
-    d.born = 0;
     return true;
   }
 
