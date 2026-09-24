@@ -52,7 +52,7 @@ function replaceCanvas(old) {
   return fresh;
 }
 
-function acquireContext(canvas) {
+export function acquireContext(canvas) {
   let el = canvas;
   for (let i = 0; i < ATTR_SETS.length; i++) {
     ensureCanvasSize(el);
