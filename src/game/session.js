@@ -118,6 +118,10 @@ export class Session {
     this.drones = new Map();
     world.netDrones = this.drones;
     this.poseAcc = 0;
+    this.lastPoseKey = '';
+    this.lastPoseAt = 0;
+    this.lastDroneKey = '';
+    this.lastDroneAt = 0;
     this.wantReady = false;
     this.readySent = false;
     this.botsParked = false;
@@ -152,11 +156,12 @@ export class Session {
 
   sendPose(dt) {
     this.poseAcc += dt;
-    if (dt < 1 && this.poseAcc < 1 / 15) return;
+    const force = dt >= 1;
+    if (this.poseAcc < (force ? 1 : 1 / 8)) return;
     this.poseAcc = 0;
     const p = this.player;
     const L = p.fighter.loadout;
-    this.net.send({
+    const msg = {
       t: 'pose',
       p: [+p.pos.x.toFixed(2), +p.pos.y.toFixed(2), +p.pos.z.toFixed(2)],
       yaw: +p.yaw.toFixed(3),
@@ -167,7 +172,14 @@ export class Session {
       aim: p.aimHold > 0 || p.scoped,
       w: L.current,
       alive: p.fighter.alive,
-    });
+    };
+    const key = `${msg.p}|${msg.yaw}|${msg.pitch}|${msg.spd}|${msg.g}|${msg.cr}|${msg.aim}|${msg.w}|${msg.alive}`;
+    const now = performance.now();
+    // Standing still: at most a 2s heartbeat so idle sockets stay alive.
+    if (!force && key === this.lastPoseKey && now - this.lastPoseAt < 2000) return;
+    this.lastPoseKey = key;
+    this.lastPoseAt = now;
+    this.net.send(msg);
   }
 
   reportShot(o, d, w, hid, head) {
@@ -198,6 +210,13 @@ export class Session {
 
   reportDrone(action, extra = {}) {
     if (!this.multi) return;
+    if (action === 'pose' && extra.p) {
+      const key = `${extra.p}|${extra.yaw}|${extra.pitch}`;
+      const now = performance.now();
+      if (key === this.lastDroneKey && now - this.lastDroneAt < 250) return;
+      this.lastDroneKey = key;
+      this.lastDroneAt = now;
+    }
     this.net.send({ t: 'drone', a: action, ...extra });
   }
 

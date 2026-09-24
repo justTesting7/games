@@ -206,11 +206,14 @@ $('roomcode').oninput = () => {
 
 let timeOfDay = mapDef.timeOfDay;
 $('timeofday').value = Math.round(timeOfDay * 1000);
+let timeSend = 0;
 $('timeofday').oninput = (e) => {
   timeOfDay = e.target.value / 1000;
-  if (mode === 'multi' && session?.isHost && net.status === 'online') {
+  if (mode !== 'multi' || !session?.isHost || net.status !== 'online') return;
+  clearTimeout(timeSend);
+  timeSend = setTimeout(() => {
     net.send({ t: 'settings', time: timeOfDay, min: Number($('minplayers').value) });
-  }
+  }, 250);
 };
 
 const minPlayers = () => Math.max(2, Math.min(12, Number($('minplayers').value) || 2));
@@ -896,7 +899,7 @@ async function init() {
     if (mode !== 'multi' || !session) return;
     if (document.visibilityState === 'visible') return;
     if (net.status === 'online') session.sendPose(1);
-    else if (net.identity) net.connect(net.identity);
+    else if (net.identity && net.status !== 'connecting') net.connect(net.identity);
   }, 1000);
 }
 

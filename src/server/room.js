@@ -33,15 +33,7 @@ export class GameRoom extends DurableObject {
     this.hostId = (await this.ctx.storage.get('hostId')) || '';
     this.nextSlot = 0;
     const saved = (await this.ctx.storage.get('players')) || {};
-    const live = new Set();
-    for (const ws of this.ctx.getWebSockets()) {
-      const a = ws.deserializeAttachment() || {};
-      if (!a.id) continue;
-      this.adopt(ws, { ...saved[a.id], ...a, away: false });
-      live.add(a.id);
-    }
     for (const [id, rec] of Object.entries(saved)) {
-      if (live.has(id)) continue;
       this.adopt(null, { ...rec, id, away: true, awayAt: rec.awayAt || Date.now() });
     }
     if (this.hostId && !this.players.has(this.hostId)) this.hostId = this.firstSeat()?.id || '';
@@ -150,14 +142,25 @@ export class GameRoom extends DurableObject {
     }
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
-    this.ctx.acceptWebSocket(server);
+    // Regular accept(), not ctx.acceptWebSocket(). Hibernation bills every
+    // incoming pose as a Durable Object request; a match at 15 Hz burns the
+    // free daily quota in about an hour. Gameplay sockets stay awake instead.
+    server.accept();
+    server.addEventListener('message', (event) => {
+      this.webSocketMessage(server, event.data).catch(() => {});
+    });
+    server.addEventListener('close', () => {
+      this.webSocketClose(server).catch(() => {});
+    });
+    server.addEventListener('error', () => {
+      this.webSocketClose(server).catch(() => {});
+    });
     const resume = str(url.searchParams.get('resume'), 8);
     const existing = resume && this.players.get(resume);
     if (existing) {
       existing.ws = server;
       existing.away = false;
       existing.awayAt = 0;
-      server.serializeAttachment({ id: existing.id, slot: existing.slot, name: existing.name, color: existing.color, roster: existing.roster });
       this.broadcast(server, { t: 'back', id: existing.id });
       this.send(server, {
         t: 'hello',
@@ -176,7 +179,6 @@ export class GameRoom extends DurableObject {
     const id = crypto.randomUUID().slice(0, 8);
     const p = this.adopt(server, { id });
     if (!this.hostId || !this.players.has(this.hostId)) this.hostId = id;
-    server.serializeAttachment({ id, slot: p.slot, name: p.name, color: p.color, roster: p.roster });
     this.broadcast(server, { t: 'join', ...this.snap(p) });
     this.send(server, {
       t: 'hello',
@@ -195,8 +197,7 @@ export class GameRoom extends DurableObject {
   }
 
   playerOf(ws) {
-    const a = ws.deserializeAttachment() || {};
-    return this.players.get(a.id) || [...this.players.values()].find((p) => p.ws === ws);
+    return [...this.players.values()].find((p) => p.ws === ws);
   }
 
   isHost(p) {
@@ -221,7 +222,6 @@ export class GameRoom extends DurableObject {
       if (this.isHost(mine) && this.round.state !== 'fight' && this.round.state !== 'countdown') {
         this.takeHostSettings(msg);
       }
-      ws.serializeAttachment({ id: mine.id, slot: mine.slot, name: mine.name, color: mine.color, roster: mine.roster });
       this.broadcast(ws, { t: 'peer', ...this.snap(mine) });
       this.send(ws, this.settingsPayload());
       this.broadcast(null, this.settingsPayload());
@@ -444,7 +444,7 @@ export class GameRoom extends DurableObject {
   async webSocketClose(ws) {
     await this.boot();
     const mine = this.playerOf(ws);
-    if (!mine) return;
+    if (!mine || (mine.ws && mine.ws !== ws)) return;
     mine.ws = null;
     mine.away = true;
     mine.awayAt = Date.now();

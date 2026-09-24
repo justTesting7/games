@@ -608,7 +608,7 @@ export class Weapons {
       this.drone.update(dt, input);
       if (this.drone.flying && !this.drone.dying) {
         this.dronePoseAcc = (this.dronePoseAcc || 0) + dt;
-        if (this.dronePoseAcc >= 1 / 12) {
+        if (this.dronePoseAcc >= 1 / 8) {
           this.dronePoseAcc = 0;
           const pack = this.drone.pack();
           if (pack) this.session?.reportDrone('pose', pack);

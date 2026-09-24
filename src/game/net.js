@@ -37,6 +37,10 @@ export class Net {
     }
     if (this._retry) { clearTimeout(this._retry); this._retry = 0; }
     this.identity = identity || this.identity;
+    if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
+      if (this.ws.readyState === WebSocket.OPEN && this.identity) this.send({ t: 'hello', ...this.identity });
+      return;
+    }
     if (this.ws) {
       this.ws.onclose = null;
       this.ws.close();
