@@ -178,7 +178,8 @@ const SURFACE = {
   metal: { dust: [0.4, 0.4, 0.4], chunks: [0.3, 0.3, 0.3], sparks: true },
   water: { dust: [0.85, 0.9, 0.95], chunks: [0.85, 0.9, 0.95] },
   flesh: { dust: [0.32, 0.03, 0.03], chunks: [0.25, 0.01, 0.01] },
-  concrete: { dust: [0.45, 0.42, 0.38], chunks: [0.38, 0.35, 0.32] },
+  concrete: { dust: [0.45, 0.42, 0.38], chunks: [0.38, 0.35, 0.32], sparks: true },
+  cover: { dust: [0.45, 0.42, 0.38], chunks: [0.38, 0.35, 0.32], sparks: true },
 };
 
 const UP = new THREE.Vector3(0, 1, 0);
@@ -293,12 +294,13 @@ export class Effects {
   tracer(from, to) {
     const d = new THREE.Vector3().subVectors(to, from);
     const len = d.length();
-    if (len < 2) return;
+    if (len < 0.3) return;
     d.divideScalar(len);
     const speed = 380;
+    const skip = Math.min(0.35, len * 0.12);
     this.add.spawn({
-      pos: from.clone().addScaledVector(d, 1.25), vel: d.clone().multiplyScalar(speed), size: 0.012, stretch: 1.2,
-      life: Math.max(0.02, (len - 2) / speed), color: [30, 20, 9], fade: 0,
+      pos: from.clone().addScaledVector(d, skip), vel: d.clone().multiplyScalar(speed), size: 0.012, stretch: 1.2,
+      life: Math.max(0.02, (len - skip) / speed), color: [30, 20, 9], fade: 0,
     });
   }
 

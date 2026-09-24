@@ -206,9 +206,9 @@ export class Audio {
     setTimeout(() => {
       if (surface === 'water') {
         this.noiseBurst({ freq: 1400, q: 0.6, gain: 0.25 * att, attack: 0.005, release: 0.25, send: 0.3 });
-      } else if (surface === 'rock' || surface === 'metal') {
+      } else if (surface === 'rock' || surface === 'metal' || surface === 'concrete' || surface === 'cover') {
         this.noiseBurst({ freq: 3500, q: 2, gain: 0.3 * att, attack: 0.001, release: 0.06, send: 0.4 });
-        if (Math.random() < 0.35) this.ricochet(att);
+        this.ricochet(att);
       } else if (surface === 'flesh') {
         this.noiseBurst({ freq: 380, q: 0.9, type: 'lowpass', gain: 0.6 * att, attack: 0.001, release: 0.09, send: 0.15 });
         this.tone(95 + Math.random() * 20, 0.08, 0.25 * att, 'sine');
@@ -222,6 +222,7 @@ export class Audio {
   }
 
   ricochet(att) {
+    if (!this.ctx) return;
     const ctx = this.ctx;
     const t = ctx.currentTime;
     const o = ctx.createOscillator();

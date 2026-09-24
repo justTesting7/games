@@ -231,8 +231,8 @@ export function placeStreetProp(models, group, colliders, terrain, id, x, z, yaw
   const fp = footprint(obj);
   obj.position.y = y - fp.minY;
   const cx = obj.position.x, cz = obj.position.z;
-  const hx = Math.max(0.25, fp.size.x * 0.42);
-  const hz = Math.max(0.25, fp.size.z * 0.42);
+  const hx = Math.max(0.22, fp.size.x * 0.5);
+  const hz = Math.max(0.22, fp.size.z * 0.5);
   colliders.addBox({
     x0: cx - hx, x1: cx + hx, z0: cz - hz, z1: cz + hz,
     y0: y, y1: y + Math.max(fp.size.y * scale, coverY),

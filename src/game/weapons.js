@@ -273,10 +273,32 @@ export class Weapons {
     } else {
       this.fx.impact(end, hit.normal, hit.surface, dir);
       this.audio.impact(hit.surface, hitDist);
+      if (hit.surface !== 'water') this.bounceOff(shooter, end, dir, hit);
     }
     if (hit.fighter) this.combat.damage(hit.fighter, shooter, hit.head ? def.head : def.body, dir, { head: hit.head, weapon: def.key });
     else if (hit.body || hit.target) hit.scored = this.world.props.hit(hit, end, dir, def.force);
     return hit;
+  }
+
+  // The round stops at the first solid thing and glances off. It does not
+  // keep going through cover to whoever is standing behind it.
+  bounceOff(shooter, pos, dir, hit) {
+    const n = hit.normal.clone();
+    if (n.dot(dir) > 0) n.negate();
+    const bounce = dir.clone().reflect(n);
+    bounce.add(new THREE.Vector3().randomDirection().multiplyScalar(0.06)).normalize();
+    if (bounce.dot(n) < 0.04) bounce.addScaledVector(n, 0.14).normalize();
+    const start = pos.clone().addScaledVector(n, 0.04);
+    const reach = 18;
+    const next = this.world.raycast(start, bounce, reach, shooter);
+    const to = start.clone().addScaledVector(bounce, next ? Math.max(next.t, 0.35) : reach);
+    this.fx.tracer(start, to);
+    const { dist } = this.listen(pos);
+    this.audio.ricochet(Math.min(1, 8 / Math.max(dist, 1)));
+    if (next && !next.fighter && next.surface !== 'water') {
+      const p = start.clone().addScaledVector(bounce, next.t);
+      this.fx.impact(p, next.normal, next.surface, bounce);
+    }
   }
 
   // Exit spray lands on whatever is behind the victim, plus a spatter on the

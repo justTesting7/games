@@ -172,6 +172,88 @@ class InstancedSet {
 }
 
 // Uniform grid of vertical cylinders used for player and bullet collisions.
+function rayBox(o, d, c, maxDist) {
+  let tmin = 0;
+  let tmax = maxDist;
+  let hitAxis = -1;
+  let hitSign = 1;
+  const mins = [c.x0, c.y0, c.z0];
+  const maxs = [c.x1, c.y1, c.z1];
+  const orig = [o.x, o.y, o.z];
+  const dir = [d.x, d.y, d.z];
+  for (let k = 0; k < 3; k++) {
+    if (Math.abs(dir[k]) < 1e-8) {
+      if (orig[k] < mins[k] || orig[k] > maxs[k]) return null;
+      continue;
+    }
+    let t1 = (mins[k] - orig[k]) / dir[k];
+    let t2 = (maxs[k] - orig[k]) / dir[k];
+    let s = -1;
+    if (t1 > t2) { const tmp = t1; t1 = t2; t2 = tmp; s = 1; }
+    if (t1 > tmin) { tmin = t1; hitAxis = k; hitSign = s; }
+    if (t2 < tmax) tmax = t2;
+    if (tmin > tmax) return null;
+  }
+  if (tmax < 0) return null;
+  let th;
+  let n;
+  if (hitAxis < 0 || tmin <= 1e-4) {
+    // Started inside: bounce off the nearest face instead of exiting the far side.
+    let nearest = Infinity;
+    n = new THREE.Vector3(0, 1, 0);
+    for (let k = 0; k < 3; k++) {
+      const dl = orig[k] - mins[k];
+      const dr = maxs[k] - orig[k];
+      if (dl < nearest) { nearest = dl; n.set(0, 0, 0).setComponent(k, -1); }
+      if (dr < nearest) { nearest = dr; n.set(0, 0, 0).setComponent(k, 1); }
+    }
+    th = 0.02;
+  } else {
+    th = tmin;
+    n = new THREE.Vector3().setComponent(hitAxis, hitSign);
+  }
+  if (th < 0 || th > maxDist) return null;
+  return { t: th, collider: c, normal: n, surface: c.type };
+}
+
+function rayCylinder(o, d, c, maxDist) {
+  const ox = o.x - c.x, oz = o.z - c.z;
+  const rad2 = c.r * c.r;
+  if (ox * ox + oz * oz <= rad2 && o.y >= c.y0 && o.y <= c.y1) {
+    const l = Math.hypot(ox, oz);
+    const n = l < 1e-4 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(ox / l, 0, oz / l);
+    return { t: 0.02, collider: c, normal: n, surface: c.type };
+  }
+  let best = null;
+  if (Math.abs(d.y) > 1e-8) {
+    for (const [y, ny] of [[c.y0, -1], [c.y1, 1]]) {
+      const th = (y - o.y) / d.y;
+      if (th < 0 || th > maxDist) continue;
+      const px = o.x + d.x * th - c.x, pz = o.z + d.z * th - c.z;
+      if (px * px + pz * pz > rad2) continue;
+      best = { t: th, collider: c, normal: new THREE.Vector3(0, ny, 0), surface: c.type };
+    }
+  }
+  const a = d.x * d.x + d.z * d.z;
+  if (a >= 1e-8) {
+    const b = ox * d.x + oz * d.z;
+    const cc = ox * ox + oz * oz - rad2;
+    const disc = b * b - a * cc;
+    if (disc >= 0) {
+      const th = (-b - Math.sqrt(disc)) / a;
+      if (th > 0 && th <= maxDist && (!best || th < best.t)) {
+        const y = o.y + d.y * th;
+        if (y >= c.y0 && y <= c.y1) {
+          const hx = o.x + d.x * th - c.x, hz = o.z + d.z * th - c.z;
+          const l = Math.hypot(hx, hz) || 1;
+          best = { t: th, collider: c, normal: new THREE.Vector3(hx / l, 0, hz / l), surface: c.type };
+        }
+      }
+    }
+  }
+  return best;
+}
+
 export class Colliders {
   constructor(cell = 16) {
     this.cell = cell;
@@ -246,52 +328,17 @@ export class Colliders {
     }
     return out;
   }
-  // Ray against capped vertical cylinders; returns { t, collider, normal }.
+  // Ray against axis boxes and capped vertical cylinders.
   raycast(o, d, maxDist) {
     let best = null;
     const step = this.cell;
     const tmp = [];
     for (let t = 0; t < maxDist + step; t += step * 0.5) {
       const x = o.x + d.x * t, z = o.z + d.z * t;
-      this.query(x, z, step * 0.75, tmp);
+      this.query(x, z, step, tmp);
       for (const c of tmp) {
-        if (c.box) {
-          const inv = 1 / (d.x || 1e-8);
-          let t0 = (c.x0 - o.x) * inv, t1 = (c.x1 - o.x) * inv;
-          if (t0 > t1) { const s = t0; t0 = t1; t1 = s; }
-          let ty0 = (c.y0 - o.y) / (d.y || 1e-8), ty1 = (c.y1 - o.y) / (d.y || 1e-8);
-          if (ty0 > ty1) { const s = ty0; ty0 = ty1; ty1 = s; }
-          let tz0 = (c.z0 - o.z) / (d.z || 1e-8), tz1 = (c.z1 - o.z) / (d.z || 1e-8);
-          if (tz0 > tz1) { const s = tz0; tz0 = tz1; tz1 = s; }
-          const tNear = Math.max(t0, ty0, tz0);
-          const tFar = Math.min(t1, ty1, tz1);
-          if (tNear > tFar || tFar < 0 || tNear > maxDist) continue;
-          const th = tNear < 0 ? tFar : tNear;
-          if (th < 0 || th > maxDist || (best && th >= best.t)) continue;
-          const px = o.x + d.x * th, py = o.y + d.y * th, pz = o.z + d.z * th;
-          const nx = px < c.x0 + 0.01 ? -1 : px > c.x1 - 0.01 ? 1 : 0;
-          const ny = py < c.y0 + 0.01 ? -1 : py > c.y1 - 0.01 ? 1 : 0;
-          const nz = pz < c.z0 + 0.01 ? -1 : pz > c.z1 - 0.01 ? 1 : 0;
-          const n = new THREE.Vector3(nx, ny, nz);
-          if (n.lengthSq() < 1e-4) n.set(0, 1, 0);
-          else n.normalize();
-          best = { t: th, collider: c, normal: n, surface: c.type };
-          continue;
-        }
-        const ox = o.x - c.x, oz = o.z - c.z;
-        const a = d.x * d.x + d.z * d.z;
-        if (a < 1e-8) continue;
-        const b = ox * d.x + oz * d.z;
-        const cc = ox * ox + oz * oz - c.r * c.r;
-        const disc = b * b - a * cc;
-        if (disc < 0) continue;
-        const th = (-b - Math.sqrt(disc)) / a;
-        if (th < 0 || th > maxDist || (best && th >= best.t)) continue;
-        const y = o.y + d.y * th;
-        if (y < c.y0 || y > c.y1) continue;
-        const hx = o.x + d.x * th - c.x, hz = o.z + d.z * th - c.z;
-        const l = Math.hypot(hx, hz) || 1;
-        best = { t: th, collider: c, normal: new THREE.Vector3(hx / l, 0, hz / l), surface: c.type };
+        const hit = c.box ? rayBox(o, d, c, maxDist) : rayCylinder(o, d, c, maxDist);
+        if (hit && (!best || hit.t < best.t)) best = hit;
       }
       if (best && best.t < t) break;
     }
