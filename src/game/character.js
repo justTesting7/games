@@ -653,6 +653,7 @@ export class Character {
     const target = {};
     const locomotion = () => {
       const sp = s.speed;
+      if ((s.crouch || 0) > 0.45) { target.idle = 1; return; }
       if (sp < 0.15) { target.idle = 1; return; }
       if (s.strafe) {
         const lf = s.localDir;
@@ -944,23 +945,58 @@ export class Character {
     if (cs > 0.1) this.actions[name].timeScale = THREE.MathUtils.clamp(speed / cs, 0.55, 1.6);
   }
 
+  // Kneel on both knees, sit toward the heels, and drape one arm over a foot.
   applyCrouch(k) {
     if (k < 0.01) return;
     const B = this.bones;
     if (!B.Hips) return;
-    B.Hips.position.y -= 0.78 * k;
+    const { fwd, left, right } = this.bodyAxes();
+    const turn = (bone, axis, ang) => {
+      if (!bone || Math.abs(ang) < 1e-4) return;
+      rotateBoneWorld(bone, this.tmp.q.setFromAxisAngle(axis, ang), this.tmp);
+    };
+
+    B.Hips.position.y -= 0.56 * k;
     B.Hips.updateMatrixWorld(true);
-    const right = this.bodyAxes().right;
-    const qThigh = new THREE.Quaternion().setFromAxisAngle(right, 1.28 * k);
-    const qShin = new THREE.Quaternion().setFromAxisAngle(right, -2.15 * k);
-    const qSpine = new THREE.Quaternion().setFromAxisAngle(right, 0.48 * k);
-    const qSpine1 = new THREE.Quaternion().setFromAxisAngle(right, 0.22 * k);
-    if (B.LeftUpLeg) rotateBoneWorld(B.LeftUpLeg, qThigh, this.tmp);
-    if (B.RightUpLeg) rotateBoneWorld(B.RightUpLeg, qThigh, this.tmp);
-    if (B.LeftLeg) rotateBoneWorld(B.LeftLeg, qShin, this.tmp);
-    if (B.RightLeg) rotateBoneWorld(B.RightLeg, qShin, this.tmp);
-    if (B.Spine) rotateBoneWorld(B.Spine, qSpine, this.tmp);
-    if (B.Spine1) rotateBoneWorld(B.Spine1, qSpine1, this.tmp);
+    turn(B.Hips, right, 0.16 * k);
+
+    turn(B.LeftUpLeg, right, 0.95 * k);
+    turn(B.RightUpLeg, right, 0.72 * k);
+    turn(B.RightUpLeg, fwd, 0.48 * k);
+    turn(B.RightUpLeg, UP, -0.14 * k);
+
+    turn(B.LeftLeg, right, -2.08 * k);
+    turn(B.RightLeg, right, -1.72 * k);
+    turn(B.RightLeg, fwd, 0.22 * k);
+
+    turn(B.LeftFoot, right, 0.52 * k);
+    turn(B.RightFoot, right, 0.95 * k);
+    turn(B.RightFoot, fwd, 0.28 * k);
+
+    turn(B.Spine, right, 0.16 * k);
+    turn(B.Spine, fwd, 0.12 * k);
+    turn(B.Spine1, right, 0.06 * k);
+    turn(B.Spine1, UP, 0.1 * k);
+    turn(B.Spine2, fwd, 0.06 * k);
+
+    if (B.RightFoot && B.RightArm && B.RightHand) {
+      const foot = B.RightFoot.getWorldPosition(new THREE.Vector3());
+      const target = foot.clone()
+        .addScaledVector(UP, 0.08)
+        .addScaledVector(fwd, 0.06)
+        .addScaledVector(right, 0.05);
+      const sh = B.RightArm.getWorldPosition(new THREE.Vector3());
+      const pole = sh.clone().addScaledVector(UP, -0.22).addScaledVector(right, 0.58).addScaledVector(fwd, 0.18);
+      const finger = right.clone().multiplyScalar(0.45).addScaledVector(fwd, 0.25).addScaledVector(UP, -0.4).normalize();
+      solveArm(B, 'Right', target, pole, finger, fwd, k, this.tmp);
+    }
+    if (B.LeftLeg && B.LeftArm) {
+      const knee = B.LeftLeg.getWorldPosition(new THREE.Vector3());
+      const rest = knee.clone().addScaledVector(UP, 0.05).addScaledVector(fwd, 0.05).addScaledVector(left, 0.02);
+      const shL = B.LeftArm.getWorldPosition(new THREE.Vector3());
+      const poleL = shL.clone().addScaledVector(UP, -0.4).addScaledVector(left, 0.38);
+      solveArm(B, 'Left', rest, poleL, fwd.clone().addScaledVector(UP, -0.35).normalize(), left, k * 0.8, this.tmp);
+    }
   }
 
   applyAim(s) {

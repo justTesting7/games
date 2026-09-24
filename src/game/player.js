@@ -230,7 +230,7 @@ export class Player {
     const yaw = this.camYaw + swayYaw;
     const dir = new THREE.Vector3(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch));
     const right = new THREE.Vector3(-Math.cos(this.camYaw), 0, Math.sin(this.camYaw));
-    const eye = (through ? 1.64 : aiming ? 1.58 : 1.55) - this.crouchT * 0.92;
+    const eye = (through ? 1.64 : aiming ? 1.58 : 1.55) - this.crouchT * 0.52;
     const pivot = this.pos.clone().add(new THREE.Vector3(0, eye, 0));
     const smoothPivot = this.smoothPivot || pivot.clone();
     smoothPivot.x = pivot.x;
@@ -260,7 +260,7 @@ export class Player {
   // standing behind actually sits on the aim ray.
   eyeHeight() {
     const through = this.scopeT > 0.4;
-    return (through ? 1.64 : this.character?.aimWeight > 0.5 ? 1.58 : 1.55) - this.crouchT * 0.92;
+    return (through ? 1.64 : this.character?.aimWeight > 0.5 ? 1.58 : 1.55) - this.crouchT * 0.52;
   }
 
   losOrigin(out = new THREE.Vector3()) {
