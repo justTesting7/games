@@ -1,5 +1,16 @@
-const STEP = 0.05;
-const MAX_CATCHUP = 1;
+export const STEP = 0.05;
+export const MAX_CATCHUP = 1;
+
+export function consume(elapsed) {
+  let acc = Math.min(MAX_CATCHUP, Math.max(0, elapsed));
+  const steps = [];
+  while (acc > 1e-6) {
+    const dt = Math.min(STEP, acc);
+    acc -= dt;
+    steps.push(dt);
+  }
+  return steps;
+}
 
 // Drive the game from rAF when the tab is visible, and from a worker
 // (plus a timer fallback) when it is not. Large gaps are split into
@@ -12,14 +23,12 @@ export function startClock(onStep) {
     if (busy) return;
     busy = true;
     const now = performance.now();
-    let acc = Math.min(MAX_CATCHUP, (now - last) / 1000);
+    const steps = consume((now - last) / 1000);
     last = now;
     const visible = document.visibilityState === 'visible';
     const wantDraw = !!draw && visible;
-    while (acc > 1e-6) {
-      const dt = Math.min(STEP, acc);
-      acc -= dt;
-      onStep(dt, wantDraw && acc <= 1e-6);
+    for (let i = 0; i < steps.length; i++) {
+      onStep(steps[i], wantDraw && i === steps.length - 1);
     }
     busy = false;
   };
