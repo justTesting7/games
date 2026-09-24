@@ -1,8 +1,8 @@
 export const STEP = 0.05;
 export const MAX_CATCHUP = 1;
 
-export function consume(elapsed) {
-  let acc = Math.min(MAX_CATCHUP, Math.max(0, elapsed));
+export function consume(elapsed, max = MAX_CATCHUP) {
+  let acc = Math.min(max, Math.max(0, elapsed));
   const steps = [];
   while (acc > 1e-6) {
     const dt = Math.min(STEP, acc);
@@ -23,9 +23,10 @@ export function startClock(onStep) {
     if (busy) return;
     busy = true;
     const now = performance.now();
-    const steps = consume((now - last) / 1000);
-    last = now;
     const visible = document.visibilityState === 'visible';
+    // A visible hitch must not replay a second of AI (Jevs look frantic).
+    const steps = consume((now - last) / 1000, visible ? 0.12 : MAX_CATCHUP);
+    last = now;
     const wantDraw = !!draw && visible;
     for (let i = 0; i < steps.length; i++) {
       onStep(steps[i], wantDraw && i === steps.length - 1);

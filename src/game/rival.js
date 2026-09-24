@@ -5,7 +5,7 @@ const GRAVITY = 16;
 const JUMP_V = 5.0;
 const RADIUS = 0.3;
 const UP = new THREE.Vector3(0, 1, 0);
-const SHELTER_SPRINT = 7.4;
+const SHELTER_SPRINT = 5.6;
 const EXPOSE_LIMIT = 1.15;
 const COVER_PAD = RADIUS + 0.5;
 const SEARCH_R = 40;
@@ -602,7 +602,7 @@ export class Rival {
     if (t === this.tactic) return;
     this.tactic = t;
     this.strafeDir = Math.random() < 0.5 ? 1 : -1;
-    this.strafeT = 0.6 + Math.random();
+    this.strafeT = 1.1 + Math.random() * 0.8;
     this.flankSide = Math.random() < 0.5 ? 1 : -1;
     if (t !== 'take_cover' && !this.runningToShelter) this.cover = cover || this.cover;
   }
@@ -631,13 +631,16 @@ export class Rival {
   updateShelter(dt, threat) {
     this.coverScanT = (this.coverScanT || 0) - dt;
     if (threat && (this.coverScanT <= 0 || !this.cover)) {
-      this.coverScanT = this.runningToShelter ? 0.45 : 0.2;
+      this.coverScanT = this.runningToShelter ? 0.75 : 0.55;
       const found = this.pickCover(threat);
       if (found) this.cover = found;
-    }
-    if (threat && this.cover && !this.isSheltered(threat)) {
-      const spot = this.coverSpot(this.cover.c, threat);
-      if (spot) this.cover.spot.copy(spot);
+      if (this.cover && threat) {
+        const spot = this.coverSpot(this.cover.c, threat);
+        if (spot) {
+          if (!this.cover.spot) this.cover.spot = spot.clone();
+          else this.cover.spot.lerp(spot, 0.28);
+        }
+      }
     }
     const anySeen = this.enemies().some((e) => this.seen(e).visible);
     const shots = this.underFire() || this.shotsFlying();
@@ -682,8 +685,15 @@ export class Rival {
       this.reachedShelter = false;
       return;
     }
-    const dest = this.coverSpot(c.c, tp) || c.spot;
-    c.spot.copy(dest);
+    const dest = c.spot;
+    if (!dest) {
+      out.dir.set(this.pos.x - tp.x, 0, this.pos.z - tp.z);
+      if (out.dir.lengthSq() < 1e-6) out.dir.copy(side);
+      else out.dir.normalize();
+      out.speed = SHELTER_SPRINT;
+      out.aim = false;
+      return;
+    }
     if (this.onFarSide(tp) && this.pos.distanceTo(dest) < 1.8) {
       this.runningToShelter = false;
       this.reachedShelter = true;
@@ -721,7 +731,7 @@ export class Rival {
     out.aim = visible && d < 70 && this.canFight();
 
     this.strafeT -= dt;
-    if (this.strafeT <= 0) { this.strafeDir *= -1; this.strafeT = 0.7 + Math.random() * 1.4; }
+    if (this.strafeT <= 0) { this.strafeDir *= -1; this.strafeT = 1.4 + Math.random() * 1.6; }
 
     const exposed = this.needFirstCover || this.shouldShelter() || this.runningToShelter;
     if (exposed || this.tactic === 'take_cover') {
@@ -843,12 +853,7 @@ export class Rival {
 
   canSeeDrone() {
     const drone = this.world.drone?.live;
-    if (!drone || drone.dying || !this.canFight()) return false;
-    if ((drone.born || 0) < 0.85) return false;
-    const from = this.droneEye();
-    const len = from.distanceTo(drone.pos);
-    if (len < 6 || len > 30) return false;
-    return this.droneLosClear(from, drone.pos);
+    return !!(drone && !drone.dying && this.canFight() && (drone.born || 0) > 0.85);
   }
 
   // Trunks are thin; a center ray often slips past a tree the drone is
@@ -950,7 +955,7 @@ export class Rival {
     const { terrain } = this.world;
     const horiz = new THREE.Vector3(this.vel.x, 0, this.vel.z);
     const desired = wish.dir.clone().multiplyScalar(wish.speed);
-    const accel = this.onGround ? (wish.speed >= SHELTER_SPRINT ? 18 : wish.speed > horiz.length() ? 8 : 11) : 1.5;
+    const accel = this.onGround ? (wish.speed >= SHELTER_SPRINT - 0.05 ? 8 : wish.speed > horiz.length() ? 6 : 8) : 1.5;
     horiz.lerp(desired, Math.min(1, dt * accel));
     this.vel.x = horiz.x;
     this.vel.z = horiz.z;
