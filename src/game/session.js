@@ -26,6 +26,7 @@ class Remote {
     this.label = 'human';
     this.source = 'net';
     this.confidence = 1;
+    this.away = !!snap.away;
     this.applySnap(snap);
   }
 
@@ -45,6 +46,7 @@ class Remote {
       this.character.setWeapon(s.w);
     }
     if (Number.isFinite(s.hp)) this.fighter.health = s.hp;
+    if (s.away !== undefined) this.away = !!s.away;
     if (s.alive === false && this.fighter.alive) {
       this.fighter.alive = false;
       this.character.die(new THREE.Vector3(Math.sin(this.yaw), 0, Math.cos(this.yaw)));
@@ -93,7 +95,7 @@ class Remote {
 }
 
 export class Session {
-  constructor({ net, world, combat, weapons, player, rivals, charAssets, scene, spawn, facing, mapId, onRoster, onRound }) {
+  constructor({ net, world, combat, weapons, player, rivals, charAssets, scene, spawn, facing, mapId, onRoster, onRound, onSettings, onHost }) {
     this.net = net;
     this.world = world;
     this.combat = combat;
@@ -107,6 +109,8 @@ export class Session {
     this.mapId = mapId;
     this.onRoster = onRoster;
     this.onRound = onRound;
+    this.onSettings = onSettings;
+    this.onHost = onHost;
     this.remotes = new Map();
     this.pending = new Map();
     this.drones = new Map();
@@ -116,16 +120,19 @@ export class Session {
     this.readySent = false;
     this.botsParked = false;
     this.wanted = !!net.wanted;
+    this.hostId = '';
     this.slot = 0;
     weapons.session = this;
   }
+
+  get isHost() { return !this.wanted || !this.hostId || this.hostId === this.net.id; }
 
   get multi() { return this.wanted && this.net.status === 'online'; }
   get peerCount() { return this.remotes.size; }
 
   connect(identity) {
     if (!this.wanted) return;
-    this.net.connect({ ...identity, map: this.mapId });
+    this.net.connect({ ...identity, map: this.mapId, time: identity.time });
   }
 
   update(dt) {
@@ -142,7 +149,7 @@ export class Session {
 
   sendPose(dt) {
     this.poseAcc += dt;
-    if (this.poseAcc < 1 / 15) return;
+    if (dt < 1 && this.poseAcc < 1 / 15) return;
     this.poseAcc = 0;
     const p = this.player;
     const L = p.fighter.loadout;
@@ -228,6 +235,8 @@ export class Session {
       case 'hello':
         this.slot = msg.slot || 0;
         this.player.fighter.id = msg.id;
+        this.hostId = msg.hostId || (msg.host ? msg.id : this.hostId);
+        if (msg.settings) this.onSettings?.(msg.settings);
         if (msg.map && msg.map !== this.mapId) {
           localStorage.setItem('relic-map', msg.map);
           location.reload();
@@ -236,12 +245,28 @@ export class Session {
         (msg.peers || []).forEach((p) => this.upsert(p));
         if (msg.round) this.onRound?.(msg.round);
         this.readySent = false;
+        this.onHost?.(this.isHost);
+        break;
+      case 'settings':
+        this.hostId = msg.hostId || this.hostId;
+        this.onSettings?.(msg);
+        this.onHost?.(this.isHost);
+        if (msg.map && msg.map !== this.mapId) {
+          localStorage.setItem('relic-map', msg.map);
+          location.reload();
+        }
         break;
       case 'map':
         if (msg.id && msg.id !== this.mapId) {
           localStorage.setItem('relic-map', msg.id);
           location.reload();
         }
+        break;
+      case 'away':
+        if (this.remotes.has(msg.id)) this.remotes.get(msg.id).away = true;
+        break;
+      case 'back':
+        if (this.remotes.has(msg.id)) this.remotes.get(msg.id).away = false;
         break;
       case 'join':
       case 'peer':

@@ -98,6 +98,8 @@ const roomCode = resolveRoom();
 persistMode(mode);
 const jev = new Jev();
 const net = new Net({ wanted: mode === 'multi', room: roomCode });
+net.watchFocus();
+let session = null;
 
 const NO_INPUT = { forward: false, back: false, left: false, right: false, sprint: false, jump: false, aim: false, fire: false, toggleWalk: false, crouch: false };
 const input = { forward: false, back: false, left: false, right: false, sprint: false, jump: false, climb: false, aim: false, fire: false, toggleWalk: false, crouch: false, fastTime: false };
@@ -146,6 +148,7 @@ $('maptitle').textContent = mapDef.label;
 $('mapsub').textContent = mapDef.subtitle;
 $('map').onchange = (e) => {
   localStorage.setItem('relic-map', e.target.value);
+  if (mode === 'multi' && net.status === 'online') net.send({ t: 'settings', map: e.target.value, time: timeOfDay });
   location.reload();
 };
 
@@ -157,9 +160,9 @@ const paintMode = () => {
   $('netstat').classList.toggle('hidden', mode !== 'multi');
   const hosted = net.hosted;
   if (mode === 'multi') {
-    $('modehint').textContent = hosted
-      ? 'Humans only. Share the room. Last player standing wins.'
-      : 'Multiplayer needs the hosted game or npm run cf:dev.';
+    if (!hosted) $('modehint').textContent = 'Multiplayer needs the hosted game or npm run cf:dev.';
+    else if (session && !session.isHost) $('modehint').textContent = `Host chose ${mapDef.label}. Pick a fighter and join.`;
+    else $('modehint').textContent = 'You are the host. Map and time of day apply to everyone who joins.';
   } else {
     $('modehint').textContent = 'You against Jev-driven rivals. Last one standing wins.';
   }
@@ -190,7 +193,19 @@ $('roomcode').oninput = () => {
 
 let timeOfDay = mapDef.timeOfDay;
 $('timeofday').value = Math.round(timeOfDay * 1000);
-$('timeofday').oninput = (e) => { timeOfDay = e.target.value / 1000; };
+$('timeofday').oninput = (e) => {
+  timeOfDay = e.target.value / 1000;
+  if (mode === 'multi' && session?.isHost && net.status === 'online') net.send({ t: 'settings', time: timeOfDay });
+};
+
+const applyHostUi = (host) => {
+  const lock = mode === 'multi' && host === false;
+  $('map').disabled = lock;
+  $('timeofday').disabled = lock;
+  $('map').parentElement?.classList.toggle('locked', lock);
+  $('timeofday').parentElement?.classList.toggle('locked', lock);
+  paintMode();
+};
 $('quality').onchange = (e) => {
   pipeline.setQuality(e.target.value);
   localStorage.setItem('relic-quality', e.target.value);
@@ -208,6 +223,20 @@ $('volume').oninput = (e) => audio.setVolume(e.target.value / 100);
 audio.setVolume($('volume').value / 100);
 
 async function init() {
+  if (mode === 'multi' && net.hosted) {
+    try {
+      const info = await fetch(`/ws?room=${encodeURIComponent(roomCode)}`).then((r) => r.json());
+      if (info.settings?.map && info.settings.map !== mapDef.id) {
+        localStorage.setItem('relic-map', info.settings.map);
+        location.reload();
+        return;
+      }
+      if (Number.isFinite(info.settings?.time)) {
+        timeOfDay = info.settings.time;
+        $('timeofday').value = Math.round(timeOfDay * 1000);
+      }
+    } catch { /* empty room or offline */ }
+  }
   pipeline.fogMaterial.uniforms.uFogDensity.value = mapDef.fogDensity;
   const [data, textures] = await Promise.all([
     progress.task(mapDef.loadLabel, 3, () => generateHeightmap(mapDef.id)),
@@ -281,13 +310,20 @@ async function init() {
     return new Rival(world, combat, weapons, jev, persona(entry), ch);
   });
   const you = byId(selection.player);
-  const session = new Session({
+  session = new Session({
     net, world, combat, weapons, player, rivals, charAssets,
     scene: pipeline.scene, spawn, facing, mapId: mapDef.id,
     onRoster: () => rebuildTags(),
     onRound: (msg) => applyNetRound(msg),
+    onSettings: (s) => {
+      if (Number.isFinite(s?.time)) {
+        timeOfDay = s.time;
+        $('timeofday').value = Math.round(timeOfDay * 1000);
+      }
+    },
+    onHost: (host) => applyHostUi(host),
   });
-  if (mode === 'multi') session.connect({ name: you.name, color: you.color, roster: you.id });
+  if (mode === 'multi') session.connect({ name: you.name, color: you.color, roster: you.id, time: timeOfDay });
   window.__game = { world, pipeline, camera, input, rivals, combat, jev, net, session };
 
   const rosterChars = new Map([[fighters[0].id, character]]);
@@ -502,7 +538,7 @@ async function init() {
       t.el.style.transform = `translate(${((tagPos.x + 1) / 2) * innerWidth}px, ${((1 - tagPos.y) / 2) * innerHeight}px) translate(-50%, -100%)`;
       t.bar.style.width = `${(f.health / MAX_HEALTH) * 100}%`;
       if (!f.alive) t.info.textContent = 'eliminated';
-      else if (mode === 'multi') t.info.textContent = `${WEAPONS[f.loadout.current]?.short || ''} · human`;
+      else if (mode === 'multi') t.info.textContent = `${WEAPONS[f.loadout.current]?.short || ''} · ${t.r.away ? 'away' : 'human'}`;
       else {
         t.info.textContent = `${WEAPONS[f.loadout.current].short} · ${t.r.label}${t.r.target ? ` → ${t.r.target.isPlayer ? 'you' : t.r.target.name}` : ''} · ${t.r.source === 'jev' ? `Jev ${Math.round(t.r.confidence * 100)}%` : 'local AI'}`;
       }
@@ -572,7 +608,7 @@ async function init() {
     const dt = Math.min(0.05, (now - last) / 1000);
     last = now;
     elapsed += dt;
-    if (input.fastTime) {
+    if (input.fastTime && (mode !== 'multi' || session?.isHost)) {
       timeOfDay = (timeOfDay + dt * 0.03) % 1;
       $('timeofday').value = Math.round(timeOfDay * 1000);
     }
@@ -731,6 +767,12 @@ async function init() {
       }
     }
   };
+  setInterval(() => {
+    if (mode !== 'multi' || !session) return;
+    if (document.visibilityState === 'visible') return;
+    if (net.status === 'online') session.sendPose(1);
+    else if (net.identity) net.connect(net.identity);
+  }, 1000);
   loop();
 }
 

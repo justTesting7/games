@@ -13,6 +13,7 @@ export class Net {
     this.identity = null;
     this.attempts = 0;
     this._retry = 0;
+    this.resumeKey = `relic-resume:${this.room}`;
   }
 
   get hosted() {
@@ -41,7 +42,8 @@ export class Net {
       this.ws.close();
     }
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    const url = `${proto}://${location.host}/ws?room=${encodeURIComponent(this.room)}`;
+    const resume = this.id || sessionStorage.getItem(this.resumeKey) || '';
+    const url = `${proto}://${location.host}/ws?room=${encodeURIComponent(this.room)}${resume ? `&resume=${encodeURIComponent(resume)}` : ''}`;
     this.status = 'connecting';
     this.error = '';
     try {
@@ -71,6 +73,7 @@ export class Net {
       if (msg.t === 'hello' && msg.id) {
         this.id = msg.id;
         this.slot = msg.slot || 0;
+        try { sessionStorage.setItem(this.resumeKey, msg.id); } catch { /* private mode */ }
       }
       this.inbox.push(msg);
     };
@@ -95,5 +98,18 @@ export class Net {
       if (this.status === 'online') return;
       this.connect(this.identity);
     }, wait);
+  }
+
+  watchFocus() {
+    const wake = () => {
+      if (!this.wanted || !this.identity) return;
+      if (this.status === 'online' || this.status === 'connecting') return;
+      this.connect(this.identity);
+    };
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') wake();
+    });
+    addEventListener('focus', wake);
+    addEventListener('pageshow', wake);
   }
 }

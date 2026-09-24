@@ -409,6 +409,7 @@ h1 {
   font-size: 13px;
 }
 .settings label { display: flex; flex-direction: column; gap: 6px; opacity: 0.9; }
+.settings label.locked { opacity: 0.45; pointer-events: none; }
 .settings select, .settings input { width: 100%; accent-color: #d2a15c; }
 .settings select {
   background: rgba(255,255,255,0.08); color: #fff; border: 1px solid rgba(255,255,255,0.2);

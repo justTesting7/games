@@ -1,6 +1,7 @@
 import { DurableObject } from 'cloudflare:workers';
 
 const HP = 100;
+const AWAY_MS = 60_000;
 const DAMAGE = {
   pistols: { body: 9, head: 30 },
   rifle: { body: 80, head: 200 },
@@ -9,6 +10,7 @@ const DAMAGE = {
 };
 const ROSTERS = new Set(['adventurer', 'redpolo', 'greytee', 'checkers', 'denim', 'linen']);
 const WEAPONS = new Set(['pistols', 'rifle', 'grenade', 'drone']);
+const MAPS = new Set(['island', 'city']);
 
 const num = (v) => (Number.isFinite(+v) ? +v : 0);
 const str = (v, n) => (typeof v === 'string' ? v.slice(0, n) : '');
@@ -20,23 +22,44 @@ export class GameRoom extends DurableObject {
     this.booted = true;
     this.players = new Map();
     this.round = (await this.ctx.storage.get('round')) || { state: 'waiting', ends: 0 };
-    this.map = (await this.ctx.storage.get('map')) || '';
+    this.settings = (await this.ctx.storage.get('settings')) || { map: '', time: null };
+    this.map = this.settings.map || (await this.ctx.storage.get('map')) || '';
+    this.hostId = (await this.ctx.storage.get('hostId')) || '';
     this.nextSlot = 0;
     const saved = (await this.ctx.storage.get('players')) || {};
+    const live = new Set();
     for (const ws of this.ctx.getWebSockets()) {
       const a = ws.deserializeAttachment() || {};
-      if (a.id) this.adopt(ws, { ...saved[a.id], ...a });
+      if (!a.id) continue;
+      this.adopt(ws, { ...saved[a.id], ...a, away: false });
+      live.add(a.id);
     }
+    for (const [id, rec] of Object.entries(saved)) {
+      if (live.has(id)) continue;
+      this.adopt(null, { ...rec, id, away: true, awayAt: rec.awayAt || Date.now() });
+    }
+    if (this.hostId && !this.players.has(this.hostId)) this.hostId = this.firstSeat()?.id || '';
+  }
+
+  firstSeat() {
+    return [...this.players.values()].find((p) => !p.away) || [...this.players.values()][0] || null;
+  }
+
+  seated() {
+    return this.players.size;
   }
 
   async persist() {
     await this.ctx.storage.put('round', this.round);
+    await this.ctx.storage.put('settings', { map: this.map, time: this.settings.time ?? null });
     if (this.map) await this.ctx.storage.put('map', this.map);
+    if (this.hostId) await this.ctx.storage.put('hostId', this.hostId);
     const pack = {};
     for (const p of this.players.values()) {
       pack[p.id] = {
         id: p.id, name: p.name, color: p.color, roster: p.roster, slot: p.slot,
         hp: p.hp, alive: p.alive, ready: p.ready, p: p.p, yaw: p.yaw, w: p.w, drone: p.drone,
+        away: !!p.away, awayAt: p.awayAt || 0,
       };
     }
     await this.ctx.storage.put('players', pack);
@@ -45,7 +68,7 @@ export class GameRoom extends DurableObject {
   adopt(ws, a) {
     const p = {
       id: a.id,
-      ws,
+      ws: ws || null,
       name: a.name || 'player',
       color: a.color || '#f3dcb0',
       roster: ROSTERS.has(a.roster) ? a.roster : 'adventurer',
@@ -57,6 +80,8 @@ export class GameRoom extends DurableObject {
       yaw: a.yaw || 0,
       w: WEAPONS.has(a.w) ? a.w : 'pistols',
       drone: a.drone || null,
+      away: !!a.away && !ws,
+      awayAt: a.awayAt || 0,
     };
     this.nextSlot = Math.max(this.nextSlot, p.slot + 1);
     this.players.set(p.id, p);
@@ -67,37 +92,69 @@ export class GameRoom extends DurableObject {
     return {
       id: p.id, name: p.name, color: p.color, roster: p.roster, slot: p.slot,
       p: p.p, yaw: p.yaw, hp: p.hp, alive: p.alive, w: p.w, drone: p.drone || undefined,
+      away: !!p.away,
     };
   }
 
   send(ws, payload) {
+    if (!ws) return;
     try { ws.send(JSON.stringify(payload)); } catch { /* closed */ }
   }
 
   broadcast(except, payload) {
     const data = JSON.stringify(payload);
     for (const p of this.players.values()) {
-      if (p.ws !== except) {
-        try { p.ws.send(data); } catch { /* closed */ }
-      }
+      if (!p.ws || p.ws === except) continue;
+      try { p.ws.send(data); } catch { /* closed */ }
     }
+  }
+
+  settingsPayload() {
+    return { t: 'settings', map: this.map, time: this.settings.time, hostId: this.hostId };
   }
 
   async fetch(request) {
     await this.boot();
     await this.ensureFight();
+    await this.sweepAway();
+    const url = new URL(request.url);
     if (request.headers.get('Upgrade') !== 'websocket') {
       return Response.json({
         room: this.ctx.id.toString(),
         peers: this.players.size,
         round: this.round.state,
+        hostId: this.hostId,
+        settings: { map: this.map, time: this.settings.time },
       });
     }
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
     this.ctx.acceptWebSocket(server);
+    const resume = str(url.searchParams.get('resume'), 8);
+    const existing = resume && this.players.get(resume);
+    if (existing) {
+      existing.ws = server;
+      existing.away = false;
+      existing.awayAt = 0;
+      server.serializeAttachment({ id: existing.id, slot: existing.slot, name: existing.name, color: existing.color, roster: existing.roster });
+      this.broadcast(server, { t: 'back', id: existing.id });
+      this.send(server, {
+        t: 'hello',
+        id: existing.id,
+        slot: existing.slot,
+        map: this.map,
+        host: existing.id === this.hostId,
+        hostId: this.hostId,
+        settings: { map: this.map, time: this.settings.time },
+        round: this.round,
+        peers: [...this.players.values()].filter((o) => o.id !== existing.id).map((o) => this.snap(o)),
+      });
+      await this.persist();
+      return new Response(null, { status: 101, webSocket: client });
+    }
     const id = crypto.randomUUID().slice(0, 8);
     const p = this.adopt(server, { id });
+    if (!this.hostId || !this.players.has(this.hostId)) this.hostId = id;
     server.serializeAttachment({ id, slot: p.slot, name: p.name, color: p.color, roster: p.roster });
     this.broadcast(server, { t: 'join', ...this.snap(p) });
     this.send(server, {
@@ -105,6 +162,9 @@ export class GameRoom extends DurableObject {
       id,
       slot: p.slot,
       map: this.map,
+      host: id === this.hostId,
+      hostId: this.hostId,
+      settings: { map: this.map, time: this.settings.time },
       round: this.round,
       peers: [...this.players.values()].filter((o) => o.id !== id).map((o) => this.snap(o)),
     });
@@ -118,10 +178,15 @@ export class GameRoom extends DurableObject {
     return this.players.get(a.id) || [...this.players.values()].find((p) => p.ws === ws);
   }
 
+  isHost(p) {
+    return !!p && p.id === this.hostId;
+  }
+
   async webSocketMessage(ws, message) {
     await this.boot();
     const mine = this.playerOf(ws);
     if (!mine) return;
+    mine.away = false;
     let msg;
     try { msg = JSON.parse(typeof message === 'string' ? message : new TextDecoder().decode(message)); }
     catch { return; }
@@ -131,10 +196,23 @@ export class GameRoom extends DurableObject {
       mine.name = str(msg.name, 24) || mine.name;
       mine.color = hex(msg.color) || mine.color;
       if (ROSTERS.has(msg.roster)) mine.roster = msg.roster;
-      if (!this.map && typeof msg.map === 'string') this.map = msg.map.slice(0, 16);
+      if (this.isHost(mine) && this.round.state !== 'fight' && this.round.state !== 'countdown') {
+        if (MAPS.has(msg.map)) this.map = msg.map;
+        if (Number.isFinite(+msg.time)) this.settings.time = Math.max(0, Math.min(1, +msg.time));
+      }
       ws.serializeAttachment({ id: mine.id, slot: mine.slot, name: mine.name, color: mine.color, roster: mine.roster });
       this.broadcast(ws, { t: 'peer', ...this.snap(mine) });
-      if (this.map) this.send(ws, { t: 'map', id: this.map });
+      this.send(ws, this.settingsPayload());
+      this.broadcast(null, this.settingsPayload());
+      await this.persist();
+      return;
+    }
+
+    if (msg.t === 'settings') {
+      if (!this.isHost(mine) || this.round.state === 'fight' || this.round.state === 'countdown') return;
+      if (MAPS.has(msg.map)) this.map = msg.map;
+      if (Number.isFinite(+msg.time)) this.settings.time = Math.max(0, Math.min(1, +msg.time));
+      this.broadcast(null, this.settingsPayload());
       await this.persist();
       return;
     }
@@ -239,7 +317,7 @@ export class GameRoom extends DurableObject {
   async tryStart() {
     if (this.players.size < 2) return;
     if (this.round.state === 'fight' || this.round.state === 'countdown') return;
-    if (![...this.players.values()].some((p) => p.ready)) return;
+    if (![...this.players.values()].some((p) => p.ready && !p.away)) return;
     for (const p of this.players.values()) {
       p.hp = HP;
       p.alive = true;
@@ -255,7 +333,7 @@ export class GameRoom extends DurableObject {
       peers: [...this.players.values()].map((p) => this.snap(p)),
     });
     await this.persist();
-    await this.ctx.storage.setAlarm(this.round.ends);
+    await this.armAlarm(this.round.ends);
   }
 
   async ensureFight() {
@@ -265,9 +343,54 @@ export class GameRoom extends DurableObject {
     await this.persist();
   }
 
+  async armAlarm(at) {
+    const next = await this.nextAlarm(at);
+    if (next) await this.ctx.storage.setAlarm(next);
+  }
+
+  async nextAlarm(extra) {
+    let next = extra || 0;
+    if (this.round.state === 'countdown' && this.round.ends) next = next ? Math.min(next, this.round.ends) : this.round.ends;
+    for (const p of this.players.values()) {
+      if (!p.away || !p.awayAt) continue;
+      const until = p.awayAt + AWAY_MS;
+      next = next ? Math.min(next, until) : until;
+    }
+    return next || 0;
+  }
+
   async alarm() {
     await this.boot();
     await this.ensureFight();
+    await this.sweepAway();
+    await this.armAlarm();
+  }
+
+  async sweepAway() {
+    const now = Date.now();
+    const expired = [...this.players.values()].filter((p) => p.away && p.awayAt && now >= p.awayAt + AWAY_MS);
+    for (const p of expired) await this.drop(p);
+  }
+
+  async drop(p) {
+    this.players.delete(p.id);
+    this.broadcast(null, { t: 'leave', id: p.id });
+    if (p.id === this.hostId) {
+      this.hostId = this.firstSeat()?.id || '';
+      if (this.hostId) this.broadcast(null, this.settingsPayload());
+    }
+    if (this.players.size === 0) {
+      this.hostId = '';
+      this.map = '';
+      this.settings = { map: '', time: null };
+      this.round = { state: 'waiting', ends: 0 };
+    } else if (this.players.size < 2 && this.round.state !== 'waiting') {
+      this.round = { state: 'waiting', ends: 0 };
+      this.broadcast(null, { t: 'round', state: 'waiting' });
+    } else {
+      await this.checkWin();
+    }
+    await this.persist();
   }
 
   async checkWin() {
@@ -283,14 +406,11 @@ export class GameRoom extends DurableObject {
     await this.boot();
     const mine = this.playerOf(ws);
     if (!mine) return;
-    this.players.delete(mine.id);
-    this.broadcast(null, { t: 'leave', id: mine.id });
-    if (this.players.size < 2 && this.round.state !== 'waiting') {
-      this.round = { state: 'waiting', ends: 0 };
-      this.broadcast(null, { t: 'round', state: 'waiting' });
-    } else {
-      await this.checkWin();
-    }
+    mine.ws = null;
+    mine.away = true;
+    mine.awayAt = Date.now();
+    this.broadcast(null, { t: 'away', id: mine.id, until: mine.awayAt + AWAY_MS });
     await this.persist();
+    await this.armAlarm(mine.awayAt + AWAY_MS);
   }
 }

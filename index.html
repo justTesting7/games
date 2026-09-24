@@ -143,7 +143,7 @@
         multiBtn.classList.toggle('on', multi);
         roomRow.classList.toggle('hidden', !multi);
         hint.textContent = multi
-          ? 'Humans only. Share the room. Last player standing wins.'
+          ? 'First player in the room sets the map and time. Everyone else joins.'
           : 'You against Jev-driven rivals. Last one standing wins.';
         code.value = room;
         const url = new URL(location.href);
