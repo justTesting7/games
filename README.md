@@ -33,6 +33,8 @@ npx wrangler secret put JEV_API_KEY   # optional; rivals work without it
 
 `npm run cf:dev` serves the same Worker locally on port 8787. Vite (`npm run dev`) stays single-player; it has no `/ws`.
 
+Live: https://relic-isle.noam-berman7.workers.dev
+
 ## Controls
 
 | Input | Action |
