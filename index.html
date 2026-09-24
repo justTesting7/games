@@ -128,6 +128,50 @@
     </div>
 
     <div id="error" class="hidden"></div>
+    <script>
+      (function () {
+        const q = new URLSearchParams(location.search);
+        const soloBtn = document.getElementById('mode-solo');
+        const multiBtn = document.getElementById('mode-multi');
+        const hint = document.getElementById('modehint');
+        const roomRow = document.getElementById('roomrow');
+        const code = document.getElementById('roomcode');
+        const share = document.getElementById('roomshare');
+        const multi = q.get('mode') !== 'solo' && (q.get('mode') === 'multi' || !!q.get('room') || localStorage.getItem('relic-mode') === 'multi');
+        const room = (q.get('room') || localStorage.getItem('relic-room') || 'lobby').slice(0, 16);
+        soloBtn.classList.toggle('on', !multi);
+        multiBtn.classList.toggle('on', multi);
+        roomRow.classList.toggle('hidden', !multi);
+        hint.textContent = multi
+          ? 'Humans only. Share the room. Last player standing wins.'
+          : 'You against Jev-driven rivals. Last one standing wins.';
+        code.value = room;
+        const url = new URL(location.href);
+        if (multi) {
+          url.searchParams.set('mode', 'multi');
+          if (room && room !== 'lobby') url.searchParams.set('room', room);
+          share.textContent = 'Share ' + url.origin + url.search;
+        }
+        const go = (next) => {
+          localStorage.setItem('relic-mode', next);
+          const dest = new URL(location.href);
+          if (next === 'multi') {
+            dest.searchParams.set('mode', 'multi');
+            const r = (code.value || 'lobby').trim().slice(0, 16) || 'lobby';
+            localStorage.setItem('relic-room', r);
+            if (r !== 'lobby') dest.searchParams.set('room', r);
+            else dest.searchParams.delete('room');
+          } else {
+            dest.searchParams.delete('mode');
+            dest.searchParams.delete('room');
+          }
+          location.assign(dest);
+        };
+        soloBtn.onclick = () => go('solo');
+        multiBtn.onclick = () => go('multi');
+        code.onchange = () => { if (multi) go('multi'); };
+      })();
+    </script>
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>
