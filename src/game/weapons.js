@@ -309,6 +309,7 @@ export class Weapons {
     }
     if (hit.fighter?.net) {
       if (shooter.isPlayer) this.session?.reportShot(from, dir, def.key, hit.fighter.id, hit.head);
+      this.combat.damage(hit.fighter, shooter, hit.head ? def.head : def.body, dir, { head: hit.head, weapon: def.key });
       return hit;
     }
     if (shooter.isPlayer && this.session?.multi) this.session.reportShot(from, dir, def.key);

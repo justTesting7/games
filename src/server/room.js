@@ -249,6 +249,7 @@ export class GameRoom extends DurableObject {
       this.broadcast(ws, {
         t: 'pose', id: mine.id, p: mine.p, yaw: mine.yaw, pitch: num(msg.pitch),
         spd: mine.spd, g: mine.g, cr: mine.cr, aim: mine.aim, w: mine.w,
+        alive: mine.alive, hp: mine.hp,
       });
       return;
     }

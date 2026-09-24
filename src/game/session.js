@@ -52,7 +52,7 @@ class Remote {
     if (s.alive === false && this.fighter.alive) {
       this.fighter.alive = false;
       this.character.die(new THREE.Vector3(Math.sin(this.yaw), 0, Math.cos(this.yaw)));
-    } else if (s.alive !== false && !this.fighter.alive) {
+    } else if (s.alive === true && !this.fighter.alive) {
       this.fighter.alive = true;
       this.fighter.health = Number.isFinite(s.hp) ? s.hp : 100;
       this.character.revive();
@@ -166,6 +166,7 @@ export class Session {
       cr: +p.crouchT.toFixed(2),
       aim: p.aimHold > 0 || p.scoped,
       w: L.current,
+      alive: p.fighter.alive,
     });
   }
 
@@ -423,12 +424,18 @@ export class Session {
     const dir = vec(msg.dir, [0, 0, 1]);
     if (!dir.lengthSq()) dir.set(0, 0, 1);
     dir.normalize();
-    // Health is still the pre-hit value on this client.
-    this.combat.damage(vic, atk, msg.amt, dir, { head: msg.head, weapon: msg.w });
-    vic.health = msg.hp;
     if (msg.t === 'kill') {
+      // Server health is authoritative. Local HP is often still full because
+      // remote hits skip client damage, so a 9-damage kill would only flinch.
+      if (vic.alive) {
+        this.combat.damage(vic, atk, Math.max(msg.amt || 0, vic.health || 0, 1), dir, { head: !!msg.head, weapon: msg.w });
+      }
       vic.health = 0;
       vic.alive = false;
+      if (!vic.character?.dead) vic.character?.die(dir);
+    } else {
+      this.combat.damage(vic, atk, msg.amt, dir, { head: msg.head, weapon: msg.w });
+      if (Number.isFinite(msg.hp)) vic.health = msg.hp;
     }
     this.onFeed?.(msg, vic, atk);
   }
