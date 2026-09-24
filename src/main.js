@@ -172,10 +172,11 @@ const paintMode = () => {
   }
   const play = $('play');
   if (!rosterMenu) return;
-  if (rosterMenu.changed()) play.textContent = 'Apply & reload';
+  if (mode === 'solo' && rosterMenu.changed()) play.textContent = 'Apply & reload';
   else if (mode === 'multi' && !hosted) play.textContent = 'Needs host';
   else play.textContent = mode === 'multi' ? 'Join fight' : 'Fight';
 };
+let applyLocalFighter = async () => {};
 const switchMode = (next) => {
   if (next === mode) return;
   persistMode(next);
@@ -233,6 +234,7 @@ $('quality').onchange = (e) => {
 const selection = loadSelection();
 const rosterMenu = setupRosterMenu(selection, $('roster'), () => {
   paintMode();
+  if (mode === 'multi') applyLocalFighter();
 }, { opponents: mode === 'solo' });
 paintMode();
 $('roomcode').dispatchEvent(new Event('input'));
@@ -297,6 +299,7 @@ async function init() {
     city ? city.load(progress) : Promise.resolve(),
   ]);
   character.load(charAssets, looks[0]);
+  character.lookId = fighters[0].id;
 
   const spawn = data.spawn;
   const facing = Math.atan2(data.peak.x - spawn.x, data.peak.z - spawn.z);
@@ -350,12 +353,45 @@ async function init() {
     onHost: (host) => applyHostUi(host),
   });
   session.minPlayers = minPlayers();
-  if (mode === 'multi') session.connect({ name: you.name, color: you.color, roster: you.id, time: timeOfDay, min: minPlayers() });
-  window.__game = { world, pipeline, camera, input, rivals, combat, jev, net, session };
-
+  const lookCache = new Map(fighters.map((e, i) => [e.id, looks[i]]));
   const rosterChars = new Map([[fighters[0].id, character]]);
   fighters.slice(1).forEach((e, i) => rosterChars.set(e.id, rivals[i].character));
-  const lookCache = new Map(fighters.map((e, i) => [e.id, looks[i]]));
+  const syncIdentity = (entry) => {
+    if (mode !== 'multi') return;
+    const identity = { name: entry.name, color: entry.color, roster: entry.id, time: timeOfDay, min: minPlayers() };
+    if (net.identity) Object.assign(net.identity, identity);
+    if (net.status === 'online') net.send({ t: 'hello', ...identity, map: mapDef.id });
+    else if (session) session.connect(identity);
+  };
+  applyLocalFighter = async (id = rosterMenu.player()) => {
+    const entry = byId(id);
+    if (!entry) return;
+    rosterMenu.save();
+    if (character.lookId !== entry.id) {
+      let look = lookCache.get(entry.id);
+      if (!look) {
+        [look] = await resolveLooks([entry]);
+        lookCache.set(entry.id, look);
+      }
+      character.relight(charAssets, look);
+      character.lookId = entry.id;
+      character.setWeapon(player.fighter.loadout?.current || 'pistols');
+      character.equipT = 1;
+      for (const [rid, ch] of [...rosterChars]) {
+        if (ch === character && rid !== entry.id) rosterChars.delete(rid);
+      }
+      rosterChars.set(entry.id, character);
+    }
+    player.fighter.name = entry.name;
+    player.fighter.color = entry.color;
+    syncIdentity(entry);
+    paintMode();
+  };
+  const youNow = byId(rosterMenu.player()) || you;
+  if (mode === 'multi') session.connect({ name: youNow.name, color: youNow.color, roster: youNow.id, time: timeOfDay, min: minPlayers() });
+  if (mode === 'multi' && youNow.id !== character.lookId) await applyLocalFighter(youNow.id);
+  window.__game = { world, pipeline, camera, input, rivals, combat, jev, net, session };
+
   rosterMenu.bindAvatars(
     rosterStudio,
     (id) => rosterChars.get(id),
@@ -464,10 +500,11 @@ async function init() {
       banner('', '', '');
     } else if (msg.state === 'over') {
       round.state = 'over';
+      round.rematchAt = msg.rematchAt || (Date.now() + 4000);
       const won = msg.winner === net.id;
       banner(
         won ? 'Victory' : 'Eliminated',
-        won ? 'You outlasted the other players. Press R to fight again.' : 'Press R when you are ready for another round.',
+        won ? 'You outlasted the other players.' : 'The next round starts in a moment.',
         won ? 'show won' : 'show lost',
       );
     } else if (msg.state === 'waiting') {
@@ -605,9 +642,13 @@ async function init() {
   $('play').classList.remove('hidden');
   menu.classList.remove('loading');
   paintMode();
-  $('play').onclick = () => {
-    if (rosterMenu.changed()) { rosterMenu.save(); location.reload(); return; }
-    if (mode === 'multi' && !net.hosted) return;
+  $('play').onclick = async () => {
+    if (mode === 'solo' && rosterMenu.changed()) { rosterMenu.save(); location.reload(); return; }
+    if (mode === 'multi') {
+      if (!net.hosted) return;
+      rosterMenu.save();
+      await applyLocalFighter();
+    }
     audio.holdFocus();
     canvas.requestPointerLock();
   };
@@ -641,11 +682,15 @@ async function init() {
     pipeline.setTimeOfDay(timeOfDay, elapsed);
 
     const locked = document.pointerLockElement === canvas;
-    if ((input.restart || (input.reload && round.state === 'over')) && (round.state === 'over' || round.state === 'fight')) {
+    if (mode === 'solo' && (input.restart || (input.reload && round.state === 'over')) && (round.state === 'over' || round.state === 'fight')) {
       startRound();
       input.reload = false;
     }
     input.restart = false;
+    if (mode === 'multi' && round.state === 'over' && round.rematchAt) {
+      const left = Math.max(0, (round.rematchAt - Date.now()) / 1000);
+      banner($('bannertitle').textContent || 'Round over', left > 0.15 ? `Next round in ${Math.ceil(left)}` : 'Starting…', $('banner').className);
+    }
     if (round.state === 'countdown') {
       if (round.ends) round.t = (round.ends - Date.now()) / 1000;
       else round.t -= dt;

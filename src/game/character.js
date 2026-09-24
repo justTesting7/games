@@ -549,6 +549,37 @@ export class Character {
     });
   }
 
+  // Swap clothes/face on this instance so a roster pick does not reload the page.
+  relight(assets, look) {
+    const scene = this.root.parent;
+    this.mixer?.stopAllAction();
+    this.root.clear();
+    this.rifle?.removeFromParent();
+    this.grenade?.removeFromParent();
+    this.braid?.removeFromParent();
+    this.pistols?.forEach((p) => p.removeFromParent());
+    this.holsters?.forEach((h) => {
+      h.holster.removeFromParent();
+      h.band.removeFromParent();
+    });
+    this.actions = {};
+    this.weights = {};
+    this.braid = null;
+    this.pistols = null;
+    this.holsters = null;
+    this.rifle = null;
+    this.grenade = null;
+    this.model = null;
+    this.mixer = null;
+    this.load(assets, look);
+    if (scene) {
+      scene.add(this.rifle, this.grenade);
+      if (this.braid) scene.add(this.braid);
+      this.pistols.forEach((p) => scene.add(p));
+      this.holsters.forEach((h) => scene.add(h.holster, h.band));
+    }
+  }
+
   addTo(scene) {
     scene.add(this.root, this.rifle, this.grenade);
     if (this.braid) scene.add(this.braid);

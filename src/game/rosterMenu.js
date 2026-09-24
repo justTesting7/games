@@ -1,7 +1,7 @@
 import { ROSTER, STYLES, byId, saveSelection } from './roster.js';
 
-// "Play as" and "Opponents" pickers. Changes apply on the next load, so the
-// caller swaps the Fight button for a reload when `changed()` is true.
+// "Play as" and "Opponents" pickers. Solo opponent changes still need a
+// reload; a multiplayer fighter pick applies live so Join just enters.
 export function setupRosterMenu(initial, root, onChange, opts = {}) {
   const sel = { player: initial.player, rivals: [...initial.rivals] };
   const showOpponents = opts.opponents !== false;
@@ -86,6 +86,8 @@ export function setupRosterMenu(initial, root, onChange, opts = {}) {
 
   return {
     changed: () => key(sel) !== start,
+    player: () => sel.player,
+    selection: () => ({ player: sel.player, rivals: [...sel.rivals] }),
     save: () => saveSelection(sel),
     bindAvatars,
   };

@@ -2,6 +2,7 @@ import { DurableObject } from 'cloudflare:workers';
 
 const HP = 100;
 const AWAY_MS = 60_000;
+const REMATCH_MS = 4000;
 const DAMAGE = {
   pistols: { body: 9, head: 30 },
   rifle: { body: 80, head: 200 },
@@ -135,6 +136,7 @@ export class GameRoom extends DurableObject {
   async fetch(request) {
     await this.boot();
     await this.ensureFight();
+    await this.ensureRematch();
     await this.sweepAway();
     const url = new URL(request.url);
     if (request.headers.get('Upgrade') !== 'websocket') {
@@ -210,6 +212,7 @@ export class GameRoom extends DurableObject {
     try { msg = JSON.parse(typeof message === 'string' ? message : new TextDecoder().decode(message)); }
     catch { return; }
     await this.ensureFight();
+    await this.ensureRematch();
 
     if (msg.t === 'hello') {
       mine.name = str(msg.name, 24) || mine.name;
@@ -332,10 +335,18 @@ export class GameRoom extends DurableObject {
     else await this.persist();
   }
 
-  async tryStart() {
-    if (this.players.size < this.minPlayers()) return;
+  async tryStart({ rematch = false } = {}) {
+    if (this.players.size < this.minPlayers()) {
+      if (rematch || this.round.state === 'over') {
+        this.round = { state: 'waiting', ends: 0 };
+        this.broadcast(null, { t: 'round', state: 'waiting' });
+        await this.persist();
+      }
+      return;
+    }
     if (this.round.state === 'fight' || this.round.state === 'countdown') return;
-    if (![...this.players.values()].some((p) => p.ready && !p.away)) return;
+    if (this.round.state === 'over' && !rematch) return;
+    if (!rematch && ![...this.players.values()].some((p) => p.ready && !p.away)) return;
     for (const p of this.players.values()) {
       p.hp = HP;
       p.alive = true;
@@ -361,6 +372,12 @@ export class GameRoom extends DurableObject {
     await this.persist();
   }
 
+  async ensureRematch() {
+    if (this.round.state !== 'over' || !this.round.rematchAt) return;
+    if (Date.now() < this.round.rematchAt) return;
+    await this.tryStart({ rematch: true });
+  }
+
   async armAlarm(at) {
     const next = await this.nextAlarm(at);
     if (next) await this.ctx.storage.setAlarm(next);
@@ -369,6 +386,7 @@ export class GameRoom extends DurableObject {
   async nextAlarm(extra) {
     let next = extra || 0;
     if (this.round.state === 'countdown' && this.round.ends) next = next ? Math.min(next, this.round.ends) : this.round.ends;
+    if (this.round.state === 'over' && this.round.rematchAt) next = next ? Math.min(next, this.round.rematchAt) : this.round.rematchAt;
     for (const p of this.players.values()) {
       if (!p.away || !p.awayAt) continue;
       const until = p.awayAt + AWAY_MS;
@@ -380,6 +398,7 @@ export class GameRoom extends DurableObject {
   async alarm() {
     await this.boot();
     await this.ensureFight();
+    await this.ensureRematch();
     await this.sweepAway();
     await this.armAlarm();
   }
@@ -415,9 +434,10 @@ export class GameRoom extends DurableObject {
     if (this.round.state !== 'fight' || this.players.size < 2) return;
     const live = [...this.players.values()].filter((p) => p.alive);
     if (live.length > 1) return;
-    this.round = { state: 'over', winner: live[0]?.id || null };
-    this.broadcast(null, { t: 'round', state: 'over', winner: this.round.winner });
+    this.round = { state: 'over', winner: live[0]?.id || null, rematchAt: Date.now() + REMATCH_MS };
+    this.broadcast(null, { t: 'round', state: 'over', winner: this.round.winner, rematchAt: this.round.rematchAt });
     await this.persist();
+    await this.armAlarm(this.round.rematchAt);
   }
 
   async webSocketClose(ws) {

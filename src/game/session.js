@@ -23,6 +23,7 @@ class Remote {
     this.target = this.pos.clone();
     this.targetYaw = this.yaw;
     this.persona = { name: snap.name, color: snap.color };
+    this.roster = snap.roster || 'adventurer';
     this.label = 'human';
     this.source = 'net';
     this.confidence = 1;
@@ -46,6 +47,7 @@ class Remote {
       this.character.setWeapon(s.w);
     }
     if (Number.isFinite(s.hp)) this.fighter.health = s.hp;
+    if (s.roster) this.roster = s.roster;
     if (s.away !== undefined) this.away = !!s.away;
     if (s.alive === false && this.fighter.alive) {
       this.fighter.alive = false;
@@ -306,7 +308,8 @@ export class Session {
     if (!snap?.id || snap.id === this.net.id) return;
     const cur = this.remotes.get(snap.id);
     if (cur) {
-      cur.applySnap(snap);
+      if (snap.roster && snap.roster !== cur.roster) this.restyle(cur, snap);
+      else cur.applySnap(snap);
       if (snap.drone?.p) this.upsertDrone(snap.id, snap.drone);
       this.onRoster?.();
       return;
@@ -317,6 +320,22 @@ export class Session {
     }
     this.pending.set(snap.id, { ...snap });
     this.spawnRemote(snap);
+  }
+
+  async restyle(remote, snap) {
+    const entry = byId(snap.roster) || byId('adventurer');
+    const [look] = await resolveLooks([entry]);
+    remote.dispose(this.scene);
+    const ch = new Character();
+    ch.load(this.charAssets, look);
+    ch.addTo(this.scene);
+    ch.equipT = 1;
+    remote.character = ch;
+    remote.fighter.character = ch;
+    remote.fighter.name = snap.name || entry.name;
+    remote.fighter.color = snap.color || entry.color;
+    remote.roster = entry.id;
+    remote.applySnap(snap);
   }
 
   async spawnRemote(snap) {

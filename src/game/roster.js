@@ -56,19 +56,33 @@ export const ROSTER = [
 export const byId = (id) => ROSTER.find((r) => r.id === id);
 
 const KEY = 'relic-roster';
+const PLAYER_KEY = 'relic-player';
 const DEFAULT = { player: 'adventurer', rivals: ['redpolo', 'greytee', 'denim'] };
 
 export function loadSelection() {
+  let player = DEFAULT.player;
+  let rivals = [...DEFAULT.rivals];
   try {
     const s = JSON.parse(localStorage.getItem(KEY));
-    const rivals = (s?.rivals || []).filter((id) => byId(id) && id !== s.player);
-    if (byId(s?.player) && rivals.length) return { player: s.player, rivals };
+    const stored = (s?.rivals || []).filter((id) => byId(id) && id !== s.player);
+    if (byId(s?.player) && stored.length) {
+      player = s.player;
+      rivals = stored;
+    }
   } catch { /* fall back to the default line-up */ }
-  return { ...DEFAULT, rivals: [...DEFAULT.rivals] };
+  try {
+    const tab = sessionStorage.getItem(PLAYER_KEY);
+    if (byId(tab)) player = tab;
+    else sessionStorage.setItem(PLAYER_KEY, player);
+  } catch { /* private mode */ }
+  rivals = rivals.filter((id) => id !== player);
+  if (!rivals.length) rivals = DEFAULT.rivals.filter((id) => id !== player);
+  return { player, rivals };
 }
 
 export function saveSelection(sel) {
   localStorage.setItem(KEY, JSON.stringify(sel));
+  try { sessionStorage.setItem(PLAYER_KEY, sel.player); } catch { /* private mode */ }
 }
 
 // A rival persona in the shape Rival expects.
