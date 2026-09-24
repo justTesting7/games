@@ -5,7 +5,7 @@ export const DRONE = {
   name: 'Suicide drone',
   short: 'drone',
   slot: 4,
-  count: 1,
+  count: 10,
   speed: 16,
   boost: 24,
   climb: 9,

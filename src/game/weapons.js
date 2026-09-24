@@ -18,7 +18,7 @@ export const WEAPONS = {
   },
   drone: {
     key: 'drone', name: 'Suicide drone', short: 'drone', slot: 4,
-    count: 1, radius: 9.5, damage: 150,
+    count: 10, radius: 9.5, damage: 150,
   },
 };
 export const SLOTS = ['pistols', 'rifle', 'grenade', 'drone'];
