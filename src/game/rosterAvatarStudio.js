@@ -1,9 +1,31 @@
 import * as THREE from 'three';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 
+const stub = () => ({
+  paintThumb() {},
+  async bindChipThumbs() {},
+  async showHover() {},
+  hideHover() {},
+});
+
 // One off-screen WebGL context for roster chip thumbnails and hover previews.
-export function createRosterAvatarStudio() {
-  const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true, preserveDrawingBuffer: true });
+// Phones rarely have a spare WebGL context; skip the studio there so the
+// game canvas is the only GL consumer.
+export function createRosterAvatarStudio({ webgl = true } = {}) {
+  if (!webgl) return stub();
+  let renderer;
+  try {
+    renderer = new THREE.WebGLRenderer({
+      alpha: true,
+      antialias: false,
+      stencil: false,
+      powerPreference: 'default',
+      failIfMajorPerformanceCaveat: false,
+      preserveDrawingBuffer: true,
+    });
+  } catch {
+    return stub();
+  }
   renderer.setClearColor(0x000000, 0);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.NoToneMapping;

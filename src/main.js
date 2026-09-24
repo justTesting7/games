@@ -23,33 +23,27 @@ import { Net } from './game/net.js';
 import { Session } from './game/session.js';
 import { modeUrl, persistMode, persistRoom, resolveMode, resolveRoom } from './game/mode.js';
 import { isTouchDevice, setupTouch } from './game/touch.js';
+import { createGameRenderer } from './engine/webgl.js';
 
 const $ = (id) => document.getElementById(id);
-const canvas = $('game');
 const menu = $('menu');
 menu.classList.add('loading');
 
 function fail(e) {
   console.error(e);
   const el = $('error');
-  el.textContent = `Failed to start: ${e?.message || e}\n\nMake sure the assets were downloaded (npm run dev does this automatically).`;
+  const msg = e?.message || String(e);
+  const hint = /WebGL/i.test(msg)
+    ? 'Close other 3D tabs, then reload. Some phones only allow one WebGL game at a time.'
+    : 'Make sure the assets were downloaded (npm run dev does this automatically).';
+  el.textContent = `Failed to start: ${msg}\n\n${hint}`;
   el.classList.remove('hidden');
 }
 
 let renderer;
+let canvas;
 try {
-  renderer = new THREE.WebGLRenderer({
-    canvas,
-    antialias: false,
-    alpha: false,
-    stencil: false,
-    powerPreference: isTouchDevice() ? 'default' : 'high-performance',
-    failIfMajorPerformanceCaveat: false,
-  });
-  if (!renderer.capabilities.isWebGL2) throw new Error('WebGL 2 is required.');
-  renderer.info.autoReset = false;
-  renderer.setClearColor(0x05080b, 1);
-  canvas.addEventListener('webglcontextlost', (e) => e.preventDefault());
+  ({ renderer, canvas } = createGameRenderer($('game')));
   canvas.addEventListener('webglcontextrestored', () => {
     try { pipeline.setQuality(pipeline.qualityName || 'low'); } catch { /* retry on next frame */ }
   });
@@ -252,7 +246,7 @@ const rosterMenu = setupRosterMenu(selection, $('roster'), () => {
 }, { opponents: mode === 'solo' });
 paintMode();
 $('roomcode').dispatchEvent(new Event('input'));
-const rosterStudio = createRosterAvatarStudio();
+const rosterStudio = createRosterAvatarStudio({ webgl: !isTouchDevice() });
 
 $('volume').oninput = (e) => audio.setVolume(e.target.value / 100);
 audio.setVolume($('volume').value / 100);
