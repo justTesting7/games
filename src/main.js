@@ -75,7 +75,7 @@ world.raycast = (o, d, maxDist, ignore) => {
     if (tw < (best ? best.t : maxDist)) best = { t: tw, normal: new THREE.Vector3(0, 1, 0), surface: 'water' };
   }
   const c = world.veg.colliders.raycast(o, d, best ? best.t : maxDist);
-  if (c && (!best || c.t < best.t)) best = { t: c.t, normal: c.normal, surface: c.surface || c.collider.type };
+  if (c && (!best || c.t < best.t)) best = { t: c.t, normal: c.normal, surface: c.surface || c.collider.type, collider: c.collider };
   const pr = world.props.raycast(o, d, best ? best.t : maxDist);
   if (pr && (!best || pr.t < best.t)) best = pr;
   const fh = world.combat.raycast(o, d, best ? best.t : maxDist, ignore);
