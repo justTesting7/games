@@ -10,7 +10,7 @@ html, body {
   -webkit-user-select: none;
   -webkit-touch-callout: none;
 }
-#game { display: block; width: 100vw; height: 100vh; height: 100dvh; touch-action: none; }
+#game { display: block; width: 100vw; height: 100vh; height: 100dvh; touch-action: none; background: #05080b; }
 .hidden { display: none !important; }
 
 #hud { position: fixed; inset: 0; pointer-events: none; }

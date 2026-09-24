@@ -1,6 +1,7 @@
 export const isTouchDevice = () =>
   !!window.matchMedia?.('(pointer: coarse)').matches
-  || !!window.matchMedia?.('(hover: none) and (max-width: 900px)').matches;
+  || !!window.matchMedia?.('(hover: none) and (max-width: 900px)').matches
+  || /iPhone|iPad|iPod|Android/i.test(navigator.userAgent || '');
 
 // On-screen stick, look pad, and thumbs for phones. Keyboard/mouse still work.
 export function setupTouch(input, { onLook, onMenu, onPlayChange }) {

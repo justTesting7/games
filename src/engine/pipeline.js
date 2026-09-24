@@ -35,9 +35,32 @@ export const smoothstep = (a, b, x) => {
   return t * t * (3 - 2 * t);
 };
 
-function hdrTarget(w, h, opts = {}) {
+function canColorBuffer(renderer, type) {
+  const gl = renderer.getContext();
+  const rt = new THREE.WebGLRenderTarget(4, 4, {
+    type, format: THREE.RGBAFormat, depthBuffer: false, generateMipmaps: false,
+  });
+  try {
+    renderer.setRenderTarget(rt);
+    const ok = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
+    renderer.setRenderTarget(null);
+    rt.dispose();
+    return ok;
+  } catch {
+    rt.dispose();
+    return false;
+  }
+}
+
+function pickHdrType(renderer) {
+  if (canColorBuffer(renderer, THREE.HalfFloatType)) return THREE.HalfFloatType;
+  if (canColorBuffer(renderer, THREE.FloatType)) return THREE.FloatType;
+  return THREE.UnsignedByteType;
+}
+
+function hdrTarget(w, h, type, opts = {}) {
   return new THREE.WebGLRenderTarget(w, h, {
-    type: THREE.HalfFloatType,
+    type,
     format: THREE.RGBAFormat,
     minFilter: THREE.LinearFilter,
     magFilter: THREE.LinearFilter,
@@ -72,7 +95,7 @@ function fsMaterial(frag, uniforms, extra = {}) {
 }
 
 export const QUALITY = {
-  low: { label: 'Low', shadow: 2048, shadowDist: 40, ssr: 0, msaa: 0, pixelRatio: 0.75, grass: 0.45, trees: 0.6 },
+  low: { label: 'Low', shadow: 1024, shadowDist: 36, ssr: 0, msaa: 0, pixelRatio: 0.75, grass: 0.35, trees: 0.5 },
   medium: { label: 'Medium', shadow: 2048, shadowDist: 50, ssr: 16, msaa: 0, pixelRatio: 1, grass: 0.7, trees: 0.8 },
   high: { label: 'High', shadow: 4096, shadowDist: 60, ssr: 32, msaa: 4, pixelRatio: 1.25, grass: 1, trees: 1 },
   ultra: { label: 'Ultra', shadow: 4096, shadowDist: 70, ssr: 48, msaa: 4, pixelRatio: 2, grass: 1.3, trees: 1.25 },
@@ -84,8 +107,14 @@ export class Pipeline {
     this.renderer = renderer;
     renderer.toneMapping = THREE.NoToneMapping;
     renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
+    renderer.setClearColor(0x05080b, 1);
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFShadowMap;
+    this.mobile = (typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches)
+      || /iPhone|iPad|iPod|Android/i.test(globalThis.navigator?.userAgent || '');
+    // Phones often report half-float as complete, then sample Inf/NaN and
+    // the tonemap goes solid white. 8-bit targets stay visible.
+    this.hdrType = this.mobile ? THREE.UnsignedByteType : pickHdrType(renderer);
 
     this.quad = new FullscreenQuad();
     this.scene = new THREE.Scene();
@@ -102,7 +131,7 @@ export class Pipeline {
     this.firstFrame = true;
     this.envAge = Infinity;
 
-    this.skyRT = hdrTarget(256, 128, {
+    this.skyRT = hdrTarget(256, 128, this.hdrType, {
       minFilter: THREE.LinearMipmapLinearFilter,
       generateMipmaps: true,
       wrapS: THREE.RepeatWrapping,
@@ -209,7 +238,7 @@ export class Pipeline {
       uFlash: { value: 0 },
     });
 
-    this.lumRT = [0, 1].map(() => hdrTarget(1, 1, { type: THREE.FloatType, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter }));
+    this.lumRT = [0, 1].map(() => hdrTarget(1, 1, this.hdrType, { minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter }));
     this.lumIndex = 0;
 
     this.size = new THREE.Vector2(1, 1);
@@ -240,31 +269,36 @@ export class Pipeline {
     Object.assign(sh.camera, { left: -d, right: d, top: d, bottom: -d, near: 1, far: 800 });
     sh.camera.updateProjectionMatrix();
     this.waterMaterial.uniforms.uSSRSteps.value = q.ssr;
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, q.pixelRatio));
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, this.mobile ? Math.min(q.pixelRatio, 1) : q.pixelRatio));
     if (changedMsaa && this.sceneRT) { this.sceneRT.dispose(); this.sceneRT = null; }
-    this.resize(window.innerWidth, window.innerHeight);
+    this.resize(Math.max(2, window.innerWidth || 360), Math.max(2, window.innerHeight || 640));
   }
 
   resize(w, h) {
-    this.renderer.setSize(w, h);
+    w = Math.max(2, Math.round(w) || 2);
+    h = Math.max(2, Math.round(h) || 2);
+    const cap = this.mobile ? 1280 : 3840;
+    if (w > cap) { h = Math.max(2, Math.round(h * cap / w)); w = cap; }
+    if (h > cap) { w = Math.max(2, Math.round(w * cap / h)); h = cap; }
+    this.renderer.setSize(w, h, false);
     const pr = this.renderer.getPixelRatio();
-    const W = Math.max(1, Math.floor(w * pr)), H = Math.max(1, Math.floor(h * pr));
+    const W = Math.max(2, Math.floor(w * pr)), H = Math.max(2, Math.floor(h * pr));
     this.size.set(W, H);
     if (!this.sceneRT) {
-      this.sceneRT = hdrTarget(W, H, { depthBuffer: true, samples: this.quality.msaa });
+      this.sceneRT = hdrTarget(W, H, this.hdrType, { depthBuffer: true, samples: this.quality.msaa });
     } else this.sceneRT.setSize(W, H);
-    if (!this.copyRT) this.copyRT = hdrTarget(W, H); else this.copyRT.setSize(W, H);
-    if (!this.fogRT) this.fogRT = hdrTarget(W, H); else this.fogRT.setSize(W, H);
+    if (!this.copyRT) this.copyRT = hdrTarget(W, H, this.hdrType); else this.copyRT.setSize(W, H);
+    if (!this.fogRT) this.fogRT = hdrTarget(W, H, this.hdrType); else this.fogRT.setSize(W, H);
 
     this.bloomRTs?.forEach((r) => r.dispose());
     this.bloomRTs = [];
     let bw = W, bh = H;
     for (let i = 0; i < 6; i++) {
       bw = Math.max(1, bw >> 1); bh = Math.max(1, bh >> 1);
-      this.bloomRTs.push(hdrTarget(bw, bh));
+      this.bloomRTs.push(hdrTarget(bw, bh, this.hdrType));
     }
     const rw = Math.max(1, W >> 1), rh = Math.max(1, H >> 1);
-    if (!this.raysRT) this.raysRT = hdrTarget(rw, rh); else this.raysRT.setSize(rw, rh);
+    if (!this.raysRT) this.raysRT = hdrTarget(rw, rh, this.hdrType); else this.raysRT.setSize(rw, rh);
     this.waterMaterial.uniforms.uResolution.value.set(W, H);
   }
 
@@ -320,10 +354,14 @@ export class Pipeline {
 
     this.quad.render(r, this.skyGenMaterial, this.skyRT);
     this.envAge += dt;
-    if (this.envAge > 1.5 || !this.envRT) {
+    if (this.envAge > (this.mobile ? 8 : 1.5) || !this.envRT) {
       this.envAge = 0;
-      this.envRT = this.pmrem.fromEquirectangular(this.skyRT.texture, this.envRT);
-      this.scene.environment = this.envRT.texture;
+      try {
+        this.envRT = this.pmrem.fromEquirectangular(this.skyRT.texture, this.envRT);
+        this.scene.environment = this.envRT.texture;
+      } catch {
+        this.scene.environment = null;
+      }
     }
 
     this.updateShadowCamera(opts.shadowCenter || camera.position);

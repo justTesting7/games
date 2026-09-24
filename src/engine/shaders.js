@@ -570,6 +570,7 @@ void main() {
   col = mix(col, vec3(0.55, 0.7, 1.0) * pl * 1.1, scot * 0.6);
 
   float avgLum = texture(tLum, vec2(0.5)).r;
+  if (!(avgLum > 0.0) || avgLum != avgLum) avgLum = 0.18;
   col *= uExposureBias * 0.16 / clamp(avgLum, 0.04, 3.0);
   col = aces(col);
 

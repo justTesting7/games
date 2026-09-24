@@ -38,15 +38,27 @@ function fail(e) {
 
 let renderer;
 try {
-  renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
+  renderer = new THREE.WebGLRenderer({
+    canvas,
+    antialias: false,
+    alpha: false,
+    stencil: false,
+    powerPreference: isTouchDevice() ? 'default' : 'high-performance',
+    failIfMajorPerformanceCaveat: false,
+  });
   if (!renderer.capabilities.isWebGL2) throw new Error('WebGL 2 is required.');
   renderer.info.autoReset = false;
+  renderer.setClearColor(0x05080b, 1);
+  canvas.addEventListener('webglcontextlost', (e) => e.preventDefault());
+  canvas.addEventListener('webglcontextrestored', () => {
+    try { pipeline.setQuality(pipeline.qualityName || 'low'); } catch { /* retry on next frame */ }
+  });
 } catch (e) {
   fail(e);
   throw e;
 }
 
-const savedQuality = localStorage.getItem('relic-quality') || (isTouchDevice() ? 'medium' : 'high');
+const savedQuality = localStorage.getItem('relic-quality') || (isTouchDevice() ? 'low' : 'high');
 $('quality').value = savedQuality;
 const pipeline = new Pipeline(renderer);
 pipeline.setQuality(savedQuality);
@@ -681,7 +693,6 @@ async function init() {
     }
     audio.holdFocus();
     if (touchPad.active) {
-      try { await document.documentElement.requestFullscreen?.(); } catch { /* iOS */ }
       setPlay(true);
     } else {
       canvas.requestPointerLock();
@@ -898,8 +909,10 @@ async function init() {
 init().catch(fail);
 
 const fitView = () => {
-  const w = Math.round(visualViewport?.width || innerWidth);
-  const h = Math.round(visualViewport?.height || innerHeight);
+  const vw = visualViewport?.width || 0;
+  const vh = visualViewport?.height || 0;
+  const w = Math.max(2, Math.round(vw || innerWidth || 360));
+  const h = Math.max(2, Math.round(vh || innerHeight || 640));
   pipeline.resize(w, h);
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
