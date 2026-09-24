@@ -225,40 +225,44 @@ export class Weapons {
     const ch = shooter.character;
     const rifle = side < 0;
     const throughScope = rifle && shooter.isPlayer && (this.sniperWasScoped || this.player.scopeT > 0.35);
-    let muzzle, axis, dir;
-    if (throughScope) {
-      // The reticle is the camera. A muzzle-to-crosshair ray misses when the
-      // hidden rifle sits behind cover the scope is peeking over.
-      axis = new THREE.Vector3();
-      this.player.camera.getWorldDirection(axis);
-      muzzle = this.player.camera.position.clone().addScaledVector(axis, 0.15);
-      dir = axis.clone();
+    const flashAt = rifle ? ch.rifleMuzzle() : ch.muzzleWorld(side);
+    const flashAxis = rifle ? ch.rifleAxis() : ch.pistolAxis(side);
+    let from, dir;
+    if (shooter.isPlayer) {
+      // Hitscan from the body along the look, not from the shoulder camera or
+      // an offset muzzle that can sneak around a tree the player is behind.
+      from = this.player.losOrigin();
+      if (throughScope) {
+        dir = this.player.lookDir();
+      } else {
+        const target = aimPoint.clone();
+        const r = spread * target.distanceTo(from);
+        target.add(new THREE.Vector3().randomDirection().multiplyScalar(r * Math.random()));
+        dir = target.sub(from).normalize();
+      }
+      from.addScaledVector(dir, 0.2);
     } else {
-      muzzle = rifle ? ch.rifleMuzzle() : ch.muzzleWorld(side);
-      axis = rifle ? ch.rifleAxis() : ch.pistolAxis(side);
+      from = rifle ? ch.rifleMuzzle() : ch.muzzleWorld(side);
       const target = aimPoint.clone();
-      const r = spread * target.distanceTo(muzzle);
+      const r = spread * target.distanceTo(from);
       target.add(new THREE.Vector3().randomDirection().multiplyScalar(r * Math.random()));
-      dir = target.clone().sub(muzzle).normalize();
+      dir = target.sub(from).normalize();
     }
-    const hit = this.world.raycast(muzzle, dir, 900, shooter);
-
-    const flashAt = throughScope ? ch.rifleMuzzle() : muzzle;
-    const flashAxis = throughScope ? ch.rifleAxis() : axis;
+    const hit = this.world.raycast(from, dir, 900, shooter);
     this.fx.muzzle(flashAt, flashAxis, rifle ? 2.4 : 1);
     if (!rifle) {
       const up = new THREE.Vector3().setFromMatrixColumn(ch.pistols[side].matrixWorld, 1);
-      const right = new THREE.Vector3().crossVectors(axis, up).multiplyScalar(side === 0 ? 1 : -1);
-      this.fx.ejectCasing(muzzle.clone().addScaledVector(axis, -0.08).addScaledVector(up, 0.02), right, up);
+      const right = new THREE.Vector3().crossVectors(flashAxis, up).multiplyScalar(side === 0 ? 1 : -1);
+      this.fx.ejectCasing(flashAt.clone().addScaledVector(flashAxis, -0.08).addScaledVector(up, 0.02), right, up);
       ch.fired(side);
     }
     shooter.lastShotT = this.combat.time;
-    const { dist, pan } = this.listen(muzzle);
+    const { dist, pan } = this.listen(flashAt);
     this.audio.gunshot(side < 0 ? 0 : side, shooter.isPlayer ? 0 : dist, shooter.isPlayer ? null : pan, rifle);
 
-    const end = hit ? muzzle.clone().addScaledVector(dir, hit.t) : muzzle.clone().addScaledVector(dir, 500);
-    this.fx.tracer(muzzle, end);
-    if (!shooter.isPlayer) this.checkNearMiss(muzzle, end, hit);
+    const end = hit ? from.clone().addScaledVector(dir, hit.t) : from.clone().addScaledVector(dir, 500);
+    this.fx.tracer(flashAt, end);
+    if (!shooter.isPlayer) this.checkNearMiss(from, end, hit);
     if (!hit) return null;
     const hitDist = end.distanceTo(this.player.camera.position);
     if (hit.fighter) {

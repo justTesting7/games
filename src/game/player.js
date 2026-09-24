@@ -254,20 +254,31 @@ export class Player {
     cam.rotateZ(this.shake * this.shakeSide * 0.06);
   }
 
+  // Eye height at the body, not the shoulder camera, so cover the player is
+  // standing behind actually sits on the aim ray.
+  eyeHeight() {
+    const through = this.scopeT > 0.4;
+    return (through ? 1.64 : this.character?.aimWeight > 0.5 ? 1.58 : 1.55) - this.crouchT * 0.92;
+  }
+
+  losOrigin(out = new THREE.Vector3()) {
+    return out.copy(this.pos).setY(this.pos.y + this.eyeHeight());
+  }
+
+  lookDir(out = new THREE.Vector3()) {
+    this.camera.getWorldDirection(out);
+    return out;
+  }
+
   // Finds what the crosshair points at, so bullets land where it shows.
   updateAim() {
-    const cam = this.camera;
-    const o = cam.position.clone();
-    const d = new THREE.Vector3();
-    cam.getWorldDirection(d);
-    const through = this.scopeT > 0.4;
-    const skip = through ? 0.12 : o.distanceTo(this.pos) + 0.5;
-    const start = o.clone().addScaledVector(d, skip);
-    const reach = through ? 900 : 600;
+    const o = this.losOrigin();
+    const d = this.lookDir();
+    const start = o.clone().addScaledVector(d, 0.2);
+    const reach = this.scopeT > 0.4 ? 900 : 600;
     const hit = this.world.raycast(start, d, reach, this.fighter);
     if (hit) { this.aimPoint.copy(start).addScaledVector(d, hit.t); this.aimHit = hit; }
     else { this.aimPoint.copy(start).addScaledVector(d, reach); this.aimHit = null; }
-    if (!through && this.aimPoint.distanceTo(this.pos) < 3) this.aimPoint.copy(start).addScaledVector(d, 6);
   }
 
   get underwater() { return this.camera.position.y < 0.05; }
