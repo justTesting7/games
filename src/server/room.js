@@ -15,17 +15,28 @@ const str = (v, n) => (typeof v === 'string' ? v.slice(0, n) : '');
 const hex = (v) => (/^#[0-9a-fA-F]{6}$/.test(v) ? v : '');
 
 export class GameRoom extends DurableObject {
-  boot() {
+  async boot() {
     if (this.booted) return;
     this.booted = true;
     this.players = new Map();
-    this.round = { state: 'waiting', ends: 0 };
-    this.map = '';
+    this.round = (await this.ctx.storage.get('round')) || { state: 'waiting', ends: 0 };
+    this.map = (await this.ctx.storage.get('map')) || '';
     this.nextSlot = 0;
+    const saved = (await this.ctx.storage.get('players')) || {};
     for (const ws of this.ctx.getWebSockets()) {
       const a = ws.deserializeAttachment() || {};
-      if (a.id) this.adopt(ws, a);
+      if (a.id) this.adopt(ws, { ...saved[a.id], ...a });
     }
+  }
+
+  async persist() {
+    await this.ctx.storage.put('round', this.round);
+    if (this.map) await this.ctx.storage.put('map', this.map);
+    const pack = {};
+    for (const p of this.players.values()) {
+      pack[p.id] = { id: p.id, name: p.name, color: p.color, roster: p.roster, slot: p.slot, hp: p.hp, alive: p.alive, p: p.p, yaw: p.yaw, w: p.w };
+    }
+    await this.ctx.storage.put('players', pack);
   }
 
   adopt(ws, a) {
@@ -35,13 +46,13 @@ export class GameRoom extends DurableObject {
       name: a.name || 'player',
       color: a.color || '#f3dcb0',
       roster: ROSTERS.has(a.roster) ? a.roster : 'adventurer',
-      slot: a.slot ?? this.nextSlot++,
-      hp: HP,
-      alive: true,
+      slot: Number.isFinite(a.slot) ? a.slot : this.nextSlot++,
+      hp: Number.isFinite(a.hp) ? a.hp : HP,
+      alive: a.alive !== false,
       ready: false,
-      p: [0, 2, 0],
-      yaw: 0,
-      w: 'pistols',
+      p: Array.isArray(a.p) ? a.p : [0, 2, 0],
+      yaw: a.yaw || 0,
+      w: WEAPONS.has(a.w) ? a.w : 'pistols',
     };
     this.nextSlot = Math.max(this.nextSlot, p.slot + 1);
     this.players.set(p.id, p);
@@ -69,19 +80,21 @@ export class GameRoom extends DurableObject {
   }
 
   async fetch(request) {
-    this.boot();
+    await this.boot();
+    await this.ensureFight();
     if (request.headers.get('Upgrade') !== 'websocket') {
       return Response.json({
         room: this.ctx.id.toString(),
         peers: this.players.size,
-        round: this.round.state,
+        round: this.round,
+        now: Date.now(),
       });
     }
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
     this.ctx.acceptWebSocket(server);
     const id = crypto.randomUUID().slice(0, 8);
-    const p = this.adopt(server, { id, slot: this.nextSlot });
+    const p = this.adopt(server, { id });
     server.serializeAttachment({ id, slot: p.slot, name: p.name, color: p.color, roster: p.roster });
     this.broadcast(server, { t: 'join', ...this.snap(p) });
     this.send(server, {
@@ -92,6 +105,7 @@ export class GameRoom extends DurableObject {
       round: this.round,
       peers: [...this.players.values()].filter((o) => o.id !== id).map((o) => this.snap(o)),
     });
+    await this.persist();
     return new Response(null, { status: 101, webSocket: client });
   }
 
@@ -101,12 +115,13 @@ export class GameRoom extends DurableObject {
   }
 
   async webSocketMessage(ws, message) {
-    this.boot();
+    await this.boot();
     const mine = this.playerOf(ws);
     if (!mine) return;
     let msg;
     try { msg = JSON.parse(typeof message === 'string' ? message : new TextDecoder().decode(message)); }
     catch { return; }
+    await this.ensureFight();
 
     if (msg.t === 'hello') {
       mine.name = str(msg.name, 24) || mine.name;
@@ -116,6 +131,7 @@ export class GameRoom extends DurableObject {
       ws.serializeAttachment({ id: mine.id, slot: mine.slot, name: mine.name, color: mine.color, roster: mine.roster });
       this.broadcast(ws, { t: 'peer', ...this.snap(mine) });
       if (this.map) this.send(ws, { t: 'map', id: this.map });
+      await this.persist();
       return;
     }
 
@@ -138,7 +154,7 @@ export class GameRoom extends DurableObject {
       if (this.round.state !== 'fight' || !mine.alive) return;
       this.broadcast(ws, { t: 'shot', id: mine.id, o: msg.o, d: msg.d, w: WEAPONS.has(msg.w) ? msg.w : mine.w });
       if (typeof msg.hid === 'string' && this.players.has(msg.hid)) {
-        this.applyHit(mine, this.players.get(msg.hid), !!msg.head, WEAPONS.has(msg.w) ? msg.w : mine.w, msg.d);
+        await this.applyHit(mine, this.players.get(msg.hid), !!msg.head, WEAPONS.has(msg.w) ? msg.w : mine.w, msg.d);
       }
       return;
     }
@@ -156,18 +172,19 @@ export class GameRoom extends DurableObject {
         if (!vic || !vic.alive) continue;
         const k = Math.max(0, Math.min(1, num(h.k)));
         if (k < 0.04) continue;
-        this.applyHit(mine, vic, false, h.w === 'drone' ? 'drone' : 'grenade', h.dir, k);
+        await this.applyHit(mine, vic, false, h.w === 'drone' ? 'drone' : 'grenade', h.dir, k);
       }
       return;
     }
 
     if (msg.t === 'ready') {
       mine.ready = true;
-      this.tryStart();
+      await this.tryStart();
+      this.send(ws, { t: 'state', n: this.players.size, ids: [...this.players.keys()], round: this.round });
     }
   }
 
-  applyHit(atk, vic, head, w, dir, scale = 1) {
+  async applyHit(atk, vic, head, w, dir, scale = 1) {
     if (!vic.alive || atk.id === vic.id) return;
     const dx = atk.p[0] - vic.p[0], dy = atk.p[1] - vic.p[1], dz = atk.p[2] - vic.p[2];
     if (Math.hypot(dx, dy, dz) > 220) return;
@@ -181,10 +198,11 @@ export class GameRoom extends DurableObject {
       t: dead ? 'kill' : 'hit',
       vid: vic.id, aid: atk.id, amt, head: !!head, w, dir, hp: vic.hp,
     });
-    if (dead) this.checkWin();
+    if (dead) await this.checkWin();
+    else await this.persist();
   }
 
-  tryStart() {
+  async tryStart() {
     if (this.players.size < 2) return;
     if (this.round.state === 'fight' || this.round.state === 'countdown') return;
     if (![...this.players.values()].some((p) => p.ready)) return;
@@ -200,27 +218,33 @@ export class GameRoom extends DurableObject {
       ends: this.round.ends,
       slots: Object.fromEntries([...this.players.values()].map((p) => [p.id, p.slot])),
     });
-    this.ctx.setAlarm(this.round.ends);
+    await this.persist();
+    await this.ctx.storage.setAlarm(this.round.ends);
+  }
+
+  async ensureFight() {
+    if (this.round.state !== 'countdown' || Date.now() < this.round.ends) return;
+    this.round = { state: 'fight', ends: 0 };
+    this.broadcast(null, { t: 'round', state: 'fight' });
+    await this.persist();
   }
 
   async alarm() {
-    this.boot();
-    if (this.round.state === 'countdown' && Date.now() >= this.round.ends - 20) {
-      this.round = { state: 'fight', ends: 0 };
-      this.broadcast(null, { t: 'round', state: 'fight' });
-    }
+    await this.boot();
+    await this.ensureFight();
   }
 
-  checkWin() {
+  async checkWin() {
     if (this.round.state !== 'fight' || this.players.size < 2) return;
     const live = [...this.players.values()].filter((p) => p.alive);
     if (live.length > 1) return;
     this.round = { state: 'over', winner: live[0]?.id || null };
     this.broadcast(null, { t: 'round', state: 'over', winner: this.round.winner });
+    await this.persist();
   }
 
   async webSocketClose(ws) {
-    this.boot();
+    await this.boot();
     const mine = this.playerOf(ws);
     if (!mine) return;
     this.players.delete(mine.id);
@@ -229,7 +253,8 @@ export class GameRoom extends DurableObject {
       this.round = { state: 'waiting', ends: 0 };
       this.broadcast(null, { t: 'round', state: 'waiting' });
     } else {
-      this.checkWin();
+      await this.checkWin();
     }
+    await this.persist();
   }
 }
