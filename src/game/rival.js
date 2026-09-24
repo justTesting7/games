@@ -62,7 +62,7 @@ export class Rival {
   }
 
   reset() {
-    this.tactic = 'take_cover';
+    this.tactic = this.persona.ruthless ? 'push' : 'take_cover';
     this.target = null;
     this.confidence = 0;
     this.source = 'local';
@@ -70,7 +70,7 @@ export class Rival {
     this.thinking = false;
     this.epoch = (this.epoch || 0) + 1;
     this.perceiveT = 0;
-    this.cooldown = 0.5;
+    this.cooldown = this.persona.ruthless ? 0.15 : 0.5;
     this.burst = 3;
     this.burstPause = 0;
     this.side = 0;
@@ -79,11 +79,11 @@ export class Rival {
     this.flankSide = Math.random() < 0.5 ? 1 : -1;
     this.errT = 0;
     this.cover = null;
-    this.reachedShelter = false;
-    this.needFirstCover = true;
+    this.reachedShelter = !!this.persona.ruthless;
+    this.needFirstCover = !this.persona.ruthless;
     this.exposedT = 0;
     this.safeT = 0;
-    this.runningToShelter = true;
+    this.runningToShelter = !this.persona.ruthless;
     this.coverScanT = 0;
     this.droneSightT = 0;
     this.peeking = false;
@@ -286,6 +286,10 @@ export class Rival {
   }
 
   updatePeek(dt, threat) {
+    if (this.isRuthless()) {
+      this.peeking = false;
+      return;
+    }
     if (this.needFirstCover || !this.reachedShelter || !this.cover || !threat) {
       this.peeking = false;
       return;
@@ -308,6 +312,7 @@ export class Rival {
     this.peekWait -= dt;
     if (this.peekWait <= 0) {
       this.peeking = true;
+      this.runningToShelter = false;
       this.peekT = 0.55 + Math.random() * 0.65;
       this.strafeDir = Math.random() < 0.5 ? 1 : -1;
     }
@@ -430,7 +435,12 @@ export class Rival {
     return !!(this.cover?.spot && this.pos.distanceTo(this.cover.spot) < 2.2);
   }
 
+  isRuthless() {
+    return !!this.persona.ruthless;
+  }
+
   canFight() {
+    if (this.isRuthless()) return true;
     if (this.needFirstCover) return false;
     if (this.peeking) return true;
     return this.reachedShelter && !this.runningToShelter && this.onFarSide(this.anyThreat());
@@ -450,7 +460,7 @@ export class Rival {
   }
 
   shouldShelter() {
-    if (this.peeking) return false;
+    if (this.isRuthless() || this.peeking) return false;
     if (!this.inDanger()) return false;
     return !this.onFarSide(this.anyThreat());
   }
@@ -472,9 +482,14 @@ export class Rival {
     const cover = this.findCover(threat) || this.findNearestBulk(threat);
     const options = {};
     const offer = (k) => { options[k] = TACTICS[k].text; };
-    if (anyVisible) ['push', 'strafe', 'hold', 'flank', 'retreat'].forEach(offer);
-    else ['hunt', 'hold'].forEach(offer);
-    if (cover || this.shouldShelter()) offer('take_cover');
+    if (this.persona.ruthless) {
+      if (anyVisible) ['push', 'flank'].forEach(offer);
+      else offer('hunt');
+    } else {
+      if (anyVisible) ['push', 'strafe', 'hold', 'flank', 'retreat'].forEach(offer);
+      else ['hunt', 'hold'].forEach(offer);
+      if (cover || this.shouldShelter()) offer('take_cover');
+    }
 
     const L = me.loadout;
     const nearest = enemies.reduce((a, e) => Math.min(a, e.pos.distanceTo(this.pos)), Infinity);
@@ -512,7 +527,9 @@ export class Rival {
     const questions = {
       tactic: {
         type: 'choice',
-        instructions: `You are ${me.name}, ${this.persona.personality}. Get to cover first, then peek out often to shoot and duck back. Be aggressive with fire. Last one standing wins. Pick your tactic for the next second, in character.`,
+        instructions: this.persona.ruthless
+          ? `You are ${me.name}, ${this.persona.personality}. Never take cover. Never retreat. Always push and shoot. Last one standing wins. Pick your tactic for the next second, in character.`
+          : `You are ${me.name}, ${this.persona.personality}. Get to cover first, then peek out often to shoot and duck back. Be aggressive with fire. Last one standing wins. Pick your tactic for the next second, in character.`,
         criteria: options,
       },
     };
@@ -564,6 +581,12 @@ export class Rival {
     if (!target && alive.length === 1) target = alive[0];
     if (!target) target = this.localTarget(alive);
     this.setTarget(target);
+
+    if (this.isRuthless()) {
+      this.source = ans?.tactic ? 'jev' : 'local';
+      this.setTactic(ans?.tactic?.choice === 'flank' ? 'flank' : (this.enemies().some((e) => this.seen(e).visible) ? 'push' : 'hunt'), cover);
+      return;
+    }
 
     if (this.needFirstCover || this.shouldShelter()) {
       this.source = this.source === 'jev' ? 'jev' : 'local';
@@ -636,6 +659,7 @@ export class Rival {
   }
 
   localTactic(options, cover) {
+    if (this.isRuthless()) return this.target && this.seen(this.target).visible ? 'push' : 'hunt';
     const me = this.fighter;
     const visible = this.target && this.seen(this.target).visible;
     if (this.shouldShelter()) return cover ? 'take_cover' : 'retreat';
@@ -658,6 +682,9 @@ export class Rival {
   }
 
   setTactic(t, cover) {
+    if (this.isRuthless() && (t === 'take_cover' || t === 'retreat' || t === 'hold' || t === 'strafe')) {
+      t = this.target && this.seen(this.target).visible ? 'push' : 'hunt';
+    }
     if (t === 'take_cover') this.cover = cover || this.cover || this.findCover(this.threatPos()) || this.findNearestBulk(this.threatPos());
     if (t === this.tactic) return;
     this.tactic = t;
@@ -689,6 +716,13 @@ export class Rival {
   }
 
   updateShelter(dt, threat) {
+    if (this.isRuthless()) {
+      this.needFirstCover = false;
+      this.reachedShelter = true;
+      this.runningToShelter = false;
+      this.peeking = false;
+      return;
+    }
     this.coverScanT = (this.coverScanT || 0) - dt;
     if (threat && (this.coverScanT <= 0 || !this.cover)) {
       this.coverScanT = this.runningToShelter ? 0.75 : 0.55;
@@ -794,7 +828,16 @@ export class Rival {
     this.strafeT -= dt;
     if (this.strafeT <= 0) { this.strafeDir *= -1; this.strafeT = 1.4 + Math.random() * 1.6; }
 
-    const exposed = this.needFirstCover || this.shouldShelter() || (this.runningToShelter && !this.peeking);
+    if (this.isRuthless()) {
+      this.needFirstCover = false;
+      this.runningToShelter = false;
+      this.peeking = false;
+      if (this.tactic === 'take_cover' || this.tactic === 'retreat' || this.tactic === 'hold' || this.tactic === 'strafe') {
+        this.tactic = visible ? 'push' : 'hunt';
+      }
+    }
+
+    const exposed = !this.isRuthless() && (this.needFirstCover || this.shouldShelter() || (this.runningToShelter && !this.peeking));
     if (this.peeking && this.cover && !this.needFirstCover) {
       const dest = this.peekSpot(tp) || this.cover.spot;
       if (dest) {
@@ -814,7 +857,11 @@ export class Rival {
       }
     } else switch (this.tactic) {
       case 'push':
-        if (d > 7) { out.dir.copy(to).addScaledVector(side, this.strafeDir * 0.35); out.speed = visible ? 3.6 : 4.8; }
+        if (this.isRuthless()) {
+          if (d > 3.2) { out.dir.copy(to).addScaledVector(side, this.strafeDir * 0.2); out.speed = visible ? 4.9 : 5.4; }
+          else { out.dir.copy(side).multiplyScalar(this.strafeDir); out.speed = 3.0; }
+          out.aim = visible;
+        } else if (d > 7) { out.dir.copy(to).addScaledVector(side, this.strafeDir * 0.35); out.speed = visible ? 3.6 : 4.8; }
         else { out.dir.copy(side).multiplyScalar(this.strafeDir); out.speed = 2.4; }
         break;
       case 'strafe':
@@ -825,8 +872,14 @@ export class Rival {
         if (!visible) { out.dir.copy(side).multiplyScalar(this.strafeDir); out.speed = 1.4; }
         break;
       case 'flank':
-        out.dir.copy(side).multiplyScalar(this.flankSide).addScaledVector(to, d > 14 ? 0.6 : d < 8 ? -0.3 : 0.1);
-        out.speed = 4.2;
+        if (this.isRuthless()) {
+          out.dir.copy(side).multiplyScalar(this.flankSide).addScaledVector(to, d > 5 ? 0.85 : 0.2);
+          out.speed = 5.0;
+          out.aim = visible;
+        } else {
+          out.dir.copy(side).multiplyScalar(this.flankSide).addScaledVector(to, d > 14 ? 0.6 : d < 8 ? -0.3 : 0.1);
+          out.speed = 4.2;
+        }
         break;
       case 'retreat':
         out.dir.copy(to).negate().addScaledVector(side, this.strafeDir * 0.5);
@@ -834,8 +887,13 @@ export class Rival {
         break;
       case 'hunt':
       default:
-        if (d > 4) { out.dir.copy(to); out.speed = d > 15 ? 4.6 : 3.2; }
-        out.aim = visible && this.canFight() && !this.shouldShelter();
+        if (this.isRuthless()) {
+          if (d > 3.2) { out.dir.copy(to); out.speed = 5.4; }
+          out.aim = visible;
+        } else {
+          if (d > 4) { out.dir.copy(to); out.speed = d > 15 ? 4.6 : 3.2; }
+          out.aim = visible && this.canFight() && !this.shouldShelter();
+        }
         break;
     }
 
@@ -1005,11 +1063,12 @@ export class Rival {
     if (!T || !wish.aim) return;
     const m = this.seen(T);
     const rifle = L.current === 'rifle';
-    const react = this.persona.reaction * (this.peeking ? 0.35 : 0.55) + (rifle ? 0.12 : 0);
+    const rush = this.peeking || this.isRuthless();
+    const react = this.persona.reaction * (rush ? 0.28 : 0.55) + (rifle ? 0.12 : 0);
     if (!m.visible || m.sightT < react) return;
-    if (this.character.aimWeight < (this.peeking ? 0.62 : 0.75)) return;
+    if (this.character.aimWeight < (rush ? 0.55 : 0.75)) return;
     const want = Math.atan2(this.aimPoint.x - this.pos.x, this.aimPoint.z - this.pos.z);
-    if (Math.abs(wrapAngle(want - this.yaw)) > (this.peeking ? 0.45 : 0.3)) return;
+    if (Math.abs(wrapAngle(want - this.yaw)) > (rush ? 0.5 : 0.3)) return;
     if (this.burstPause > 0) { this.burstPause -= dt; return; }
     if (this.cooldown > 0) return;
     if (!this.weapons.trigger(this.fighter, this.aimPoint, rifle ? 0.002 : 0.005)) return;
@@ -1017,10 +1076,10 @@ export class Rival {
       this.cooldown = 0.22 + Math.random() * 0.28;
       return;
     }
-    this.cooldown = this.persona.fireInterval * (this.peeking ? 0.42 : 0.62);
+    this.cooldown = this.persona.fireInterval * (rush ? 0.38 : 0.62);
     if (--this.burst <= 0) {
-      this.burst = this.peeking ? 5 + Math.floor(Math.random() * 4) : 3 + Math.floor(Math.random() * 3);
-      this.burstPause = this.peeking ? 0.12 + Math.random() * 0.18 : 0.35 + Math.random() * 0.4;
+      this.burst = rush ? 6 + Math.floor(Math.random() * 4) : 3 + Math.floor(Math.random() * 3);
+      this.burstPause = rush ? 0.08 + Math.random() * 0.14 : 0.35 + Math.random() * 0.4;
     }
   }
 
