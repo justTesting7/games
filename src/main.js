@@ -348,6 +348,7 @@ async function init() {
     },
     onHost: (host) => applyHostUi(host),
   });
+  session.minPlayers = minPlayers();
   if (mode === 'multi') session.connect({ name: you.name, color: you.color, roster: you.id, time: timeOfDay, min: minPlayers() });
   window.__game = { world, pipeline, camera, input, rivals, combat, jev, net, session };
 
