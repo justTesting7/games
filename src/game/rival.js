@@ -85,6 +85,7 @@ export class Rival {
     this.safeT = 0;
     this.runningToShelter = true;
     this.coverScanT = 0;
+    this.droneSightT = 0;
     this.stuckT = 0;
     this.detour = 0;
     this.lastProgress = this.pos.clone();
@@ -764,7 +765,7 @@ export class Rival {
       out.jump = danger.fuse < 0.6 && Math.random() < 0.3;
     }
     if (this.want === 'grenade' && this.throwAt && this.canFight()) out.aim = true;
-    if (this.world.drone?.flying && !this.world.drone.dying && this.canFight()) out.aim = true;
+    if (this.canSeeDrone()) out.aim = true;
 
     // Personal space, and a way around whatever is blocking the path.
     for (const f of this.combat.fighters) {
@@ -836,27 +837,94 @@ export class Rival {
     if (def.mag && !visible && !L.reloading && !ch.action && L.mag[def.key] < def.mag * 0.5) this.weapons.reload(f);
   }
 
+  droneEye() {
+    return this.pos.clone().setY(this.pos.y + 1.55);
+  }
+
+  canSeeDrone() {
+    const drone = this.world.drone?.live;
+    if (!drone || drone.dying || !this.canFight()) return false;
+    if ((drone.born || 0) < 0.85) return false;
+    const from = this.droneEye();
+    const len = from.distanceTo(drone.pos);
+    if (len < 6 || len > 30) return false;
+    return this.droneLosClear(from, drone.pos);
+  }
+
+  // Trunks are thin; a center ray often slips past a tree the drone is
+  // hiding behind. A fat probe plus a wider wood radius matches what you see.
+  droneLosClear(from, dest) {
+    const dir = dest.clone().sub(from);
+    const len = dir.length();
+    if (len < 1.2) return false;
+    dir.divideScalar(len);
+    const probe = (origin) => {
+      const hit = this.world.raycast(origin, dir, len - 0.15, this.fighter);
+      return !hit || !!hit.drone;
+    };
+    if (!probe(from)) return false;
+    const up = UP;
+    const right = new THREE.Vector3().crossVectors(dir, up);
+    if (right.lengthSq() < 1e-6) right.set(1, 0, 0);
+    else right.normalize();
+    for (const [sx, sy] of [[0.34, 0], [-0.34, 0], [0, 0.3]]) {
+      const o = from.clone().addScaledVector(right, sx).addScaledVector(up, sy);
+      if (!probe(o)) return false;
+    }
+    const cols = this.world.veg?.colliders;
+    if (!cols) return true;
+    const tmp = [];
+    for (let t = 0; t < len; t += 5) {
+      cols.query(from.x + dir.x * t, from.z + dir.z * t, 6, tmp);
+      for (const c of tmp) {
+        if (c.type !== 'wood') continue;
+        const y0 = Math.min(from.y, dest.y) - 0.5;
+        const y1 = Math.max(from.y, dest.y) + 0.5;
+        if (c.y1 < y0 || c.y0 > y1) continue;
+        const bx = dest.x - from.x, bz = dest.z - from.z;
+        const bl = bx * bx + bz * bz || 1;
+        const u = Math.max(0, Math.min(1, ((c.x - from.x) * bx + (c.z - from.z) * bz) / bl));
+        const dist = Math.hypot(c.x - (from.x + bx * u), c.z - (from.z + bz * u));
+        if (dist < c.r + 1.2) return false;
+      }
+    }
+    return true;
+  }
+
+  tryShootDrone(dt) {
+    const drone = this.world.drone?.live;
+    if (!drone || drone.dying) {
+      this.droneSightT = 0;
+      return false;
+    }
+    if (this.needFirstCover || !this.canFight() || this.fighter.loadout.current === 'grenade') {
+      this.droneSightT = 0;
+      return false;
+    }
+    const from = this.droneEye();
+    const len = from.distanceTo(drone.pos);
+    if ((drone.born || 0) < 0.85 || len < 6 || len > 30 || !this.droneLosClear(from, drone.pos)) {
+      this.droneSightT = 0;
+      return false;
+    }
+    this.droneSightT += dt;
+    const rifle = this.fighter.loadout.current === 'rifle';
+    const need = this.persona.reaction + (rifle ? 0.55 : 0.35);
+    if (this.droneSightT < need || this.character.aimWeight < 0.88 || this.cooldown > 0) return false;
+    const miss = 0.7 + len * 0.05 + (rifle ? 0.9 : 0);
+    const aim = drone.pos.clone().add(new THREE.Vector3(gauss() * miss, gauss() * miss * 0.7, gauss() * miss));
+    const spread = rifle ? 0.028 : 0.02;
+    if (!this.weapons.trigger(this.fighter, aim, spread)) return false;
+    this.cooldown = this.persona.fireInterval * (rifle ? 1.6 : 1.25);
+    return true;
+  }
+
   shoot(dt, wish) {
     this.cooldown -= dt;
     const T = this.target;
     const L = this.fighter.loadout;
     if (this.needFirstCover || !this.canFight() || L.current === 'grenade') return;
-    const drone = this.world.drone?.live;
-    if (drone && !drone.dying && this.cooldown <= 0 && this.character.aimWeight > 0.7) {
-      const eye = this.pos.clone().setY(this.pos.y + 1.6);
-      const to = drone.pos.clone().sub(eye);
-      const len = to.length();
-      if (len < 48) {
-        to.divideScalar(len);
-        const hit = this.world.raycast(eye, to, len + 0.35, this.fighter);
-        if (!hit || hit.drone || hit.t > len - 0.2) {
-          if (this.weapons.trigger(this.fighter, drone.pos, 0.006)) {
-            this.cooldown = this.persona.fireInterval * 0.85;
-            return;
-          }
-        }
-      }
-    }
+    if (this.tryShootDrone(dt)) return;
     if (!T || !wish.aim) return;
     const m = this.seen(T);
     const rifle = L.current === 'rifle';

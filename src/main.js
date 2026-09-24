@@ -23,6 +23,7 @@ import { Net } from './game/net.js';
 import { Session } from './game/session.js';
 import { modeUrl, persistMode, persistRoom, resolveMode, resolveRoom } from './game/mode.js';
 import { isTouchDevice, setupTouch } from './game/touch.js';
+import { DRONE } from './game/drone.js';
 import { createGameRenderer } from './engine/webgl.js';
 
 const $ = (id) => document.getElementById(id);
@@ -826,8 +827,15 @@ async function init() {
     $('dronesplit').classList.toggle('leaving', weapons.drone.fadeOut);
     const leftHint = document.querySelector('#dronesplit .pane.left b');
     const leftTag = document.querySelector('#dronesplit .pane.left small');
-    if (leftHint) leftHint.textContent = dying ? 'shot down' : 'wasd fly · f up · space explode';
-    if (leftTag) leftTag.textContent = dying ? 'signal lost' : 'drone';
+    const range = weapons.drone.range();
+    const far = range > DRONE.maxRange * 0.78;
+    if (leftHint) {
+      leftHint.textContent = dying ? 'shot down'
+        : far ? `range ${range.toFixed(0)} / ${DRONE.maxRange} m · turn back`
+        : `range ${range.toFixed(0)} / ${DRONE.maxRange} m · space explode`;
+    }
+    if (leftTag) leftTag.textContent = dying ? 'signal lost' : far ? 'link fading' : 'drone';
+    $('dronesplit').classList.toggle('far', flying && !dying && far);
     const near = weapons.live.some((g) => g.pos.distanceTo(player.pos) < WEAPONS.grenade.radius && g.owner !== player.fighter);
     $('grenadewarn').classList.toggle('show', alive && near);
     const hp = player.fighter.health;

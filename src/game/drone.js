@@ -124,10 +124,12 @@ export class SuicideDrone {
       dying: false,
       phase: 'fly',
       dieT: 0,
+      born: 0,
     };
     this.mesh.visible = true;
     this.mesh.position.copy(pos);
     this.audio.droneStart();
+    d.born = 0;
     return true;
   }
 
@@ -153,6 +155,7 @@ export class SuicideDrone {
       this.updateDying(dt);
       return;
     }
+    d.born = (d.born || 0) + dt;
     const fwd = this.fwd();
     const right = new THREE.Vector3().crossVectors(fwd, UP).normalize();
     if (right.lengthSq() < 1e-4) right.set(1, 0, 0);
@@ -188,7 +191,7 @@ export class SuicideDrone {
     this.mesh.rotation.set(d.pitch * 0.35, d.yaw, -right.dot(d.vel) * 0.015);
     for (const r of this.rotors) r.rotation.y = d.spin;
 
-    const range = d.pos.distanceTo(d.owner.pos);
+    const range = this.range();
     if (range > DRONE.maxRange) {
       this.explode('range');
       return;
@@ -223,6 +226,12 @@ export class SuicideDrone {
     this.opCam.position.set(ox, oy, oz);
     this.opCam.lookAt(owner.pos.x, owner.pos.y + 1.15, owner.pos.z);
     if (owner.character?.root) owner.character.root.visible = true;
+  }
+
+  range() {
+    const d = this.live;
+    if (!d?.owner) return 0;
+    return d.pos.distanceTo(d.owner.pos);
   }
 
   setAspect(w, h) {

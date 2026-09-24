@@ -184,6 +184,8 @@ html, body {
   color: #ffc8a8;
   opacity: 0.9;
 }
+#dronesplit.far .pane.left small { color: #ffb347; }
+#dronesplit.far .pane.left b { color: #ffd27a; }
 #dronesplit.shotdown .pane.left small { color: #ff8a6a; opacity: 1; }
 #dronesplit.shotdown .pane.left b { color: #ff3a28; }
 #dronesplit.shotdown::after {
