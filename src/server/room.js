@@ -11,6 +11,10 @@ const DAMAGE = {
 const ROSTERS = new Set(['adventurer', 'redpolo', 'greytee', 'checkers', 'denim', 'linen']);
 const WEAPONS = new Set(['pistols', 'rifle', 'grenade', 'drone']);
 const MAPS = new Set(['island', 'city']);
+const clampMin = (v) => {
+  const n = Math.round(num(v));
+  return Number.isFinite(n) ? Math.max(2, Math.min(12, n)) : 2;
+};
 
 const num = (v) => (Number.isFinite(+v) ? +v : 0);
 const str = (v, n) => (typeof v === 'string' ? v.slice(0, n) : '');
@@ -22,7 +26,8 @@ export class GameRoom extends DurableObject {
     this.booted = true;
     this.players = new Map();
     this.round = (await this.ctx.storage.get('round')) || { state: 'waiting', ends: 0 };
-    this.settings = (await this.ctx.storage.get('settings')) || { map: '', time: null };
+    this.settings = (await this.ctx.storage.get('settings')) || { map: '', time: null, min: 2 };
+    this.settings.min = clampMin(this.settings.min);
     this.map = this.settings.map || (await this.ctx.storage.get('map')) || '';
     this.hostId = (await this.ctx.storage.get('hostId')) || '';
     this.nextSlot = 0;
@@ -51,7 +56,7 @@ export class GameRoom extends DurableObject {
 
   async persist() {
     await this.ctx.storage.put('round', this.round);
-    await this.ctx.storage.put('settings', { map: this.map, time: this.settings.time ?? null });
+    await this.ctx.storage.put('settings', { map: this.map, time: this.settings.time ?? null, min: this.minPlayers() });
     if (this.map) await this.ctx.storage.put('map', this.map);
     if (this.hostId) await this.ctx.storage.put('hostId', this.hostId);
     const pack = {};
@@ -109,8 +114,22 @@ export class GameRoom extends DurableObject {
     }
   }
 
+  minPlayers() {
+    return clampMin(this.settings.min);
+  }
+
+  packSettings() {
+    return { map: this.map, time: this.settings.time, min: this.minPlayers() };
+  }
+
+  takeHostSettings(msg) {
+    if (MAPS.has(msg.map)) this.map = msg.map;
+    if (Number.isFinite(+msg.time)) this.settings.time = Math.max(0, Math.min(1, +msg.time));
+    if (msg.min != null && Number.isFinite(+msg.min)) this.settings.min = clampMin(msg.min);
+  }
+
   settingsPayload() {
-    return { t: 'settings', map: this.map, time: this.settings.time, hostId: this.hostId };
+    return { t: 'settings', ...this.packSettings(), hostId: this.hostId };
   }
 
   async fetch(request) {
@@ -124,7 +143,7 @@ export class GameRoom extends DurableObject {
         peers: this.players.size,
         round: this.round.state,
         hostId: this.hostId,
-        settings: { map: this.map, time: this.settings.time },
+        settings: this.packSettings(),
       });
     }
     const pair = new WebSocketPair();
@@ -145,7 +164,7 @@ export class GameRoom extends DurableObject {
         map: this.map,
         host: existing.id === this.hostId,
         hostId: this.hostId,
-        settings: { map: this.map, time: this.settings.time },
+        settings: this.packSettings(),
         round: this.round,
         peers: [...this.players.values()].filter((o) => o.id !== existing.id).map((o) => this.snap(o)),
       });
@@ -164,7 +183,7 @@ export class GameRoom extends DurableObject {
       map: this.map,
       host: id === this.hostId,
       hostId: this.hostId,
-      settings: { map: this.map, time: this.settings.time },
+      settings: this.packSettings(),
       round: this.round,
       peers: [...this.players.values()].filter((o) => o.id !== id).map((o) => this.snap(o)),
     });
@@ -197,8 +216,7 @@ export class GameRoom extends DurableObject {
       mine.color = hex(msg.color) || mine.color;
       if (ROSTERS.has(msg.roster)) mine.roster = msg.roster;
       if (this.isHost(mine) && this.round.state !== 'fight' && this.round.state !== 'countdown') {
-        if (MAPS.has(msg.map)) this.map = msg.map;
-        if (Number.isFinite(+msg.time)) this.settings.time = Math.max(0, Math.min(1, +msg.time));
+        this.takeHostSettings(msg);
       }
       ws.serializeAttachment({ id: mine.id, slot: mine.slot, name: mine.name, color: mine.color, roster: mine.roster });
       this.broadcast(ws, { t: 'peer', ...this.snap(mine) });
@@ -210,10 +228,10 @@ export class GameRoom extends DurableObject {
 
     if (msg.t === 'settings') {
       if (!this.isHost(mine) || this.round.state === 'fight' || this.round.state === 'countdown') return;
-      if (MAPS.has(msg.map)) this.map = msg.map;
-      if (Number.isFinite(+msg.time)) this.settings.time = Math.max(0, Math.min(1, +msg.time));
+      this.takeHostSettings(msg);
       this.broadcast(null, this.settingsPayload());
       await this.persist();
+      await this.tryStart();
       return;
     }
 
@@ -315,7 +333,7 @@ export class GameRoom extends DurableObject {
   }
 
   async tryStart() {
-    if (this.players.size < 2) return;
+    if (this.players.size < this.minPlayers()) return;
     if (this.round.state === 'fight' || this.round.state === 'countdown') return;
     if (![...this.players.values()].some((p) => p.ready && !p.away)) return;
     for (const p of this.players.values()) {
@@ -382,7 +400,7 @@ export class GameRoom extends DurableObject {
     if (this.players.size === 0) {
       this.hostId = '';
       this.map = '';
-      this.settings = { map: '', time: null };
+      this.settings = { map: '', time: null, min: 2 };
       this.round = { state: 'waiting', ends: 0 };
     } else if (this.players.size < 2 && this.round.state !== 'waiting') {
       this.round = { state: 'waiting', ends: 0 };

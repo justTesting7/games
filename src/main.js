@@ -148,7 +148,9 @@ $('maptitle').textContent = mapDef.label;
 $('mapsub').textContent = mapDef.subtitle;
 $('map').onchange = (e) => {
   localStorage.setItem('relic-map', e.target.value);
-  if (mode === 'multi' && net.status === 'online') net.send({ t: 'settings', map: e.target.value, time: timeOfDay });
+  if (mode === 'multi' && net.status === 'online') {
+    net.send({ t: 'settings', map: e.target.value, time: timeOfDay, min: Number($('minplayers').value) });
+  }
   location.reload();
 };
 
@@ -156,13 +158,14 @@ const paintMode = () => {
   $('mode-solo').classList.toggle('on', mode === 'solo');
   $('mode-multi').classList.toggle('on', mode === 'multi');
   $('roomrow').classList.toggle('hidden', mode !== 'multi');
+  $('minrow').classList.toggle('hidden', mode !== 'multi');
   $('jevstat').classList.toggle('hidden', mode === 'multi');
   $('netstat').classList.toggle('hidden', mode !== 'multi');
   const hosted = net.hosted;
   if (mode === 'multi') {
     if (!hosted) $('modehint').textContent = 'Multiplayer needs the hosted game or npm run cf:dev.';
     else if (session && !session.isHost) $('modehint').textContent = `Host chose ${mapDef.label}. Pick a fighter and join.`;
-    else $('modehint').textContent = 'You are the host. Map and time of day apply to everyone who joins.';
+    else $('modehint').textContent = 'You are the host. Map, time, and min players apply to everyone who joins.';
   } else {
     $('modehint').textContent = 'You against Jev-driven rivals. Last one standing wins.';
   }
@@ -195,15 +198,30 @@ let timeOfDay = mapDef.timeOfDay;
 $('timeofday').value = Math.round(timeOfDay * 1000);
 $('timeofday').oninput = (e) => {
   timeOfDay = e.target.value / 1000;
-  if (mode === 'multi' && session?.isHost && net.status === 'online') net.send({ t: 'settings', time: timeOfDay });
+  if (mode === 'multi' && session?.isHost && net.status === 'online') {
+    net.send({ t: 'settings', time: timeOfDay, min: Number($('minplayers').value) });
+  }
+};
+
+const minPlayers = () => Math.max(2, Math.min(12, Number($('minplayers').value) || 2));
+$('minplayers').value = localStorage.getItem('relic-min-players') || '2';
+$('minplayers').onchange = () => {
+  const n = minPlayers();
+  localStorage.setItem('relic-min-players', String(n));
+  if (session) session.minPlayers = n;
+  if (mode === 'multi' && session?.isHost && net.status === 'online') {
+    net.send({ t: 'settings', map: mapDef.id, time: timeOfDay, min: n });
+  }
 };
 
 const applyHostUi = (host) => {
   const lock = mode === 'multi' && host === false;
   $('map').disabled = lock;
   $('timeofday').disabled = lock;
+  $('minplayers').disabled = lock;
   $('map').parentElement?.classList.toggle('locked', lock);
   $('timeofday').parentElement?.classList.toggle('locked', lock);
+  $('minrow').classList.toggle('locked', lock);
   paintMode();
 };
 $('quality').onchange = (e) => {
@@ -234,6 +252,9 @@ async function init() {
       if (Number.isFinite(info.settings?.time)) {
         timeOfDay = info.settings.time;
         $('timeofday').value = Math.round(timeOfDay * 1000);
+      }
+      if (Number.isFinite(+info.settings?.min)) {
+        $('minplayers').value = String(Math.max(2, Math.min(12, Math.round(+info.settings.min))));
       }
     } catch { /* empty room or offline */ }
   }
@@ -320,10 +341,14 @@ async function init() {
         timeOfDay = s.time;
         $('timeofday').value = Math.round(timeOfDay * 1000);
       }
+      if (Number.isFinite(+s?.min)) {
+        session.minPlayers = Math.max(2, Math.min(12, Math.round(+s.min)));
+        $('minplayers').value = String(session.minPlayers);
+      }
     },
     onHost: (host) => applyHostUi(host),
   });
-  if (mode === 'multi') session.connect({ name: you.name, color: you.color, roster: you.id, time: timeOfDay });
+  if (mode === 'multi') session.connect({ name: you.name, color: you.color, roster: you.id, time: timeOfDay, min: minPlayers() });
   window.__game = { world, pipeline, camera, input, rivals, combat, jev, net, session };
 
   const rosterChars = new Map([[fighters[0].id, character]]);
@@ -400,8 +425,12 @@ async function init() {
     if (mode === 'multi') {
       session.placeLocal();
       session.ready();
+      const need = session.minPlayers || minPlayers();
+      const have = session.peerCount + 1;
       const wait = net.status === 'online'
-        ? (session.peerCount ? 'The room is lining up. Last human standing wins.' : 'Waiting for another player. Share the room link.')
+        ? (have >= need
+          ? `${have} in the room. Waiting for the fight to start.`
+          : `${have} / ${need} players. Share the room link.`)
         : net.error === 'host'
           ? 'Open the hosted game or run npm run cf:dev to play multiplayer.'
           : 'Connecting to the room…';
@@ -649,8 +678,12 @@ async function init() {
     const active = locked && (round.state === 'fight' || round.state === 'over');
     session.update(dt);
     if (mode === 'multi' && round.state === 'waiting') {
+      const need = session.minPlayers || minPlayers();
+      const have = session.peerCount + 1;
       const wait = net.status === 'online'
-        ? (session.peerCount ? `${session.peerCount + 1} in the room. Waiting for the fight to start.` : 'Waiting for another player. Share the room link.')
+        ? (have >= need
+          ? `${have} in the room. Waiting for the fight to start.`
+          : `${have} / ${need} players. Share the room link.`)
         : net.error === 'host'
           ? 'Open the hosted game or run npm run cf:dev to play multiplayer.'
           : 'Connecting to the room…';

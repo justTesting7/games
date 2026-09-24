@@ -121,6 +121,7 @@ export class Session {
     this.botsParked = false;
     this.wanted = !!net.wanted;
     this.hostId = '';
+    this.minPlayers = 2;
     this.slot = 0;
     weapons.session = this;
   }
@@ -132,7 +133,7 @@ export class Session {
 
   connect(identity) {
     if (!this.wanted) return;
-    this.net.connect({ ...identity, map: this.mapId, time: identity.time });
+    this.net.connect({ ...identity, map: this.mapId, time: identity.time, min: identity.min });
   }
 
   update(dt) {

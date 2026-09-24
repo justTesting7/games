@@ -38,7 +38,7 @@ Live: https://relic-isle.noam-berman7.workers.dev
 The menu splits the two games:
 
 - **Single player** — you versus Jev-driven rivals. No socket. This is also what `npm run dev` runs.
-- **Multiplayer** — humans only, last player standing. The first player in a room is the host and picks the map and time of day; everyone else just joins. Share `?mode=multi` or `?room=yourcode`. Switching tabs keeps you in the match for a minute so you can come back.
+- **Multiplayer** — humans only, last player standing. The first player in a room is the host and picks the map, time of day, and how many players must join before the fight starts; everyone else just joins. Share `?mode=multi` or `?room=yourcode`. Switching tabs keeps you in the match for a minute so you can come back.
 
 Poses, shots, grenades, drones, and the round clock stay on the Durable Object.
 

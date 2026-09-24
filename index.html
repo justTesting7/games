@@ -107,6 +107,17 @@
           <label>Time of day
             <input id="timeofday" type="range" min="0" max="1000" value="90" />
           </label>
+          <label id="minrow" class="hidden">Min players
+            <select id="minplayers">
+              <option value="2" selected>2</option>
+              <option value="3">3</option>
+              <option value="4">4</option>
+              <option value="5">5</option>
+              <option value="6">6</option>
+              <option value="8">8</option>
+            </select>
+            <small>Fight starts when this many have joined</small>
+          </label>
           <label>Mouse sensitivity
             <input id="sens" type="range" min="1" max="20" value="8" />
           </label>
@@ -143,7 +154,7 @@
         multiBtn.classList.toggle('on', multi);
         roomRow.classList.toggle('hidden', !multi);
         hint.textContent = multi
-          ? 'First player in the room sets the map and time. Everyone else joins.'
+          ? 'First player in the room sets the map, time, and min players. Everyone else joins.'
           : 'You against Jev-driven rivals. Last one standing wins.';
         code.value = room;
         const url = new URL(location.href);
