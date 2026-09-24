@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { Tree } from '@dgreenheck/ez-tree';
 import { CITY, cityCell } from './cityLayout.js';
+import { activeBatcher } from './propBatcher.js';
 
 const TREE_KINDS = [
   { preset: 'Oak Medium', scale: 0.42 },
@@ -220,6 +221,7 @@ export function buildSewers(group, colliders, terrain, rand) {
 }
 
 export function placeStreetProp(models, group, colliders, terrain, id, x, z, yaw, scale, coverY, type) {
+  if (activeBatcher) return activeBatcher.place(id, x, z, yaw, scale, coverY, type, terrain, colliders);
   const gltf = models[id];
   if (!gltf) return null;
   const obj = cloneModel(gltf);

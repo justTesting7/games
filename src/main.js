@@ -53,7 +53,7 @@ try {
   throw e;
 }
 
-const savedQuality = localStorage.getItem('relic-quality') || (isTouchDevice() ? 'low' : 'high');
+const savedQuality = localStorage.getItem('relic-quality') || (isTouchDevice() ? 'low' : 'medium');
 $('quality').value = savedQuality;
 const pipeline = new Pipeline(renderer);
 pipeline.setQuality(savedQuality);

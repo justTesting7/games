@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { CITY, cityCell } from './cityLayout.js';
+import { activeBatcher } from './propBatcher.js';
 
 const mat = (color, extras = {}) => new THREE.MeshStandardMaterial({
   color, roughness: 0.55, metalness: 0.15, ...extras,
@@ -157,9 +158,19 @@ function inPlay(x, z) {
   return Math.hypot(x, z) < CITY.playRadius - 10;
 }
 
+export function bindFurniture(batcher) {
+  for (const [kind, def] of Object.entries(FACTORIES)) {
+    batcher.registerObject(kind, def.make());
+  }
+}
+
 export function placeFurniture(kind, group, colliders, terrain, x, z, yaw) {
   const def = FACTORIES[kind];
   if (!def) return;
+  if (activeBatcher) {
+    activeBatcher.place(kind, x, z, yaw, 1, def.h, def.type, terrain, colliders);
+    return;
+  }
   const y = terrain.heightAt(x, z);
   placeGroup(group, def.make(), x, y, z, yaw);
   addCollider(colliders, x, z, y, def.hx, def.hz, def.h, def.type);

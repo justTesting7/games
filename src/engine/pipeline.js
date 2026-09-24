@@ -95,10 +95,10 @@ function fsMaterial(frag, uniforms, extra = {}) {
 }
 
 export const QUALITY = {
-  low: { label: 'Low', shadow: 1024, shadowDist: 36, ssr: 0, msaa: 0, pixelRatio: 0.75, grass: 0.35, trees: 0.5 },
-  medium: { label: 'Medium', shadow: 2048, shadowDist: 50, ssr: 16, msaa: 0, pixelRatio: 1, grass: 0.7, trees: 0.8 },
-  high: { label: 'High', shadow: 4096, shadowDist: 60, ssr: 32, msaa: 4, pixelRatio: 1.25, grass: 1, trees: 1 },
-  ultra: { label: 'Ultra', shadow: 4096, shadowDist: 70, ssr: 48, msaa: 4, pixelRatio: 2, grass: 1.3, trees: 1.25 },
+  low: { label: 'Low', shadow: 512, shadowDist: 28, ssr: 0, msaa: 0, pixelRatio: 0.7, grass: 0.3, trees: 0.45 },
+  medium: { label: 'Medium', shadow: 1024, shadowDist: 40, ssr: 8, msaa: 0, pixelRatio: 1, grass: 0.55, trees: 0.7 },
+  high: { label: 'High', shadow: 2048, shadowDist: 48, ssr: 16, msaa: 0, pixelRatio: 1, grass: 0.85, trees: 0.9 },
+  ultra: { label: 'Ultra', shadow: 2048, shadowDist: 58, ssr: 24, msaa: 2, pixelRatio: 1.25, grass: 1.1, trees: 1.05 },
 };
 
 export class Pipeline {
@@ -311,7 +311,7 @@ export class Pipeline {
     this.bloomRTs = [];
     if (!this.mobile) {
       let bw = W, bh = H;
-      for (let i = 0; i < 6; i++) {
+      for (let i = 0; i < 4; i++) {
         bw = Math.max(1, bw >> 1); bh = Math.max(1, bh >> 1);
         this.bloomRTs.push(hdrTarget(bw, bh, this.hdrType));
       }
@@ -374,7 +374,7 @@ export class Pipeline {
     this.frame++;
     r.autoClear = false;
 
-    this.quad.render(r, this.skyGenMaterial, this.skyRT);
+    if (this.firstFrame || this.frame % 6 === 1) this.quad.render(r, this.skyGenMaterial, this.skyRT);
     this.envAge += dt;
     if (this.mobile) {
       this.scene.environment = null;
