@@ -10,6 +10,8 @@ export class Net {
     this.slot = 0;
     this.inbox = [];
     this.identity = null;
+    this.attempts = 0;
+    this._retry = 0;
   }
 
   get enabled() {
@@ -22,6 +24,7 @@ export class Net {
 
   connect(identity) {
     if (!this.enabled) return;
+    if (this._retry) { clearTimeout(this._retry); this._retry = 0; }
     this.identity = identity || this.identity;
     if (this.ws) {
       this.ws.onclose = null;
@@ -40,11 +43,13 @@ export class Net {
     }
     this.ws.onopen = () => {
       this.status = 'online';
+      this.attempts = 0;
       if (this.identity) this.send({ t: 'hello', ...this.identity });
     };
     this.ws.onclose = () => {
       this.status = 'off';
       this.ws = null;
+      this.scheduleReconnect();
     };
     this.ws.onerror = () => {
       this.status = 'error';
@@ -69,5 +74,16 @@ export class Net {
 
   send(msg) {
     if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(msg));
+  }
+
+  scheduleReconnect() {
+    if (!this.enabled || !this.identity || this._retry) return;
+    const wait = Math.min(8000, 500 * (2 ** Math.min(this.attempts, 4)));
+    this.attempts += 1;
+    this._retry = setTimeout(() => {
+      this._retry = 0;
+      if (this.status === 'online') return;
+      this.connect(this.identity);
+    }, wait);
   }
 }

@@ -35,7 +35,7 @@ npx wrangler secret put JEV_API_KEY   # optional; rivals work without it
 
 Live: https://relic-isle.noam-berman7.workers.dev
 
-Share that URL (or add `?room=yourcode`) and click Fight. Two or more humans in the same room play last-one-standing against each other; bots drop out. Alone on that host, or on Vite, you still fight the AI.
+Share that URL (or add `?room=yourcode`) and click Fight. Two or more humans in the same room play last-one-standing against each other; bots drop out. Poses, shots, grenades, drones, and the round clock stay on the Durable Object. Alone on that host, or on Vite, you still fight the AI.
 
 ## Controls
 
@@ -70,6 +70,7 @@ Share that URL (or add `?room=yourcode`) and click Fight. Two or more humans in 
   - **Dual pistols:** 16 rounds with 96 spare. Body shots do 9 damage and headshots 30.
   - **7.62 Sniper** (Poly Haven bolt-action plus a built-on scope): 5 rounds with 15 spare. Body shots do 80 damage and headshots 200. Hold Space to go into a first-person mil-dot scope, release to fire. Shift holds breath to steady sway. Hip fire is wide. The right hand works the bolt after every shot and the spent case flies out. Reloading loads the rounds one by one.
   - **Stick grenades:** 3 for the player and 2 per rival. They bounce off terrain and trees on a 3.4 s fuse and do up to 120 damage within 8 m. Cover blocks most of the blast, and props are thrown clear.
+  - **Suicide drone** (4): 10 per life. Space launches it, then you fly with WASD, F to climb, and Space to detonate. One bullet shoots it down. Other players in a room see the drone and can shoot it.
   - The rifle is carried at low ready and raised to the shoulder with two-bone arm IK, and it slings across the back when another weapon is out.
   - Grenades are thrown with an over-the-shoulder arm swing. Right mouse shows the predicted throw arc.
   - Jev also picks each rival's weapon. The rivals aim grenades with a ballistic solution, lob them over cover, and run from live grenades.

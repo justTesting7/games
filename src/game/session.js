@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { Character } from './character.js';
 import { Loadout } from './weapons.js';
 import { byId, resolveLooks } from './roster.js';
+import { RemoteDrone } from './drone.js';
 
 const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 const vec = (a, fallback = [0, 0, 0]) => new THREE.Vector3(a?.[0] ?? fallback[0], a?.[1] ?? fallback[1], a?.[2] ?? fallback[2]);
@@ -47,6 +48,10 @@ class Remote {
     if (s.alive === false && this.fighter.alive) {
       this.fighter.alive = false;
       this.character.die(new THREE.Vector3(Math.sin(this.yaw), 0, Math.cos(this.yaw)));
+    } else if (s.alive !== false && !this.fighter.alive) {
+      this.fighter.alive = true;
+      this.fighter.health = Number.isFinite(s.hp) ? s.hp : 100;
+      this.character.revive();
     }
   }
 
@@ -105,7 +110,11 @@ export class Session {
     this.onJoinedHuman = onJoinedHuman;
     this.remotes = new Map();
     this.pending = new Map();
+    this.drones = new Map();
+    world.netDrones = this.drones;
     this.poseAcc = 0;
+    this.wantReady = false;
+    this.readySent = false;
     this.botsParked = false;
     this.slot = 0;
     weapons.session = this;
@@ -121,7 +130,12 @@ export class Session {
   update(dt) {
     for (const msg of this.net.take()) this.handle(msg);
     if (this.net.status === 'online') this.sendPose(dt);
+    if (this.wantReady && !this.readySent && this.net.status === 'online') {
+      this.net.send({ t: 'ready' });
+      this.readySent = true;
+    }
     for (const r of this.remotes.values()) r.tick(dt);
+    for (const d of this.drones.values()) d.tick(dt, this.world.terrain);
     this.syncBots();
   }
 
@@ -170,8 +184,34 @@ export class Session {
     this.net.send({ t: 'blast', w, hits });
   }
 
+  reportDrone(action, extra = {}) {
+    if (!this.multi) return;
+    this.net.send({ t: 'drone', a: action, ...extra });
+  }
+
   ready() {
-    this.net.send({ t: 'ready' });
+    this.wantReady = true;
+    this.readySent = false;
+  }
+
+  beginRound(msg) {
+    this.wantReady = false;
+    this.readySent = false;
+    for (const r of this.remotes.values()) {
+      r.fighter.health = 100;
+      r.fighter.alive = true;
+      r.character.revive();
+      r.fighter.loadout?.reset();
+      r.weapon = 'pistols';
+      r.character.setWeapon('pistols');
+    }
+    this.clearDrones();
+    (msg.peers || []).forEach((p) => this.upsert(p));
+  }
+
+  clearDrones() {
+    for (const d of this.drones.values()) d.dispose();
+    this.drones.clear();
   }
 
   placeLocal(slot = this.slot) {
@@ -194,6 +234,7 @@ export class Session {
         }
         (msg.peers || []).forEach((p) => this.upsert(p));
         if (msg.round) this.onRound?.(msg.round);
+        this.readySent = false;
         break;
       case 'map':
         if (msg.id && msg.id !== this.mapId) {
@@ -226,6 +267,9 @@ export class Session {
       case 'round':
         this.onRound?.(msg);
         break;
+      case 'drone':
+        this.seeDrone(msg);
+        break;
       default:
         break;
     }
@@ -236,6 +280,7 @@ export class Session {
     const cur = this.remotes.get(snap.id);
     if (cur) {
       cur.applySnap(snap);
+      if (snap.drone?.p) this.upsertDrone(snap.id, snap.drone);
       this.onRoster?.();
       return;
     }
@@ -267,17 +312,57 @@ export class Session {
     const remote = new Remote(latest, fighter, ch);
     this.remotes.set(latest.id, remote);
     this.pending.delete(snap.id);
+    if (latest.drone?.p) this.upsertDrone(latest.id, latest.drone);
     this.onRoster?.();
   }
 
   remove(id) {
     this.pending.delete(id);
+    this.dropDrone(id);
     const r = this.remotes.get(id);
     if (!r) return;
     r.dispose(this.scene);
     this.combat.fighters = this.combat.fighters.filter((f) => f !== r.fighter);
     this.remotes.delete(id);
     this.onRoster?.();
+  }
+
+  upsertDrone(id, snap) {
+    if (!id || id === this.net.id) return;
+    let d = this.drones.get(id);
+    if (!d) {
+      d = new RemoteDrone(this.scene, this.world.fx, this.weapons.audio, id);
+      this.drones.set(id, d);
+    }
+    d.apply(snap.p, snap.yaw, snap.pitch);
+  }
+
+  dropDrone(id) {
+    const d = this.drones.get(id);
+    if (!d) return;
+    d.dispose();
+    this.drones.delete(id);
+  }
+
+  seeDrone(msg) {
+    if (!msg.id || msg.id === this.net.id) {
+      if (msg.a === 'down' && msg.id === this.net.id) this.weapons.drone.kill(this.fighter(msg.aid));
+      return;
+    }
+    if (msg.a === 'go' || msg.a === 'pose') {
+      this.upsertDrone(msg.id, msg);
+      return;
+    }
+    const d = this.drones.get(msg.id);
+    if (msg.a === 'down') {
+      if (d) d.kill(this.fighter(msg.aid));
+      else this.dropDrone(msg.id);
+      return;
+    }
+    if (msg.a === 'boom') {
+      if (d) d.explode();
+      this.drones.delete(msg.id);
+    }
   }
 
   fighter(id) {

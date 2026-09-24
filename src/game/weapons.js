@@ -295,6 +295,16 @@ export class Weapons {
     }
     if (hit.drone) {
       hit.drone.kill(shooter);
+      if (shooter.isPlayer && this.session?.multi) {
+        const ownerId = hit.drone.ownerId || hit.drone.live?.owner?.id || this.session.net.id;
+        const from = hit.drone.pos || hit.drone.live?.pos;
+        this.session.reportDrone('down', {
+          id: ownerId,
+          p: from ? [from.x, from.y, from.z] : undefined,
+          dir: [dir.x, dir.y, dir.z],
+        });
+        this.session.reportShot(from || flashAt, dir, def.key);
+      }
       return hit;
     }
     if (hit.fighter?.net) {
@@ -595,13 +605,24 @@ export class Weapons {
     this.updateArc(false);
     if (this.drone.flying) {
       this.drone.update(dt, input);
-      if (!this.drone.flying || this.drone.dying) return;
-      if (input.firePressed) this.drone.explode('detonate');
+      if (this.drone.flying && !this.drone.dying) {
+        this.dronePoseAcc = (this.dronePoseAcc || 0) + dt;
+        if (this.dronePoseAcc >= 1 / 12) {
+          this.dronePoseAcc = 0;
+          const pack = this.drone.pack();
+          if (pack) this.session?.reportDrone('pose', pack);
+        }
+        if (input.firePressed) this.drone.explode('detonate');
+      }
       return;
     }
     const ready = ch.weapon === 'drone' && ch.equipT >= 1 && L.drones > 0 && !ch.action;
     if (ready && input.firePressed) {
-      if (this.drone.launch(f)) L.drones--;
+      if (this.drone.launch(f)) {
+        L.drones--;
+        const pack = this.drone.pack();
+        if (pack) this.session?.reportDrone('go', pack);
+      }
     }
   }
 

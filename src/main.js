@@ -80,8 +80,12 @@ world.raycast = (o, d, maxDist, ignore) => {
   if (c && (!best || c.t < best.t)) best = { t: c.t, normal: c.normal, surface: c.surface || c.collider.type, collider: c.collider };
   const pr = world.props.raycast(o, d, best ? best.t : maxDist);
   if (pr && (!best || pr.t < best.t)) best = pr;
-  const dr = world.drone?.raycast(o, d, best ? best.t : maxDist);
-  if (dr && (!best || dr.t < best.t)) best = dr;
+  const checkDrone = (drone) => {
+    const hit = drone?.raycast(o, d, best ? best.t : maxDist);
+    if (hit && (!best || hit.t < best.t)) best = hit;
+  };
+  checkDrone(world.drone);
+  if (world.netDrones) for (const drone of world.netDrones.values()) checkDrone(drone);
   const fh = world.combat.raycast(o, d, best ? best.t : maxDist, ignore);
   if (fh) best = fh;
   return best;
@@ -333,6 +337,7 @@ async function init() {
   const applyNetRound = (msg) => {
     if (msg.state === 'countdown') {
       resetLocalKit();
+      session.beginRound(msg);
       const slot = msg.slots?.[net.id] ?? session.slot;
       session.placeLocal(slot);
       round.state = 'countdown';
@@ -617,6 +622,8 @@ async function init() {
     $('rivalsleft').textContent = session.multi
       ? Math.max(0, session.humansAlive() - (player.fighter.alive ? 1 : 0))
       : rivals.filter((r) => r.fighter.alive).length;
+    const leftLabel = document.querySelector('#round small');
+    if (leftLabel) leftLabel.textContent = session.multi ? 'players left' : 'rivals left';
     hurt = Math.max(0, hurt - dt * 1.6);
     $('damage').style.opacity = Math.max(hurt, alive ? Math.max(0, (45 - hp) / 45) * 0.45 : 0.7);
     const js = jev.stats;

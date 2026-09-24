@@ -23,6 +23,44 @@ function shade(mat) {
   return mat;
 }
 
+function makeDroneMesh() {
+  const g = new THREE.Group();
+  g.name = 'suicide-drone';
+  const body = shade(new THREE.MeshStandardMaterial({ color: 0x1c1f22, metalness: 0.55, roughness: 0.38 }));
+  const arm = shade(new THREE.MeshStandardMaterial({ color: 0x2a2e32, metalness: 0.4, roughness: 0.5 }));
+  const accent = shade(new THREE.MeshStandardMaterial({ color: 0xc45a1a, emissive: 0x6a2208, emissiveIntensity: 0.7, metalness: 0.2, roughness: 0.4 }));
+  const lens = new THREE.MeshStandardMaterial({ color: 0x111318, metalness: 0.8, roughness: 0.15, emissive: 0x143018, emissiveIntensity: 0.35 });
+  const hub = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.08, 0.28), body);
+  hub.castShadow = true;
+  g.add(hub);
+  const cam = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.04, 0.06, 10), lens);
+  cam.rotation.x = Math.PI / 2;
+  cam.position.set(0, -0.01, 0.16);
+  g.add(cam);
+  const led = new THREE.Mesh(new THREE.SphereGeometry(0.018, 8, 8), accent);
+  led.position.set(0, 0.05, -0.1);
+  g.add(led);
+  const rotors = [];
+  const armLen = 0.2;
+  for (const [sx, sz] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) {
+    const a = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.02, armLen), arm);
+    a.position.set(sx * 0.12, 0.01, sz * 0.12);
+    a.lookAt(sx * 0.4, 0.01, sz * 0.4);
+    g.add(a);
+    const motor = new THREE.Mesh(new THREE.CylinderGeometry(0.028, 0.028, 0.03, 8), body);
+    motor.position.set(sx * 0.2, 0.03, sz * 0.2);
+    g.add(motor);
+    const blade = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.006, 0.028), new THREE.MeshStandardMaterial({
+      color: 0x3a3a3a, metalness: 0.1, roughness: 0.7, transparent: true, opacity: 0.55,
+    }));
+    blade.position.copy(motor.position).setY(0.05);
+    g.add(blade);
+    rotors.push(blade);
+  }
+  g.traverse((o) => { if (o.isMesh) o.castShadow = o.receiveShadow = true; });
+  return { group: g, rotors, ledMat: accent, lensMat: lens };
+}
+
 export class SuicideDrone {
   constructor(world, fx, audio, combat, scene) {
     this.world = world;
@@ -54,43 +92,21 @@ export class SuicideDrone {
   }
 
   buildMesh() {
-    const g = new THREE.Group();
-    g.name = 'suicide-drone';
-    const body = shade(new THREE.MeshStandardMaterial({ color: 0x1c1f22, metalness: 0.55, roughness: 0.38 }));
-    const arm = shade(new THREE.MeshStandardMaterial({ color: 0x2a2e32, metalness: 0.4, roughness: 0.5 }));
-    const accent = shade(new THREE.MeshStandardMaterial({ color: 0xc45a1a, emissive: 0x6a2208, emissiveIntensity: 0.7, metalness: 0.2, roughness: 0.4 }));
-    const lens = new THREE.MeshStandardMaterial({ color: 0x111318, metalness: 0.8, roughness: 0.15, emissive: 0x143018, emissiveIntensity: 0.35 });
-    const hub = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.08, 0.28), body);
-    hub.castShadow = true;
-    g.add(hub);
-    const cam = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.04, 0.06, 10), lens);
-    cam.rotation.x = Math.PI / 2;
-    cam.position.set(0, -0.01, 0.16);
-    g.add(cam);
-    const led = new THREE.Mesh(new THREE.SphereGeometry(0.018, 8, 8), accent);
-    led.position.set(0, 0.05, -0.1);
-    g.add(led);
-    this.ledMat = accent;
-    this.lensMat = lens;
-    this.rotors = [];
-    const armLen = 0.2;
-    for (const [sx, sz] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) {
-      const a = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.02, armLen), arm);
-      a.position.set(sx * 0.12, 0.01, sz * 0.12);
-      a.lookAt(sx * 0.4, 0.01, sz * 0.4);
-      g.add(a);
-      const motor = new THREE.Mesh(new THREE.CylinderGeometry(0.028, 0.028, 0.03, 8), body);
-      motor.position.set(sx * 0.2, 0.03, sz * 0.2);
-      g.add(motor);
-      const blade = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.006, 0.028), new THREE.MeshStandardMaterial({
-        color: 0x3a3a3a, metalness: 0.1, roughness: 0.7, transparent: true, opacity: 0.55,
-      }));
-      blade.position.copy(motor.position).setY(0.05);
-      g.add(blade);
-      this.rotors.push(blade);
-    }
-    g.traverse((o) => { if (o.isMesh) o.castShadow = o.receiveShadow = true; });
-    return g;
+    const { group, rotors, ledMat, lensMat } = makeDroneMesh();
+    this.rotors = rotors;
+    this.ledMat = ledMat;
+    this.lensMat = lensMat;
+    return group;
+  }
+
+  pack() {
+    const d = this.live;
+    if (!d) return null;
+    return {
+      p: [+d.pos.x.toFixed(2), +d.pos.y.toFixed(2), +d.pos.z.toFixed(2)],
+      yaw: +d.yaw.toFixed(3),
+      pitch: +d.pitch.toFixed(3),
+    };
   }
 
   launch(owner) {
@@ -391,6 +407,7 @@ export class SuicideDrone {
       this.world.props.blast?.(pos, r, 11);
     }
     this.world.weapons?.onExplosion?.(pos, dist);
+    this.world.weapons?.session?.reportDrone('boom', { p: [pos.x, pos.y, pos.z], reason });
   }
 
   clear() {
@@ -402,5 +419,125 @@ export class SuicideDrone {
     if (this.lensMat) this.lensMat.emissiveIntensity = 0.35;
     this.audio.droneHum?.(0);
     this.purgeChunks();
+  }
+}
+
+// Other players' drones: same hit box and wreck, driven by the room instead of input.
+export class RemoteDrone {
+  constructor(scene, fx, audio, ownerId) {
+    this.remote = true;
+    this.ownerId = ownerId;
+    this.scene = scene;
+    this.fx = fx;
+    this.audio = audio;
+    this.mesh = this.buildMesh();
+    this.mesh.visible = false;
+    scene.add(this.mesh);
+    this.pos = new THREE.Vector3();
+    this.target = new THREE.Vector3();
+    this.yaw = 0;
+    this.pitch = 0;
+    this.spin = 0;
+    this.vel = new THREE.Vector3();
+    this.live = false;
+    this.dying = false;
+    this.dieT = 0;
+  }
+
+  get flying() { return this.live && !this.dying; }
+
+  buildMesh() {
+    const { group, rotors, ledMat, lensMat } = makeDroneMesh();
+    this.rotors = rotors;
+    this.ledMat = ledMat;
+    this.lensMat = lensMat;
+    return group;
+  }
+
+  apply(p, yaw, pitch) {
+    if (this.dying) return;
+    this.target.set(p[0], p[1], p[2]);
+    this.yaw = yaw || 0;
+    this.pitch = pitch || 0;
+    if (!this.live) {
+      this.pos.copy(this.target);
+      this.live = true;
+    }
+    this.mesh.visible = true;
+  }
+
+  tick(dt, terrain) {
+    if (!this.live) {
+      this.mesh.visible = false;
+      return;
+    }
+    if (this.dying) {
+      this.dieT += dt;
+      this.vel.y -= 16 * dt;
+      this.pos.addScaledVector(this.vel, dt);
+      this.mesh.position.copy(this.pos);
+      this.mesh.rotation.x += dt * 3.2;
+      this.mesh.rotation.z += dt * 4.1;
+      for (const r of this.rotors || []) r.rotation.y += dt * 18;
+      const ground = terrain?.heightAt?.(this.pos.x, this.pos.z) ?? 0;
+      if (this.dieT > 1.2 || this.pos.y < ground + 0.12) this.crash();
+      return;
+    }
+    this.pos.lerp(this.target, 1 - Math.exp(-dt * 16));
+    this.spin += dt * 22;
+    this.mesh.position.copy(this.pos);
+    this.mesh.rotation.set(this.pitch * 0.35, this.yaw, 0);
+    this.mesh.visible = true;
+    for (const r of this.rotors || []) r.rotation.y = this.spin;
+  }
+
+  raycast(o, d, maxDist) {
+    if (!this.live || this.dying) return null;
+    const c = this.pos;
+    const oc = new THREE.Vector3().subVectors(o, c);
+    const b = oc.dot(d);
+    const disc = b * b - (oc.lengthSq() - DRONE.hitR * DRONE.hitR);
+    if (disc < 0) return null;
+    const t = -b - Math.sqrt(disc);
+    if (t <= 0 || t >= maxDist) return null;
+    const p = o.clone().addScaledVector(d, t);
+    return { t, normal: p.sub(c).normalize(), surface: 'metal', drone: this };
+  }
+
+  kill(attacker) {
+    if (!this.live || this.dying) return;
+    const from = attacker?.pos ? this.pos.clone().sub(attacker.pos) : new THREE.Vector3(0, 1, 0);
+    from.y *= 0.4;
+    if (from.lengthSq() < 1e-4) from.set(0, 1, 0);
+    from.normalize();
+    this.fx.droneKill?.(this.pos, from);
+    this.fx.impact(this.pos, from.clone().negate(), 'metal', from);
+    this.audio.droneShotDown?.();
+    this.dying = true;
+    this.dieT = 0;
+    this.vel.copy(from).multiplyScalar(7).setY(2.4);
+  }
+
+  explode() {
+    if (!this.live) return;
+    const pos = this.pos.clone();
+    this.fx.explosion(pos, pos.y < 0.15 ? 'water' : 'ground');
+    this.audio.explosion?.(pos.length(), 0, pos.y < 0.15);
+    this.dispose();
+  }
+
+  crash() {
+    if (!this.live) return;
+    const pos = this.pos.clone();
+    this.fx.explosion(pos, pos.y < 0.15 ? 'water' : 'ground');
+    this.audio.explosion?.(8, 0, pos.y < 0.15);
+    this.dispose();
+  }
+
+  dispose() {
+    this.live = false;
+    this.dying = false;
+    this.mesh.visible = false;
+    this.mesh.removeFromParent();
   }
 }

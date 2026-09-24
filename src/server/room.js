@@ -34,7 +34,10 @@ export class GameRoom extends DurableObject {
     if (this.map) await this.ctx.storage.put('map', this.map);
     const pack = {};
     for (const p of this.players.values()) {
-      pack[p.id] = { id: p.id, name: p.name, color: p.color, roster: p.roster, slot: p.slot, hp: p.hp, alive: p.alive, p: p.p, yaw: p.yaw, w: p.w };
+      pack[p.id] = {
+        id: p.id, name: p.name, color: p.color, roster: p.roster, slot: p.slot,
+        hp: p.hp, alive: p.alive, ready: p.ready, p: p.p, yaw: p.yaw, w: p.w, drone: p.drone,
+      };
     }
     await this.ctx.storage.put('players', pack);
   }
@@ -49,10 +52,11 @@ export class GameRoom extends DurableObject {
       slot: Number.isFinite(a.slot) ? a.slot : this.nextSlot++,
       hp: Number.isFinite(a.hp) ? a.hp : HP,
       alive: a.alive !== false,
-      ready: false,
+      ready: !!a.ready,
       p: Array.isArray(a.p) ? a.p : [0, 2, 0],
       yaw: a.yaw || 0,
       w: WEAPONS.has(a.w) ? a.w : 'pistols',
+      drone: a.drone || null,
     };
     this.nextSlot = Math.max(this.nextSlot, p.slot + 1);
     this.players.set(p.id, p);
@@ -62,7 +66,7 @@ export class GameRoom extends DurableObject {
   snap(p) {
     return {
       id: p.id, name: p.name, color: p.color, roster: p.roster, slot: p.slot,
-      p: p.p, yaw: p.yaw, hp: p.hp, alive: p.alive, w: p.w,
+      p: p.p, yaw: p.yaw, hp: p.hp, alive: p.alive, w: p.w, drone: p.drone || undefined,
     };
   }
 
@@ -86,8 +90,7 @@ export class GameRoom extends DurableObject {
       return Response.json({
         room: this.ctx.id.toString(),
         peers: this.players.size,
-        round: this.round,
-        now: Date.now(),
+        round: this.round.state,
       });
     }
     const pair = new WebSocketPair();
@@ -106,6 +109,7 @@ export class GameRoom extends DurableObject {
       peers: [...this.players.values()].filter((o) => o.id !== id).map((o) => this.snap(o)),
     });
     await this.persist();
+    await this.tryStart();
     return new Response(null, { status: 101, webSocket: client });
   }
 
@@ -177,15 +181,45 @@ export class GameRoom extends DurableObject {
       return;
     }
 
+    if (msg.t === 'drone') {
+      if (this.round.state !== 'fight' || !mine.alive) return;
+      await this.onDrone(mine, ws, msg);
+      return;
+    }
+
     if (msg.t === 'ready') {
       mine.ready = true;
+      await this.persist();
       await this.tryStart();
-      this.send(ws, { t: 'state', n: this.players.size, ids: [...this.players.keys()], round: this.round });
+    }
+  }
+
+  async onDrone(mine, ws, msg) {
+    const act = str(msg.a, 8);
+    const p = Array.isArray(msg.p) ? msg.p.slice(0, 3).map(num) : null;
+    if (act === 'go' || act === 'pose') {
+      if (!p) return;
+      mine.drone = { p, yaw: num(msg.yaw), pitch: num(msg.pitch) };
+      this.broadcast(ws, { t: 'drone', a: act, id: mine.id, p, yaw: mine.drone.yaw, pitch: mine.drone.pitch });
+      return;
+    }
+    if (act === 'boom') {
+      mine.drone = null;
+      this.broadcast(ws, { t: 'drone', a: 'boom', id: mine.id, p, reason: str(msg.reason, 12) });
+      return;
+    }
+    if (act === 'down') {
+      const owner = this.players.get(str(msg.id, 8)) || mine;
+      owner.drone = null;
+      this.broadcast(null, {
+        t: 'drone', a: 'down', id: owner.id, aid: mine.id, p, dir: Array.isArray(msg.dir) ? msg.dir.slice(0, 3).map(num) : undefined,
+      });
     }
   }
 
   async applyHit(atk, vic, head, w, dir, scale = 1) {
-    if (!vic.alive || atk.id === vic.id) return;
+    const splash = w === 'grenade' || w === 'drone';
+    if (!vic.alive || (atk.id === vic.id && !splash)) return;
     const dx = atk.p[0] - vic.p[0], dy = atk.p[1] - vic.p[1], dz = atk.p[2] - vic.p[2];
     if (Math.hypot(dx, dy, dz) > 220) return;
     const def = DAMAGE[w] || DAMAGE.pistols;
@@ -210,6 +244,7 @@ export class GameRoom extends DurableObject {
       p.hp = HP;
       p.alive = true;
       p.ready = false;
+      p.drone = null;
     }
     this.round = { state: 'countdown', ends: Date.now() + 3000 };
     this.broadcast(null, {
@@ -217,6 +252,7 @@ export class GameRoom extends DurableObject {
       state: 'countdown',
       ends: this.round.ends,
       slots: Object.fromEntries([...this.players.values()].map((p) => [p.id, p.slot])),
+      peers: [...this.players.values()].map((p) => this.snap(p)),
     });
     await this.persist();
     await this.ctx.storage.setAlarm(this.round.ends);
