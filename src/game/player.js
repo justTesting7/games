@@ -97,13 +97,14 @@ export class Player {
     this.crouching = !!(input.crouch || this.crouchToggle) && this.onGround;
     this.crouchT += ((this.crouching ? 1 : 0) - this.crouchT) * Math.min(1, dt * 8);
 
-    const f = (input.forward ? 1 : 0) - (input.back ? 1 : 0);
-    const s = (input.right ? 1 : 0) - (input.left ? 1 : 0);
+    const f = (input.forward ? 1 : 0) - (input.back ? 1 : 0) + (input.moveY || 0);
+    const s = (input.right ? 1 : 0) - (input.left ? 1 : 0) + (input.moveX || 0);
     const camFwd = new THREE.Vector3(Math.sin(this.camYaw), 0, Math.cos(this.camYaw));
     const camRight = new THREE.Vector3(-camFwd.z, 0, camFwd.x);
     const wish = new THREE.Vector3().addScaledVector(camFwd, f).addScaledVector(camRight, s);
-    const moving = wish.lengthSq() > 0;
-    if (moving) wish.normalize();
+    const stick = Math.min(1, wish.length());
+    const moving = stick > 0.06;
+    if (moving) wish.multiplyScalar(1 / wish.length());
 
     let target = 0;
     if (moving) {
@@ -111,6 +112,7 @@ export class Player {
       else if (this.scoped) target = SPEED.aimWalk;
       else if (aiming) target = input.sprint ? SPEED.aim : (this.walkMode ? SPEED.aimWalk : SPEED.aim * 0.85);
       else target = input.sprint ? SPEED.sprint : this.walkMode ? SPEED.walk : SPEED.jog;
+      if (stick < 0.98) target *= stick;
     }
 
     // Facing: free movement turns the body, aiming locks it to the camera.

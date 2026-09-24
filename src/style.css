@@ -7,8 +7,10 @@ html, body {
   font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
   color: #fff;
   user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
 }
-#game { display: block; width: 100vw; height: 100vh; }
+#game { display: block; width: 100vw; height: 100vh; height: 100dvh; touch-action: none; }
 .hidden { display: none !important; }
 
 #hud { position: fixed; inset: 0; pointer-events: none; }
@@ -421,6 +423,96 @@ h1 {
   font-size: 12px; opacity: 0.75; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 14px;
 }
 .controls b { color: #f3dcb0; }
+.touch-hint { display: none; }
+
+#touch {
+  position: fixed; inset: 0; z-index: 8;
+  pointer-events: none;
+}
+#touch-look {
+  position: absolute; left: 36%; top: 0; right: 0; bottom: 0;
+  pointer-events: auto; touch-action: none;
+}
+#touch-menu {
+  position: absolute; left: calc(10px + env(safe-area-inset-left));
+  top: calc(10px + env(safe-area-inset-top));
+  pointer-events: auto; z-index: 3;
+  min-width: 64px; padding: 8px 12px; border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.25);
+  background: rgba(8, 10, 12, 0.55); color: #fff;
+  font: 12px/1 inherit; letter-spacing: 1px; text-transform: uppercase;
+}
+.stick {
+  position: absolute;
+  left: calc(18px + env(safe-area-inset-left));
+  bottom: calc(22px + env(safe-area-inset-bottom));
+  width: 128px; height: 128px;
+  pointer-events: auto; touch-action: none; z-index: 3;
+}
+.stick-base, .stick-knob {
+  position: absolute; left: 50%; top: 50%; border-radius: 50%;
+}
+.stick-base {
+  width: 128px; height: 128px; margin: -64px 0 0 -64px;
+  background: rgba(255,255,255,0.08);
+  border: 2px solid rgba(255,255,255,0.22);
+  box-shadow: inset 0 0 24px rgba(0,0,0,0.35);
+}
+.stick-knob {
+  width: 56px; height: 56px; margin: -28px 0 0 -28px;
+  background: rgba(243, 220, 176, 0.85);
+  border: 1px solid rgba(255,255,255,0.4);
+  box-shadow: 0 6px 16px rgba(0,0,0,0.4);
+}
+#touch-actions {
+  position: absolute;
+  right: calc(12px + env(safe-area-inset-right));
+  bottom: calc(16px + env(safe-area-inset-bottom));
+  width: 196px; height: 196px;
+  pointer-events: none; z-index: 3;
+}
+#touch-actions button {
+  position: absolute; pointer-events: auto; touch-action: none;
+  border: 1px solid rgba(255,255,255,0.28);
+  background: rgba(8, 10, 12, 0.5); color: #fff;
+  font: 11px/1 inherit; letter-spacing: 1px; text-transform: uppercase;
+  border-radius: 50%;
+}
+#touch-actions button.on { background: rgba(210, 161, 92, 0.75); }
+#touch-fire {
+  right: 0; bottom: 0; width: 88px; height: 88px;
+  font-size: 14px; font-weight: 700;
+  background: rgba(180, 70, 40, 0.72);
+}
+#touch-jump { right: 96px; bottom: 8px; width: 64px; height: 64px; }
+#touch-aim { right: 8px; bottom: 96px; width: 56px; height: 56px; }
+#touch-reload { right: 148px; bottom: 72px; width: 48px; height: 48px; }
+#touch-crouch { right: 88px; bottom: 88px; width: 48px; height: 48px; }
+#touch-up { right: 96px; bottom: 148px; width: 52px; height: 52px; }
+
+body.touch #menu {
+  align-items: stretch; overflow-y: auto; -webkit-overflow-scrolling: touch;
+}
+body.touch .panel {
+  width: min(560px, 100%);
+  margin: auto;
+  padding: 22px 18px calc(24px + env(safe-area-inset-bottom));
+  border-radius: 0;
+}
+body.touch h1 { font-size: 32px; letter-spacing: 3px; }
+body.touch .controls { display: none; }
+body.touch .touch-hint { display: block; margin-top: 10px; }
+body.touch .settings { grid-template-columns: 1fr; }
+body.touch #play { width: 100%; padding: 16px 20px; }
+body.touch #health { left: 16px; bottom: 164px; width: 150px; }
+body.touch #weapon { right: 14px; bottom: 220px; }
+body.touch #health span, body.touch #weapon span, body.touch #round span { font-size: 24px; }
+body.touch #round { top: calc(12px + env(safe-area-inset-top)); }
+body.touch #feed { top: calc(52px + env(safe-area-inset-top)); right: 10px; font-size: 12px; }
+body.touch #bannertitle { font-size: 34px; letter-spacing: 4px; }
+body.touch #slots { pointer-events: auto; }
+body.touch #slots b { padding: 8px 9px; }
+
 #error {
   position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
   background: #111; padding: 40px; text-align: center; font-size: 16px; white-space: pre-wrap;

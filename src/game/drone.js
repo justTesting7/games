@@ -161,14 +161,13 @@ export class SuicideDrone {
     else flatFwd.set(Math.sin(d.yaw), 0, Math.cos(d.yaw));
 
     const boost = input.sprint ? DRONE.boost : DRONE.speed;
-    const wish = new THREE.Vector3();
-    if (input.forward) wish.add(flatFwd);
-    if (input.back) wish.sub(flatFwd);
-    if (input.right) wish.add(right);
-    if (input.left) wish.sub(right);
-    if (wish.lengthSq() > 0) wish.normalize().multiplyScalar(boost);
+    const fy = (input.forward ? 1 : 0) - (input.back ? 1 : 0) + (input.moveY || 0);
+    const fx = (input.right ? 1 : 0) - (input.left ? 1 : 0) + (input.moveX || 0);
+    const wish = new THREE.Vector3().addScaledVector(flatFwd, fy).addScaledVector(right, fx);
+    if (wish.lengthSq() > 1) wish.normalize();
+    if (wish.lengthSq() > 0) wish.multiplyScalar(boost);
     const climb = ((input.climb || input.jump ? 1 : 0) - (input.crouch ? 1 : 0)) * DRONE.climb;
-    wish.y += climb + fwd.y * (input.forward || input.back ? boost * 0.35 : 0);
+    wish.y += climb + fwd.y * (fy ? boost * 0.35 : 0);
 
     d.vel.lerp(wish, 1 - Math.exp(-dt * 4.5));
     const next = d.pos.clone().addScaledVector(d.vel, dt);

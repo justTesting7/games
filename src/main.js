@@ -22,6 +22,7 @@ import { Jev } from './game/jev.js';
 import { Net } from './game/net.js';
 import { Session } from './game/session.js';
 import { modeUrl, persistMode, persistRoom, resolveMode, resolveRoom } from './game/mode.js';
+import { isTouchDevice, setupTouch } from './game/touch.js';
 
 const $ = (id) => document.getElementById(id);
 const canvas = $('game');
@@ -45,7 +46,7 @@ try {
   throw e;
 }
 
-const savedQuality = localStorage.getItem('relic-quality') || 'high';
+const savedQuality = localStorage.getItem('relic-quality') || (isTouchDevice() ? 'medium' : 'high');
 $('quality').value = savedQuality;
 const pipeline = new Pipeline(renderer);
 pipeline.setQuality(savedQuality);
@@ -102,14 +103,15 @@ const net = new Net({ wanted: mode === 'multi', room: roomCode });
 net.watchFocus();
 let session = null;
 
-const NO_INPUT = { forward: false, back: false, left: false, right: false, sprint: false, jump: false, aim: false, fire: false, toggleWalk: false, crouch: false };
-const input = { forward: false, back: false, left: false, right: false, sprint: false, jump: false, climb: false, aim: false, fire: false, toggleWalk: false, crouch: false, fastTime: false };
+const NO_INPUT = { forward: false, back: false, left: false, right: false, sprint: false, jump: false, aim: false, fire: false, toggleWalk: false, crouch: false, moveX: 0, moveY: 0 };
+const input = { forward: false, back: false, left: false, right: false, sprint: false, jump: false, climb: false, aim: false, fire: false, toggleWalk: false, crouch: false, fastTime: false, moveX: 0, moveY: 0 };
+let inPlay = false;
 const keymap = { KeyW: 'forward', ArrowUp: 'forward', KeyS: 'back', ArrowDown: 'back', KeyA: 'left', ArrowLeft: 'left', KeyD: 'right', ArrowRight: 'right', ShiftLeft: 'sprint', ShiftRight: 'sprint', ControlLeft: 'crouch', ControlRight: 'crouch', KeyT: 'fastTime' };
 addEventListener('keydown', (e) => {
   if (keymap[e.code]) input[keymap[e.code]] = true;
   if (e.code === 'Space') {
     e.preventDefault();
-    if (document.pointerLockElement === canvas) {
+    if (inPlay || document.pointerLockElement === canvas) {
       input.fire = true;
       if (!e.repeat) input.firePressed = true;
     }
@@ -642,6 +644,34 @@ async function init() {
   $('play').classList.remove('hidden');
   menu.classList.remove('loading');
   paintMode();
+  const applyLook = (dx, dy, touch) => {
+    const flying = weapons.drone.flying;
+    const base = touch ? 0.0026 : 0.00022;
+    const sens = Number($('sens').value) * base * (flying ? 0.85 : player.scoped ? 0.16 : player.camDist < 2 ? 0.7 : 1);
+    if (flying) weapons.drone.look(dx * sens, dy * sens);
+    else player.look(dx * sens, dy * sens);
+  };
+  const setPlay = (on) => {
+    inPlay = !!on;
+    menu.classList.toggle('hidden', inPlay);
+    $('hud').classList.toggle('hidden', !inPlay);
+    if (inPlay) {
+      rosterStudio.hideHover();
+      touchPad.show();
+      if (round.state === 'waiting') startRound();
+    } else {
+      touchPad.hide();
+      for (const k in input) input[k] = false;
+      input.moveX = 0;
+      input.moveY = 0;
+      if (document.pointerLockElement) document.exitPointerLock();
+      if (document.fullscreenElement) document.exitFullscreen?.();
+    }
+  };
+  const touchPad = setupTouch(input, {
+    onLook: (dx, dy) => { if (inPlay) applyLook(dx, dy, true); },
+    onMenu: () => setPlay(false),
+  });
   $('play').onclick = async () => {
     if (mode === 'solo' && rosterMenu.changed()) { rosterMenu.save(); location.reload(); return; }
     if (mode === 'multi') {
@@ -650,25 +680,24 @@ async function init() {
       await applyLocalFighter();
     }
     audio.holdFocus();
-    canvas.requestPointerLock();
+    if (touchPad.active) {
+      try { await document.documentElement.requestFullscreen?.(); } catch { /* iOS */ }
+      setPlay(true);
+    } else {
+      canvas.requestPointerLock();
+    }
   };
   canvas.addEventListener('click', () => {
+    if (touchPad.active) return;
     if (document.pointerLockElement !== canvas && menu.classList.contains('hidden')) canvas.requestPointerLock();
   });
   document.addEventListener('pointerlockchange', () => {
-    const locked = document.pointerLockElement === canvas;
-    menu.classList.toggle('hidden', locked);
-    $('hud').classList.toggle('hidden', !locked);
-    if (locked) rosterStudio.hideHover();
-    if (!locked) for (const k in input) input[k] = false;
-    if (locked && round.state === 'waiting') startRound();
+    if (touchPad.active) return;
+    setPlay(document.pointerLockElement === canvas);
   });
   addEventListener('mousemove', (e) => {
     if (document.pointerLockElement !== canvas) return;
-    const flying = weapons.drone.flying;
-    const sens = Number($('sens').value) * 0.00022 * (flying ? 0.85 : player.scoped ? 0.16 : player.camDist < 2 ? 0.7 : 1);
-    if (flying) weapons.drone.look(e.movementX * sens, e.movementY * sens);
-    else player.look(e.movementX * sens, e.movementY * sens);
+    applyLook(e.movementX, e.movementY, false);
   });
 
   let elapsed = 0;
@@ -681,7 +710,7 @@ async function init() {
     }
     pipeline.setTimeOfDay(timeOfDay, elapsed);
 
-    const locked = document.pointerLockElement === canvas;
+    const locked = inPlay;
     if (mode === 'solo' && (input.restart || (input.reload && round.state === 'over')) && (round.state === 'over' || round.state === 'fight')) {
       startRound();
       input.reload = false;
@@ -704,6 +733,7 @@ async function init() {
     const alive = player.fighter.alive;
     const flying = weapons.drone.flying;
     const dying = weapons.drone.dying;
+    touchPad.setDrone(flying);
     const state = player.update(dt, alive && !flying ? input : NO_INPUT);
     const canShoot = alive && round.state !== 'countdown' && !(mode === 'multi' && round.state === 'waiting');
     if (canShoot) weapons.update(dt, input);
@@ -867,10 +897,13 @@ async function init() {
 
 init().catch(fail);
 
-addEventListener('resize', () => {
-  pipeline.resize(innerWidth, innerHeight);
-  camera.aspect = innerWidth / innerHeight;
+const fitView = () => {
+  const w = Math.round(visualViewport?.width || innerWidth);
+  const h = Math.round(visualViewport?.height || innerHeight);
+  pipeline.resize(w, h);
+  camera.aspect = w / h;
   camera.updateProjectionMatrix();
-});
-camera.aspect = innerWidth / innerHeight;
-camera.updateProjectionMatrix();
+};
+addEventListener('resize', fitView);
+visualViewport?.addEventListener('resize', fitView);
+fitView();

@@ -2,7 +2,10 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>Relic Isle</title>
     <link rel="icon" href="data:," />
     <link rel="stylesheet" href="/src/style.css" />
@@ -70,6 +73,23 @@
       <div id="debug" class="hidden"></div>
     </div>
 
+    <div id="touch" class="hidden">
+      <button type="button" id="touch-menu">Menu</button>
+      <div id="touch-look"></div>
+      <div id="stick" class="stick">
+        <i class="stick-base"></i>
+        <b class="stick-knob"></b>
+      </div>
+      <div id="touch-actions">
+        <button type="button" id="touch-reload">R</button>
+        <button type="button" id="touch-aim">Aim</button>
+        <button type="button" id="touch-crouch">Crouch</button>
+        <button type="button" id="touch-up" class="hidden">Up</button>
+        <button type="button" id="touch-jump">Jump</button>
+        <button type="button" id="touch-fire">Fire</button>
+      </div>
+    </div>
+
     <div id="menu">
       <div class="panel">
         <h1 id="maptitle">Relic Isle</h1>
@@ -125,6 +145,7 @@
             <input id="volume" type="range" min="0" max="100" value="70" />
           </label>
         </div>
+        <p class="sub touch-hint">Left stick move · drag right to look · Fire shoots. Landscape is easier.</p>
         <div class="controls">
           <div><b>WASD</b> move</div><div><b>Shift</b> sprint</div>
           <div><b>F</b> jump</div><div><b>Ctrl</b> / <b>C</b> crouch</div>
