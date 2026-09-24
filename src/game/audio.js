@@ -462,6 +462,25 @@ export class Audio {
     this.ambT = 0;
   }
 
+  // Chrome throttles timers in a hidden tab unless it thinks audio is
+  // playing. A sub-audible tone keeps the sim clock running for two-tab tests.
+  holdFocus() {
+    this.start();
+    if (!this.ctx || this._hold) {
+      this.ctx?.resume?.();
+      return;
+    }
+    const ctx = this.ctx;
+    const o = ctx.createOscillator();
+    o.type = 'sine';
+    o.frequency.value = 18;
+    const g = ctx.createGain();
+    g.gain.value = 0.0008;
+    o.connect(g).connect(ctx.destination);
+    o.start();
+    this._hold = { o, g };
+  }
+
   updateAmbience(dt, { altitude, coast, underwater }) {
     if (!this.ctx || !this.wind) return;
     this.ambT += dt;

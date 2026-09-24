@@ -76,6 +76,7 @@ export class Net {
         try { sessionStorage.setItem(this.resumeKey, msg.id); } catch { /* private mode */ }
       }
       this.inbox.push(msg);
+      this.onMessage?.();
     };
   }
 

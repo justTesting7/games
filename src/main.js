@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { Pipeline } from './engine/pipeline.js';
+import { startClock } from './engine/clock.js';
 import { Progress, loadImage } from './engine/assets.js';
 import { generateHeightmap, loadTerrainTextures, Terrain } from './world/terrain.js';
 import { Grass } from './world/grass.js';
@@ -607,7 +608,7 @@ async function init() {
   $('play').onclick = () => {
     if (rosterMenu.changed()) { rosterMenu.save(); location.reload(); return; }
     if (mode === 'multi' && !net.hosted) return;
-    audio.start();
+    audio.holdFocus();
     canvas.requestPointerLock();
   };
   canvas.addEventListener('click', () => {
@@ -629,14 +630,9 @@ async function init() {
     else player.look(e.movementX * sens, e.movementY * sens);
   });
 
-  let last = performance.now();
   let elapsed = 0;
   let fpsT = 0, frames = 0, fps = 0;
-  const loop = () => {
-    requestAnimationFrame(loop);
-    const now = performance.now();
-    const dt = Math.min(0.05, (now - last) / 1000);
-    last = now;
+  const clock = startClock((dt, draw) => {
     elapsed += dt;
     if (input.fastTime && (mode !== 'multi' || session?.isHost)) {
       timeOfDay = (timeOfDay + dt * 0.03) % 1;
@@ -676,7 +672,8 @@ async function init() {
     weapons.updateGrenades(dt);
     input.firePressed = false;
     input.fireReleased = false;
-    const active = locked && (round.state === 'fight' || round.state === 'over');
+    const hidden = document.visibilityState === 'hidden';
+    const active = (locked || hidden) && (round.state === 'fight' || round.state === 'over');
     session.update(dt);
     if (mode === 'multi' && round.state === 'waiting') {
       const need = session.minPlayers || minPlayers();
@@ -694,12 +691,18 @@ async function init() {
     combat.update(dt);
     props.update(dt);
     fx.update(dt);
-    terrain.update(elapsed);
-    if (grass) grass.update(elapsed, camera.position, player.pos);
-    if (mapDef.vegetation) veg.update(elapsed, camera.position);
-    if (city) city.update(dt, fx, camera);
-    const coast = THREE.MathUtils.clamp(1 - (terrain.heightAt(player.pos.x, player.pos.z) - 1) / 25, 0, 1);
-    audio.updateAmbience(dt, { altitude: player.pos.y, coast, underwater: player.underwater });
+    if (draw) {
+      terrain.update(elapsed);
+      if (grass) grass.update(elapsed, camera.position, player.pos);
+      if (mapDef.vegetation) veg.update(elapsed, camera.position);
+      if (city) city.update(dt, fx, camera);
+      const coast = THREE.MathUtils.clamp(1 - (terrain.heightAt(player.pos.x, player.pos.z) - 1) / 25, 0, 1);
+      audio.updateAmbience(dt, { altitude: player.pos.y, coast, underwater: player.underwater });
+    }
+
+    if (hitTimer > 0) { hitTimer -= dt; if (hitTimer <= 0) $('hitmarker').classList.remove('show'); }
+    hurt = Math.max(0, hurt - dt * 1.6);
+    if (!draw) return;
 
     $('crosshair').classList.toggle('idle', !state.aiming && !flying);
     $('crosshair').classList.toggle('enemy', !!player.aimHit?.fighter);
@@ -744,7 +747,6 @@ async function init() {
     if (leftTag) leftTag.textContent = dying ? 'signal lost' : 'drone';
     const near = weapons.live.some((g) => g.pos.distanceTo(player.pos) < WEAPONS.grenade.radius && g.owner !== player.fighter);
     $('grenadewarn').classList.toggle('show', alive && near);
-    if (hitTimer > 0) { hitTimer -= dt; if (hitTimer <= 0) $('hitmarker').classList.remove('show'); }
     const hp = player.fighter.health;
     $('hpbar').style.width = `${(hp / MAX_HEALTH) * 100}%`;
     $('hpbar').classList.toggle('low', hp <= 35);
@@ -754,7 +756,6 @@ async function init() {
       : rivals.filter((r) => r.fighter.alive).length;
     const leftLabel = document.querySelector('#round small');
     if (leftLabel) leftLabel.textContent = mode === 'multi' ? 'players left' : 'rivals left';
-    hurt = Math.max(0, hurt - dt * 1.6);
     $('damage').style.opacity = Math.max(hurt, alive ? Math.max(0, (45 - hp) / 45) * 0.45 : 0.7);
     const js = jev.stats;
     if (mode === 'solo') {
@@ -772,34 +773,44 @@ async function init() {
     }
     updateTags(dt);
 
-    renderer.info.reset();
-    if (flying) {
-      weapons.drone.setAspect(innerWidth, innerHeight);
-      if (character.root) character.root.visible = true;
-      pipeline.renderSplit(weapons.drone.cam, weapons.drone.opCam, dt, { underwater: false, shadowCenter: player.pos });
-    } else {
-      pipeline.render(camera, dt, { underwater: player.underwater, shadowCenter: player.pos });
-    }
+    if (draw) {
+      renderer.info.reset();
+      if (flying) {
+        weapons.drone.setAspect(innerWidth, innerHeight);
+        if (character.root) character.root.visible = true;
+        pipeline.renderSplit(weapons.drone.cam, weapons.drone.opCam, dt, { underwater: false, shadowCenter: player.pos });
+      } else {
+        pipeline.render(camera, dt, { underwater: player.underwater, shadowCenter: player.pos });
+      }
 
-    frames++;
-    fpsT += dt;
-    if (fpsT > 0.5) {
-      fps = frames / fpsT;
-      frames = 0;
-      fpsT = 0;
-      if (!$('debug').classList.contains('hidden')) {
-        const info = renderer.info.render;
-        $('debug').textContent = [
-          `${fps.toFixed(0)} fps · ${pipeline.qualityName}`,
-          `pos ${player.pos.x.toFixed(1)} ${player.pos.y.toFixed(1)} ${player.pos.z.toFixed(1)}`,
-          `speed ${state.speed.toFixed(2)} m/s · ${player.onGround ? 'ground' : 'air'}`,
-          `draw calls ${info.calls} · tris ${(info.triangles / 1e6).toFixed(2)}M`,
-          mapDef.vegetation ? `trees ${veg.stats.trees} · rocks ${veg.stats.rocks} · ferns ${veg.stats.ferns}` : `map ${mapDef.label}`,
-          `jev ${jev.stats.requests} requests · ${jev.stats.errors} errors`,
-          ...rivals.map((r) => `${r.persona.name} ${Math.ceil(r.fighter.health)} hp · ${r.tactic} (${r.source} ${r.confidence.toFixed(2)}) → ${r.target?.name ?? '-'}`),
-        ].join('\n');
+      frames++;
+      fpsT += dt;
+      if (fpsT > 0.5) {
+        fps = frames / fpsT;
+        frames = 0;
+        fpsT = 0;
+        if (!$('debug').classList.contains('hidden')) {
+          const info = renderer.info.render;
+          $('debug').textContent = [
+            `${fps.toFixed(0)} fps · ${pipeline.qualityName}`,
+            `pos ${player.pos.x.toFixed(1)} ${player.pos.y.toFixed(1)} ${player.pos.z.toFixed(1)}`,
+            `speed ${state.speed.toFixed(2)} m/s · ${player.onGround ? 'ground' : 'air'}`,
+            `draw calls ${info.calls} · tris ${(info.triangles / 1e6).toFixed(2)}M`,
+            mapDef.vegetation ? `trees ${veg.stats.trees} · rocks ${veg.stats.rocks} · ferns ${veg.stats.ferns}` : `map ${mapDef.label}`,
+            `jev ${jev.stats.requests} requests · ${jev.stats.errors} errors`,
+            ...rivals.map((r) => `${r.persona.name} ${Math.ceil(r.fighter.health)} hp · ${r.tactic} (${r.source} ${r.confidence.toFixed(2)}) → ${r.target?.name ?? '-'}`),
+          ].join('\n');
+        }
       }
     }
+  });
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'hidden') return;
+    for (const k in input) input[k] = false;
+    audio.holdFocus();
+  });
+  net.onMessage = () => {
+    if (document.visibilityState === 'hidden') clock.pulse(false);
   };
   setInterval(() => {
     if (mode !== 'multi' || !session) return;
@@ -807,7 +818,6 @@ async function init() {
     if (net.status === 'online') session.sendPose(1);
     else if (net.identity) net.connect(net.identity);
   }, 1000);
-  loop();
 }
 
 init().catch(fail);
