@@ -371,6 +371,46 @@ export class Audio {
     this.tone(180, 0.12, 0.08, 'square');
   }
 
+  droneShotDown() {
+    if (!this.ctx) return;
+    this.noiseBurst({ freq: 3200, q: 1.6, gain: 0.42, attack: 0.001, release: 0.07, send: 0.4 });
+    this.noiseBurst({ freq: 170, q: 0.55, type: 'lowpass', gain: 0.58, attack: 0.002, release: 0.38, send: 0.22 });
+    this.noiseBurst({ freq: 900, q: 2.2, gain: 0.22, attack: 0.001, release: 0.12, send: 0.25 });
+    const ctx = this.ctx;
+    const t = ctx.currentTime;
+    if (this.droneBuzz) {
+      this.droneBuzz.o.frequency.setTargetAtTime(26, t, 0.32);
+      this.droneBuzz.f.frequency.setTargetAtTime(130, t, 0.38);
+      this.droneBuzz.g.gain.setTargetAtTime(0.24, t, 0.04);
+      this.droneBuzz.g.gain.setTargetAtTime(0.0001, t + 0.12, 0.65);
+      this.droneBuzz.og.gain.setTargetAtTime(0.14, t, 0.03);
+      this.droneBuzz.og.gain.setTargetAtTime(0.0001, t + 0.16, 0.5);
+    }
+    const o = ctx.createOscillator();
+    o.type = 'sawtooth';
+    o.frequency.setValueAtTime(360, t);
+    o.frequency.exponentialRampToValueAtTime(38, t + 1.35);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.09, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 1.45);
+    const f = ctx.createBiquadFilter();
+    f.type = 'lowpass';
+    f.frequency.setValueAtTime(2400, t);
+    f.frequency.exponentialRampToValueAtTime(280, t + 1.3);
+    o.connect(f).connect(g).connect(this.master);
+    o.start(t);
+    o.stop(t + 1.5);
+    for (const at of [0.07, 0.2, 0.38, 0.62, 0.94, 1.22]) {
+      setTimeout(() => {
+        if (!this.ctx) return;
+        this.noiseBurst({
+          freq: 1400 + Math.random() * 2200, q: 1.8,
+          gain: 0.1 + Math.random() * 0.08, attack: 0.001, release: 0.055, send: 0.18,
+        });
+      }, at * 1000);
+    }
+  }
+
   droneHum(gain) {
     if (!this.ctx) return;
     if (!this.droneBuzz) {

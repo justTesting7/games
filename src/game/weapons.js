@@ -105,7 +105,7 @@ export class Weapons {
       this.chargingGrenade = false; this.grenadeCharge = 0; this.pendingThrow = 0;
       this.sniperHeld = false; this.sniperWasScoped = false;
       if (this.player) this.player.sniperPending = false;
-      if (key !== 'drone' && this.drone.flying) this.drone.explode('abort');
+      if (key !== 'drone' && this.drone.flying && !this.drone.dying) this.drone.explode('abort');
     }
     L.current = key;
     L.reloadT = 0;
@@ -588,7 +588,7 @@ export class Weapons {
     this.updateArc(false);
     if (this.drone.flying) {
       this.drone.update(dt, input);
-      if (!this.drone.flying) return;
+      if (!this.drone.flying || this.drone.dying) return;
       if (input.firePressed) this.drone.explode('detonate');
       return;
     }

@@ -121,6 +121,93 @@ html, body {
   font-size: 18px; letter-spacing: 1px; text-transform: uppercase;
 }
 #dronesplit .pane.right b { color: #ff8a5a; }
+#dronesplit.show { opacity: 1; transition: opacity 0.3s linear; }
+#dronesplit.show.leaving { opacity: 0; }
+#dronesplit .static, #dronesplit .scan, #dronesplit .shotlost { display: none; }
+#dronesplit.shotdown .static {
+  display: block;
+  position: absolute; left: 0; top: 0; bottom: 0; width: 50%;
+  pointer-events: none;
+  background:
+    repeating-linear-gradient(
+      0deg,
+      rgba(255, 255, 255, 0.07) 0 1px,
+      transparent 1px 3px
+    ),
+    repeating-linear-gradient(
+      90deg,
+      rgba(255, 80, 40, 0.08) 0 2px,
+      transparent 2px 5px
+    );
+  mix-blend-mode: screen;
+  opacity: 0.42;
+  animation: drone-static 0.08s steps(2) infinite;
+}
+#dronesplit.shotdown .scan {
+  display: block;
+  position: absolute; left: 0; top: 0; bottom: 0; width: 50%;
+  background:
+    linear-gradient(180deg, rgba(255, 40, 20, 0.28), transparent 22%, transparent 78%, rgba(0, 0, 0, 0.45)),
+    repeating-linear-gradient(
+      180deg,
+      transparent 0 3px,
+      rgba(0, 0, 0, 0.18) 3px 4px
+    );
+  animation: drone-scan 0.7s linear infinite;
+  pointer-events: none;
+}
+#dronesplit.shotdown .shotlost {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 8px;
+  position: absolute; left: 0; top: 0; bottom: 0; width: 50%;
+  padding: 0 8%;
+  text-shadow: 0 3px 18px #000, 0 0 22px rgba(255, 40, 20, 0.55);
+}
+#dronesplit.shotdown .shotlost em {
+  font-style: normal;
+  font-size: clamp(28px, 5vw, 54px);
+  font-weight: 800;
+  letter-spacing: 6px;
+  color: #ff3a28;
+  animation: drone-glitch 0.16s steps(2) infinite;
+}
+#dronesplit.shotdown .shotlost small {
+  font-size: 13px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: #ffc8a8;
+  opacity: 0.9;
+}
+#dronesplit.shotdown .pane.left small { color: #ff8a6a; opacity: 1; }
+#dronesplit.shotdown .pane.left b { color: #ff3a28; }
+#dronesplit.shotdown::after {
+  content: '';
+  position: absolute; left: 0; top: 0; bottom: 0; width: 50%;
+  background: rgba(255, 70, 30, 0.22);
+  animation: drone-flash 0.55s ease-out 1;
+  pointer-events: none;
+}
+@keyframes drone-static {
+  0% { transform: translate(0, 0); opacity: 0.38; }
+  100% { transform: translate(-6px, 3px); opacity: 0.5; }
+}
+@keyframes drone-scan {
+  0% { background-position: 0 0, 0 0; }
+  100% { background-position: 0 0, 0 18px; }
+}
+@keyframes drone-glitch {
+  0% { transform: translate(0, 0); filter: none; }
+  50% { transform: translate(2px, -1px); filter: hue-rotate(-15deg); }
+  100% { transform: translate(-2px, 1px); }
+}
+@keyframes drone-flash {
+  0% { opacity: 1; background: rgba(255, 230, 200, 0.7); }
+  35% { opacity: 0.55; background: rgba(255, 50, 20, 0.35); }
+  100% { opacity: 0; }
+}
 #crosshair.drone { left: 25%; }
 #crosshair.drone i, #crosshair.drone b { background: #ffb347; }
 

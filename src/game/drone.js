@@ -38,9 +38,20 @@ export class SuicideDrone {
     scene.add(this.mesh);
     this.opOrbit = 0;
     this.buzzT = 0;
+    this.trailAcc = 0;
+    this.chunks = [];
+    this.chunkMats = [
+      shade(new THREE.MeshStandardMaterial({ color: 0x2a2e32, metalness: 0.55, roughness: 0.42, emissive: 0x5a1c08, emissiveIntensity: 0.55 })),
+      shade(new THREE.MeshStandardMaterial({ color: 0x1c1f22, metalness: 0.65, roughness: 0.32 })),
+    ];
   }
 
   get flying() { return !!this.live; }
+  get dying() { return !!this.live?.dying; }
+  get fadeOut() {
+    const d = this.live;
+    return !!(d?.dying && d.phase === 'hold' && d.dieT > (d.holdUntil - 0.32));
+  }
 
   buildMesh() {
     const g = new THREE.Group();
@@ -59,6 +70,8 @@ export class SuicideDrone {
     const led = new THREE.Mesh(new THREE.SphereGeometry(0.018, 8, 8), accent);
     led.position.set(0, 0.05, -0.1);
     g.add(led);
+    this.ledMat = accent;
+    this.lensMat = lens;
     this.rotors = [];
     const armLen = 0.2;
     for (const [sx, sz] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) {
@@ -91,6 +104,10 @@ export class SuicideDrone {
       yaw: owner.isPlayer ? this.world.player.camYaw : 0,
       pitch: -0.12,
       spin: 0,
+      roll: 0,
+      dying: false,
+      phase: 'fly',
+      dieT: 0,
     };
     this.mesh.visible = true;
     this.mesh.position.copy(pos);
@@ -99,7 +116,7 @@ export class SuicideDrone {
   }
 
   look(dx, dy) {
-    if (!this.live) return;
+    if (!this.live || this.live.dying) return;
     this.live.yaw -= dx;
     this.live.pitch = THREE.MathUtils.clamp(this.live.pitch - dy, -1.15, 0.85);
   }
@@ -116,6 +133,10 @@ export class SuicideDrone {
       return;
     }
     const d = this.live;
+    if (d.dying) {
+      this.updateDying(dt);
+      return;
+    }
     const fwd = this.fwd();
     const right = new THREE.Vector3().crossVectors(fwd, UP).normalize();
     if (right.lengthSq() < 1e-4) right.set(1, 0, 0);
@@ -165,8 +186,19 @@ export class SuicideDrone {
     const d = this.live;
     const look = this.fwd();
     this.cam.position.copy(d.pos).addScaledVector(look, 0.12).setY(d.pos.y - 0.02);
+    if (d.dying) {
+      const kick = 0.045 + Math.min(0.08, d.dieT * 0.04);
+      this.cam.position.x += Math.sin(d.dieT * 53.1) * kick;
+      this.cam.position.y += Math.cos(d.dieT * 41.7) * kick * 0.85;
+      this.cam.position.z += Math.sin(d.dieT * 29.3) * kick * 0.55;
+    }
     this.cam.lookAt(this.cam.position.clone().add(look));
-    this.cam.up.set(0, 1, 0);
+    if (d.dying) {
+      const roll = d.roll || 0;
+      this.cam.up.set(Math.sin(roll), Math.cos(roll), Math.sin(roll * 0.35) * 0.25).normalize();
+    } else {
+      this.cam.up.set(0, 1, 0);
+    }
 
     this.opOrbit += dt * 0.22;
     const owner = d.owner;
@@ -187,7 +219,7 @@ export class SuicideDrone {
   }
 
   raycast(o, d, maxDist) {
-    if (!this.live) return null;
+    if (!this.live || this.live.dying) return null;
     const c = this.live.pos;
     const oc = new THREE.Vector3().subVectors(o, c);
     const b = oc.dot(d);
@@ -200,17 +232,151 @@ export class SuicideDrone {
   }
 
   kill(attacker) {
-    if (!this.live) return;
-    const pos = this.live.pos.clone();
-    this.fx.impact(pos, new THREE.Vector3(0, 1, 0), 'metal', new THREE.Vector3(0, 1, 0));
+    if (!this.live || this.live.dying) return;
+    const d = this.live;
+    const pos = d.pos.clone();
+    const from = attacker?.pos ? pos.clone().sub(attacker.pos) : this.fwd();
+    from.y *= 0.4;
+    if (from.lengthSq() < 1e-4) from.copy(this.fwd());
+    from.normalize();
+    this.fx.droneKill?.(pos, from);
+    this.fx.impact(pos, from.clone().negate(), 'metal', from);
     this.audio.impact?.('metal', pos.distanceTo(this.world.player.camera.position));
-    this.clear();
-    this.fx.explosion(pos, 'ground');
-    this.audio.explosion?.(pos.distanceTo(this.world.player.pos), 0, false);
+    this.audio.droneShotDown?.();
+    d.dying = true;
+    d.phase = 'tumble';
+    d.dieT = 0;
+    d.roll = (Math.random() < 0.5 ? -1 : 1) * 0.35;
+    d.rollVel = (Math.sign(d.roll) || 1) * (5.2 + Math.random() * 2.8);
+    d.pitchVel = -1.8 - Math.random() * 1.4;
+    d.yawVel = (Math.random() - 0.5) * 4.2;
+    d.vel.addScaledVector(from, 7.5).y += 2.4;
+    d.holdUntil = 0;
+    this.trailAcc = 0;
+    this.spawnChunks(pos, from);
+    if (this.ledMat) this.ledMat.emissiveIntensity = 2.4;
+  }
+
+  updateDying(dt) {
+    const d = this.live;
+    d.dieT += dt;
+    this.updateChunks(dt);
+    if (d.phase === 'hold') {
+      this.updateCameras(dt);
+      this.audio.droneHum?.(0);
+      if (d.dieT >= d.holdUntil) this.clear();
+      return;
+    }
+
+    d.vel.y -= 16.5 * dt;
+    const drag = Math.exp(-dt * 0.45);
+    d.vel.x *= drag;
+    d.vel.z *= drag;
+    d.yaw += d.yawVel * dt;
+    d.pitch = THREE.MathUtils.clamp(d.pitch + d.pitchVel * dt, -1.45, 1.15);
+    d.roll += d.rollVel * dt;
+    d.rollVel *= Math.exp(-dt * 0.12);
+    d.spin += dt * Math.max(1.5, 24 - d.dieT * 13);
+
+    const next = d.pos.clone().addScaledVector(d.vel, dt);
+    const ground = this.world.terrain.heightAt(next.x, next.z);
+    const timedOut = d.dieT > 1.65;
+    const out = !this.world.terrain.inBounds(next.x, next.z);
+    if (!out && next.y < ground + 0.16 && d.dieT < 0.45) {
+      next.y = ground + 0.16;
+      d.vel.y = Math.abs(d.vel.y) * 0.4 + 3.1;
+      d.rollVel *= 1.2;
+      d.yawVel += (Math.random() - 0.5) * 3;
+    } else if (out || next.y < ground + 0.16 || timedOut) {
+      if (!out) next.y = Math.max(next.y, ground + 0.1);
+      d.pos.copy(next);
+      this.mesh.position.copy(d.pos);
+      this.crashOut();
+      return;
+    }
+    d.pos.copy(next);
+    this.mesh.position.copy(d.pos);
+    this.mesh.rotation.set(d.pitch + d.dieT * 2.8, d.yaw, d.roll);
+    for (const r of this.rotors) r.rotation.y = d.spin;
+    if (this.ledMat) this.ledMat.emissiveIntensity = Math.random() < 0.42 ? 2.6 : 0.04;
+    if (this.lensMat) this.lensMat.emissiveIntensity = Math.random() < 0.25 ? 1.1 : 0.08;
+
+    this.trailAcc += dt;
+    if (this.trailAcc > 0.028) {
+      this.trailAcc = 0;
+      this.fx.droneTrail?.(d.pos, d.vel);
+    }
+    this.updateCameras(dt);
+  }
+
+  crashOut() {
+    const d = this.live;
+    const pos = d.pos.clone();
+    const underwater = pos.y < 0.15;
+    this.fx.explosion(pos, underwater ? 'water' : 'ground');
+    this.audio.explosion?.(pos.distanceTo(this.world.player.pos), 0, underwater);
+    this.world.weapons?.onExplosion?.(pos, pos.distanceTo(this.world.player.pos));
+    d.phase = 'hold';
+    d.holdUntil = d.dieT + 0.82;
+    d.vel.set(0, 0, 0);
+    this.mesh.visible = false;
+    this.audio.droneHum?.(0);
+    this.updateCameras(0);
+  }
+
+  spawnChunks(pos, incoming) {
+    this.purgeChunks();
+    for (let i = 0; i < 8; i++) {
+      const geo = i < 5
+        ? new THREE.BoxGeometry(0.035 + Math.random() * 0.07, 0.012 + Math.random() * 0.02, 0.03 + Math.random() * 0.055)
+        : new THREE.CylinderGeometry(0.01, 0.014, 0.045 + Math.random() * 0.03, 6);
+      const mesh = new THREE.Mesh(geo, this.chunkMats[i % this.chunkMats.length]);
+      mesh.castShadow = true;
+      mesh.position.copy(pos).add(new THREE.Vector3().randomDirection().multiplyScalar(0.06));
+      const vel = incoming.clone().multiplyScalar(3 + Math.random() * 7)
+        .add(new THREE.Vector3().randomDirection().multiplyScalar(3.5));
+      vel.y = Math.abs(vel.y) + 2.2 + Math.random() * 3;
+      this.scene.add(mesh);
+      this.chunks.push({
+        mesh,
+        vel,
+        spin: new THREE.Vector3().randomDirection().multiplyScalar(9 + Math.random() * 12),
+        life: 1.6 + Math.random() * 0.7,
+        age: 0,
+      });
+    }
+  }
+
+  updateChunks(dt) {
+    for (const c of this.chunks) {
+      c.age += dt;
+      c.vel.y -= 15 * dt;
+      c.mesh.position.addScaledVector(c.vel, dt);
+      c.mesh.rotation.x += c.spin.x * dt;
+      c.mesh.rotation.y += c.spin.y * dt;
+      c.mesh.rotation.z += c.spin.z * dt;
+      const h = this.world.terrain.heightAt(c.mesh.position.x, c.mesh.position.z);
+      if (c.mesh.position.y < h + 0.02) {
+        c.mesh.position.y = h + 0.02;
+        if (c.vel.y < 0) c.vel.y *= -0.28;
+        c.vel.x *= 0.55;
+        c.vel.z *= 0.55;
+        c.spin.multiplyScalar(0.65);
+      }
+      c.mesh.visible = c.age < c.life;
+    }
+  }
+
+  purgeChunks() {
+    for (const c of this.chunks) {
+      c.mesh.removeFromParent();
+      c.mesh.geometry.dispose();
+    }
+    this.chunks = [];
   }
 
   explode(reason = 'detonate') {
-    if (!this.live) return;
+    if (!this.live || this.live.dying) return;
     const pos = this.live.pos.clone();
     const owner = this.live.owner;
     const shotDown = reason === 'shot';
@@ -230,6 +396,11 @@ export class SuicideDrone {
   clear() {
     this.live = null;
     this.mesh.visible = false;
+    this.mesh.rotation.set(0, 0, 0);
+    this.cam.up.set(0, 1, 0);
+    if (this.ledMat) this.ledMat.emissiveIntensity = 0.7;
+    if (this.lensMat) this.lensMat.emissiveIntensity = 0.35;
     this.audio.droneHum?.(0);
+    this.purgeChunks();
   }
 }

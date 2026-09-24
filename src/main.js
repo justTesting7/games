@@ -473,6 +473,7 @@ async function init() {
 
     const alive = player.fighter.alive;
     const flying = weapons.drone.flying;
+    const dying = weapons.drone.dying;
     const state = player.update(dt, alive && !flying ? input : NO_INPUT);
     if (alive && round.state !== 'countdown') weapons.update(dt, input);
     else weapons.tick(player.fighter, dt);
@@ -499,8 +500,8 @@ async function init() {
 
     $('crosshair').classList.toggle('idle', !state.aiming && !flying);
     $('crosshair').classList.toggle('enemy', !!player.aimHit?.fighter);
-    $('crosshair').classList.toggle('hidden', !alive || player.scopeT > 0.35);
-    $('crosshair').classList.toggle('drone', flying);
+    $('crosshair').classList.toggle('hidden', !alive || player.scopeT > 0.35 || dying);
+    $('crosshair').classList.toggle('drone', flying && !dying);
     const scoped = alive && player.scopeT > 0.45;
     $('scope').classList.toggle('show', scoped);
     $('scope').classList.toggle('steady', scoped && player.holdingBreath);
@@ -513,7 +514,8 @@ async function init() {
     const wdef = WEAPONS[L.current];
     $('ammo').textContent = L.current === 'grenade' ? `${L.grenades}`
       : L.current === 'drone' ? `${L.drones}` : `${L.mag[L.current]} / ${L.reserve[L.current]}`;
-    $('weaponname').textContent = flying ? 'space to explode · you are exposed'
+    $('weaponname').textContent = dying ? 'drone shot down — returning'
+      : flying ? 'space to explode · you are exposed'
       : weapons.chargingGrenade ? 'pull back… release to throw'
       : L.reloading ? 'reloading…' : wdef.name;
     $('weapon').classList.toggle('reloading', L.reloading);
@@ -531,6 +533,12 @@ async function init() {
       el.classList.toggle('off', key === 'drone' ? L.drones <= 0 && !flying : !L.has(key));
     });
     $('dronesplit').classList.toggle('show', flying);
+    $('dronesplit').classList.toggle('shotdown', dying);
+    $('dronesplit').classList.toggle('leaving', weapons.drone.fadeOut);
+    const leftHint = document.querySelector('#dronesplit .pane.left b');
+    const leftTag = document.querySelector('#dronesplit .pane.left small');
+    if (leftHint) leftHint.textContent = dying ? 'shot down' : 'wasd fly · f up · space explode';
+    if (leftTag) leftTag.textContent = dying ? 'signal lost' : 'drone';
     const near = weapons.live.some((g) => g.pos.distanceTo(player.pos) < WEAPONS.grenade.radius && g.owner !== player.fighter);
     $('grenadewarn').classList.toggle('show', alive && near);
     if (hitTimer > 0) { hitTimer -= dt; if (hitTimer <= 0) $('hitmarker').classList.remove('show'); }

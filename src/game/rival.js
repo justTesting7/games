@@ -764,7 +764,7 @@ export class Rival {
       out.jump = danger.fuse < 0.6 && Math.random() < 0.3;
     }
     if (this.want === 'grenade' && this.throwAt && this.canFight()) out.aim = true;
-    if (this.world.drone?.flying && this.canFight()) out.aim = true;
+    if (this.world.drone?.flying && !this.world.drone.dying && this.canFight()) out.aim = true;
 
     // Personal space, and a way around whatever is blocking the path.
     for (const f of this.combat.fighters) {
@@ -842,7 +842,7 @@ export class Rival {
     const L = this.fighter.loadout;
     if (this.needFirstCover || !this.canFight() || L.current === 'grenade') return;
     const drone = this.world.drone?.live;
-    if (drone && this.cooldown <= 0 && this.character.aimWeight > 0.7) {
+    if (drone && !drone.dying && this.cooldown <= 0 && this.character.aimWeight > 0.7) {
       const eye = this.pos.clone().setY(this.pos.y + 1.6);
       const to = drone.pos.clone().sub(eye);
       const len = to.length();
