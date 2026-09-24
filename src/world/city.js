@@ -11,6 +11,7 @@ import {
 } from './streets.js';
 import { dressCityFurniture } from './streetFurniture.js';
 import { buildPlaza, updateFountain } from './plaza.js';
+import { scatterLotWreckage, scatterPlazaRing, scatterStreetClutter } from './urbanClutter.js';
 
 /** Horizontal distance (to the tower footprint) inside which real facade modules are shown. */
 const DETAIL_DIST = 60;
@@ -139,24 +140,11 @@ export class City {
     dressSidewalks(this.models, this.group, this.colliders, this.terrain, rand);
     dressCityFurniture(this.models, this.group, this.colliders, this.terrain, rand, place);
     placeRoadblocks(this.models, this.group, this.colliders, this.terrain, rand);
+    scatterStreetClutter(this.models, this.group, this.colliders, this.terrain, rand);
+    scatterLotWreckage(this.models, this.group, this.colliders, this.terrain, layout, rand);
+    scatterPlazaRing(this.models, this.group, this.colliders, this.terrain, rand);
 
-    for (const b of layout.blocks) {
-      if (b.kind !== 4 && b.kind !== 5 && b.kind !== 6) continue;
-      if (Math.hypot(b.cx, b.cz) < 30 || Math.hypot(b.cx, b.cz) > CITY.playRadius - 20) continue;
-      if (rand() > 0.55) {
-        place('modular_chainlink_fence', b.cx + (rand() - 0.5) * 10, b.cz + (rand() - 0.5) * 10, rand() * Math.PI, 1, 2.2);
-      }
-      if (rand() > 0.4) place('covered_car', b.cx + (rand() - 0.5) * 12, b.cz + (rand() - 0.5) * 12, rand() * 6, 0.95, 1.6);
-      if (rand() > 0.35) {
-        const x = b.cx + (rand() - 0.5) * 14, z = b.cz + (rand() - 0.5) * 14;
-        place('wooden_crate_01', x, z, rand() * 6, 1, 1.35);
-        if (rand() > 0.4) place('wooden_crate_01', x + 0.9, z + 0.15, rand() * 6, 1, 2.1);
-      }
-      if (rand() > 0.5) place('barrel_03', b.cx + (rand() - 0.5) * 12, b.cz + (rand() - 0.5) * 12, rand() * 6, 1, 1.25);
-      if (rand() > 0.6) place('old_tyre', b.cx + (rand() - 0.5) * 12, b.cz + (rand() - 0.5) * 12, rand() * 6, 1, 0.85);
-    }
-
-    for (let n = 0; n < 8; n++) {
+    for (let n = 0; n < 22; n++) {
       const x = (rand() - 0.5) * 90, z = (rand() - 0.5) * 90;
       const cell = cityCell(x, z);
       if (cell.onRoad || Math.hypot(x, z) < CITY.plazaRoad) continue;

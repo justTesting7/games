@@ -249,22 +249,14 @@ export function dressSidewalks(models, group, colliders, terrain, rand) {
     if (cell.intersection) return;
     i++;
     const jitter = () => (rand() - 0.5) * 0.5;
-    if (i % 4 === 0) {
+    if (i % 3 === 0) {
       placeStreetProp(models, group, colliders, terrain, 'street_lamp_01', x + jitter(), z + jitter(), yaw, 1, 2.8, 'metal');
     }
-    if (i % 6 === 1 && rand() > 0.4) {
+    if (i % 4 === 1 && rand() > 0.18) {
       placeStreetProp(models, group, colliders, terrain, 'metal_trash_can', x + jitter() * 2, z + jitter() * 2, rand() * 6, 1, 1.15, 'metal');
     }
-    if (i % 11 === 2 && rand() > 0.5) {
+    if (i % 7 === 2 && rand() > 0.28) {
       placeStreetProp(models, group, colliders, terrain, 'fire_hydrant', x + jitter(), z + jitter(), rand() * 6, 1, 0.95, 'metal');
-    }
-    if (i % 8 === 3 && rand() > 0.45) {
-      const inward = dir === 'ns' ? -Math.sign(x) : -Math.sign(z);
-      const px = dir === 'ns' ? x + inward * 2.2 : x + (rand() - 0.5) * 1.2;
-      const pz = dir === 'ew' ? z + inward * 2.2 : z + (rand() - 0.5) * 1.2;
-      if (cityCell(px, pz).onRoad) {
-        placeStreetProp(models, group, colliders, terrain, 'covered_car', px, pz, yaw + Math.PI * 0.5 + (rand() - 0.5) * 0.12, 0.95, 1.6);
-      }
     }
   });
 }
@@ -281,11 +273,11 @@ export function placeRoadblocks(models, group, colliders, terrain, rand) {
   };
   for (let bz = -halfBlocks; bz <= halfBlocks; bz++) {
     for (let bx = -halfBlocks; bx <= halfBlocks; bx++) {
-      if (rand() > 0.22) continue;
+      if (rand() > 0.62) continue;
       const x = (bx + 0.5) * pitch;
       const z = (bz + 0.5) * pitch;
-      if (!inPlay(x, z)) continue;
-      place(x, z, rand() > 0.5 ? 0 : Math.PI * 0.5, 2 + Math.floor(rand() * 3));
+      if (!inPlay(x, z) || Math.hypot(x, z) < CITY.plazaRoad + 4) continue;
+      place(x, z, rand() > 0.5 ? 0 : Math.PI * 0.5, 3 + Math.floor(rand() * 4));
     }
   }
 }
