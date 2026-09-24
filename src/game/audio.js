@@ -365,6 +365,42 @@ export class Audio {
     this.noiseBurst({ freq: 300, q: 0.7, type: 'lowpass', gain: 0.25 + speed * 0.03, attack: 0.003, release: 0.14 });
   }
 
+  droneStart() {
+    if (!this.ctx) return;
+    this.noiseBurst({ freq: 900, q: 0.8, type: 'bandpass', gain: 0.22, attack: 0.02, release: 0.18 });
+    this.tone(180, 0.12, 0.08, 'square');
+  }
+
+  droneHum(gain) {
+    if (!this.ctx) return;
+    if (!this.droneBuzz) {
+      const ctx = this.ctx;
+      const src = ctx.createBufferSource();
+      src.buffer = this.noise;
+      src.loop = true;
+      const f = ctx.createBiquadFilter();
+      f.type = 'bandpass';
+      f.frequency.value = 420;
+      f.Q.value = 1.4;
+      const g = ctx.createGain();
+      g.gain.value = 0;
+      const o = ctx.createOscillator();
+      o.type = 'sawtooth';
+      o.frequency.value = 92;
+      const og = ctx.createGain();
+      og.gain.value = 0;
+      src.connect(f).connect(g).connect(this.master);
+      o.connect(og).connect(this.master);
+      src.start();
+      o.start();
+      this.droneBuzz = { g, f, og, o };
+    }
+    const t = this.ctx.currentTime;
+    this.droneBuzz.g.gain.setTargetAtTime(gain * 0.16, t, 0.08);
+    this.droneBuzz.og.gain.setTargetAtTime(gain * 0.04, t, 0.08);
+    this.droneBuzz.f.frequency.setTargetAtTime(360 + gain * 220, t, 0.12);
+  }
+
   startAmbience() {
     const ctx = this.ctx;
     const loop = (freq, type, q) => {

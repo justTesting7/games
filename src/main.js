@@ -78,6 +78,8 @@ world.raycast = (o, d, maxDist, ignore) => {
   if (c && (!best || c.t < best.t)) best = { t: c.t, normal: c.normal, surface: c.surface || c.collider.type, collider: c.collider };
   const pr = world.props.raycast(o, d, best ? best.t : maxDist);
   if (pr && (!best || pr.t < best.t)) best = pr;
+  const dr = world.drone?.raycast(o, d, best ? best.t : maxDist);
+  if (dr && (!best || dr.t < best.t)) best = dr;
   const fh = world.combat.raycast(o, d, best ? best.t : maxDist, ignore);
   if (fh) best = fh;
   return best;
@@ -87,7 +89,7 @@ world.combat = combat;
 const jev = new Jev();
 
 const NO_INPUT = { forward: false, back: false, left: false, right: false, sprint: false, jump: false, aim: false, fire: false, toggleWalk: false, crouch: false };
-const input = { forward: false, back: false, left: false, right: false, sprint: false, jump: false, aim: false, fire: false, toggleWalk: false, crouch: false, fastTime: false };
+const input = { forward: false, back: false, left: false, right: false, sprint: false, jump: false, climb: false, aim: false, fire: false, toggleWalk: false, crouch: false, fastTime: false };
 const keymap = { KeyW: 'forward', ArrowUp: 'forward', KeyS: 'back', ArrowDown: 'back', KeyA: 'left', ArrowLeft: 'left', KeyD: 'right', ArrowRight: 'right', ShiftLeft: 'sprint', ShiftRight: 'sprint', ControlLeft: 'crouch', ControlRight: 'crouch', KeyT: 'fastTime' };
 addEventListener('keydown', (e) => {
   if (keymap[e.code]) input[keymap[e.code]] = true;
@@ -98,18 +100,19 @@ addEventListener('keydown', (e) => {
       if (!e.repeat) input.firePressed = true;
     }
   }
-  if (e.code === 'KeyF' && !e.repeat) input.jump = true;
+  if (e.code === 'KeyF') { input.climb = true; if (!e.repeat) input.jump = true; }
   if (e.code === 'KeyC' && !e.repeat) input.toggleCrouch = true;
   if (e.code === 'KeyV' && !e.repeat) input.toggleWalk = true;
   if (e.code === 'KeyR' && !e.repeat) input.reload = true;
   if (e.code === 'Enter' && !e.repeat) input.restart = true;
-  if (/^Digit[1-3]$/.test(e.code)) input.slot = Number(e.code.slice(5));
+  if (/^Digit[1-4]$/.test(e.code)) input.slot = Number(e.code.slice(5));
   if (e.code === 'KeyQ' && !e.repeat) input.cycle = 1;
   if (e.code === 'F3') { $('debug').classList.toggle('hidden'); e.preventDefault(); }
 });
 addEventListener('keyup', (e) => {
   if (keymap[e.code]) input[keymap[e.code]] = false;
   if (e.code === 'Space') { input.fire = false; input.fireReleased = true; }
+  if (e.code === 'KeyF') { input.jump = false; input.climb = false; }
 });
 canvas.addEventListener('mousedown', (e) => {
   if (document.pointerLockElement !== canvas) return;
@@ -293,6 +296,7 @@ async function init() {
     weapons.sniperHeld = false;
     weapons.sniperWasScoped = false;
     player.sniperPending = false;
+    weapons.drone.clear();
     fx.decals.clear();
     spawnRivals();
     $('feed').innerHTML = '';
@@ -338,6 +342,7 @@ async function init() {
     const by = attacker === victim ? '' : attacker ? tagName(attacker) : '';
     feed(`${by} <span class="gun">▸ ${how} ▸</span> ${tagName(victim)}`);
     if (victim === player.fighter) {
+      weapons.drone.clear();
       hurt = 1;
       audio.hurt(true);
       if (attacker) pointDamage(attacker);
@@ -433,8 +438,10 @@ async function init() {
   });
   addEventListener('mousemove', (e) => {
     if (document.pointerLockElement !== canvas) return;
-    const sens = Number($('sens').value) * 0.00022 * (player.scoped ? 0.16 : player.camDist < 2 ? 0.7 : 1);
-    player.look(e.movementX * sens, e.movementY * sens);
+    const flying = weapons.drone.flying;
+    const sens = Number($('sens').value) * 0.00022 * (flying ? 0.85 : player.scoped ? 0.16 : player.camDist < 2 ? 0.7 : 1);
+    if (flying) weapons.drone.look(e.movementX * sens, e.movementY * sens);
+    else player.look(e.movementX * sens, e.movementY * sens);
   });
 
   let last = performance.now();
@@ -465,12 +472,13 @@ async function init() {
     }
 
     const alive = player.fighter.alive;
-    const state = player.update(dt, alive ? input : NO_INPUT);
+    const flying = weapons.drone.flying;
+    const state = player.update(dt, alive && !flying ? input : NO_INPUT);
+    if (alive && round.state !== 'countdown') weapons.update(dt, input);
+    else weapons.tick(player.fighter, dt);
     input.jump = false;
     input.toggleWalk = false;
     input.toggleCrouch = false;
-    if (alive && round.state !== 'countdown') weapons.update(dt, input);
-    else weapons.tick(player.fighter, dt);
     input.slot = 0;
     input.cycle = 0;
     input.reload = false;
@@ -489,9 +497,10 @@ async function init() {
     const coast = THREE.MathUtils.clamp(1 - (terrain.heightAt(player.pos.x, player.pos.z) - 1) / 25, 0, 1);
     audio.updateAmbience(dt, { altitude: player.pos.y, coast, underwater: player.underwater });
 
-    $('crosshair').classList.toggle('idle', !state.aiming);
+    $('crosshair').classList.toggle('idle', !state.aiming && !flying);
     $('crosshair').classList.toggle('enemy', !!player.aimHit?.fighter);
     $('crosshair').classList.toggle('hidden', !alive || player.scopeT > 0.35);
+    $('crosshair').classList.toggle('drone', flying);
     const scoped = alive && player.scopeT > 0.45;
     $('scope').classList.toggle('show', scoped);
     $('scope').classList.toggle('steady', scoped && player.holdingBreath);
@@ -502,11 +511,13 @@ async function init() {
     }
     const L = player.fighter.loadout;
     const wdef = WEAPONS[L.current];
-    $('ammo').textContent = L.current === 'grenade' ? `${L.grenades}` : `${L.mag[L.current]} / ${L.reserve[L.current]}`;
-    $('weaponname').textContent = weapons.chargingGrenade ? 'pull back… release to throw'
+    $('ammo').textContent = L.current === 'grenade' ? `${L.grenades}`
+      : L.current === 'drone' ? `${L.drones}` : `${L.mag[L.current]} / ${L.reserve[L.current]}`;
+    $('weaponname').textContent = flying ? 'space to explode · you are exposed'
+      : weapons.chargingGrenade ? 'pull back… release to throw'
       : L.reloading ? 'reloading…' : wdef.name;
     $('weapon').classList.toggle('reloading', L.reloading);
-    $('weapon').classList.toggle('empty', L.current !== 'grenade' && L.mag[L.current] === 0);
+    $('weapon').classList.toggle('empty', L.current !== 'grenade' && L.current !== 'drone' && L.mag[L.current] === 0);
     const gch = $('grenadecharge');
     const charging = alive && L.current === 'grenade' && weapons.chargingGrenade;
     gch.classList.toggle('show', charging);
@@ -515,10 +526,11 @@ async function init() {
     if (gbar) gbar.style.setProperty('--pct', charging ? `${(weapons.grenadeCharge * 100).toFixed(0)}%` : '0%');
     $('crosshair').classList.toggle('grenade', charging);
     document.querySelectorAll('#slots b').forEach((el, i) => {
-      const key = ['pistols', 'rifle', 'grenade'][i];
+      const key = ['pistols', 'rifle', 'grenade', 'drone'][i];
       el.classList.toggle('on', key === L.current);
-      el.classList.toggle('off', !L.has(key));
+      el.classList.toggle('off', key === 'drone' ? L.drones <= 0 && !flying : !L.has(key));
     });
+    $('dronesplit').classList.toggle('show', flying);
     const near = weapons.live.some((g) => g.pos.distanceTo(player.pos) < WEAPONS.grenade.radius && g.owner !== player.fighter);
     $('grenadewarn').classList.toggle('show', alive && near);
     if (hitTimer > 0) { hitTimer -= dt; if (hitTimer <= 0) $('hitmarker').classList.remove('show'); }
@@ -535,7 +547,13 @@ async function init() {
     updateTags(dt);
 
     renderer.info.reset();
-    pipeline.render(camera, dt, { underwater: player.underwater, shadowCenter: player.pos });
+    if (flying) {
+      weapons.drone.setAspect(innerWidth, innerHeight);
+      if (character.root) character.root.visible = true;
+      pipeline.renderSplit(weapons.drone.cam, weapons.drone.opCam, dt, { underwater: false, shadowCenter: player.pos });
+    } else {
+      pipeline.render(camera, dt, { underwater: player.underwater, shadowCenter: player.pos });
+    }
 
     frames++;
     fpsT += dt;

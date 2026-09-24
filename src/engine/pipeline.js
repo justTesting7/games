@@ -312,7 +312,7 @@ export class Pipeline {
     this.sun.updateMatrixWorld();
   }
 
-  render(camera, dt, opts) {
+  render(camera, dt, opts = {}) {
     const r = this.renderer;
     const W = this.size.x, H = this.size.y;
     this.frame++;
@@ -411,6 +411,26 @@ export class Pipeline {
     cu.uFlash.value = opts.flash || 0;
     const amb = new THREE.Vector3(0.02, 0.1, 0.13).multiplyScalar(0.4 + this.lightColor.y * 0.08 + (1 - this.night) * 0.4);
     cu.uWaterAmbient.value.copy(amb);
+    const splitVp = opts.outViewport;
+    if (splitVp) {
+      r.setViewport(splitVp[0], splitVp[1], splitVp[2], splitVp[3]);
+      r.setScissor(splitVp[0], splitVp[1], splitVp[2], splitVp[3]);
+      r.setScissorTest(true);
+    }
     this.quad.render(r, this.compositeMaterial, null);
+    if (splitVp) {
+      r.setViewport(0, 0, r.domElement.clientWidth, r.domElement.clientHeight);
+      r.setScissorTest(false);
+    }
+  }
+
+  renderSplit(leftCam, rightCam, dt, opts = {}) {
+    const w = this.renderer.domElement.clientWidth;
+    const h = this.renderer.domElement.clientHeight;
+    const hw = Math.max(1, Math.floor(w / 2));
+    this.render(leftCam, dt, { ...opts, outViewport: [0, 0, hw, h] });
+    this.render(rightCam, 0, { ...opts, outViewport: [hw, 0, w - hw, h] });
+    this.renderer.setViewport(0, 0, w, h);
+    this.renderer.setScissorTest(false);
   }
 }

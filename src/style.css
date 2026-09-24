@@ -99,6 +99,31 @@ html, body {
 #weapon.reloading #weaponname { color: #f3dcb0; }
 #weapon.empty #ammo { color: #ff6a55; }
 
+#dronesplit {
+  position: absolute; inset: 0; display: none; pointer-events: none;
+}
+#dronesplit.show { display: block; }
+#dronesplit::before {
+  content: ''; position: absolute; left: 50%; top: 0; bottom: 0; width: 2px;
+  background: rgba(255, 180, 80, 0.7); box-shadow: 0 0 12px rgba(255, 120, 40, 0.5);
+}
+#dronesplit .pane {
+  position: absolute; top: 18%; width: 50%;
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 0 28px; text-shadow: 0 2px 8px #000;
+}
+#dronesplit .pane.left { left: 0; align-items: flex-start; }
+#dronesplit .pane.right { right: 0; align-items: flex-end; }
+#dronesplit .pane small {
+  font-size: 11px; letter-spacing: 3px; text-transform: uppercase; opacity: 0.7;
+}
+#dronesplit .pane b {
+  font-size: 18px; letter-spacing: 1px; text-transform: uppercase;
+}
+#dronesplit .pane.right b { color: #ff8a5a; }
+#crosshair.drone { left: 25%; }
+#crosshair.drone i, #crosshair.drone b { background: #ffb347; }
+
 #scope {
   position: absolute; inset: 0; opacity: 0; transition: opacity 0.1s;
   pointer-events: none;
