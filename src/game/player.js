@@ -270,15 +270,28 @@ export class Player {
     return out;
   }
 
-  // Finds what the crosshair points at, so bullets land where it shows.
+  // The on-screen crosshair is the camera look. Hip-fire aim must use that
+  // ray — a body-center ray sits ~0.5 m left of the shoulder camera, so the
+  // reticle went red while the pistols still missed to the left.
   updateAim() {
-    const o = this.losOrigin();
     const d = this.lookDir();
-    const start = o.clone().addScaledVector(d, 0.2);
-    const reach = this.scopeT > 0.4 ? 900 : 600;
+    const through = this.scopeT > 0.4;
+    const start = new THREE.Vector3();
+    if (through) this.losOrigin(start).addScaledVector(d, 0.2);
+    else start.copy(this.camera.position).addScaledVector(d, Math.max(0.35, this.smoothDist ?? this.camDist));
+    const reach = through ? 900 : 600;
     const hit = this.world.raycast(start, d, reach, this.fighter);
     if (hit) { this.aimPoint.copy(start).addScaledVector(d, hit.t); this.aimHit = hit; }
     else { this.aimPoint.copy(start).addScaledVector(d, reach); this.aimHit = null; }
+    if (!this.aimHit?.fighter || through) return;
+    const from = this.losOrigin();
+    const to = this.aimPoint.clone().sub(from);
+    const len = to.length();
+    if (len <= 0.25) return;
+    to.multiplyScalar(1 / len);
+    from.addScaledVector(to, 0.2);
+    const block = this.world.raycast(from, to, len - 0.2, this.fighter);
+    if (block && block.fighter !== this.aimHit.fighter) this.aimHit = null;
   }
 
   get underwater() { return this.camera.position.y < 0.05; }

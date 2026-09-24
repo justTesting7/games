@@ -29,3 +29,22 @@ console.log('clock catch-up ok', {
   hiddenSum: sum(hidden),
   capSteps: cap.length,
 });
+
+globalThis.document = {
+  visibilityState: 'hidden',
+  addEventListener() {},
+};
+globalThis.requestAnimationFrame = () => 0;
+
+const { startClock } = await import('../src/engine/clock.js');
+let sim = 0;
+let draws = 0;
+const clock = startClock((dt, draw) => {
+  sim += dt;
+  if (draw) draws++;
+});
+await new Promise((r) => setTimeout(r, 280));
+clock.stop();
+if (sim < 0.18) throw new Error(`hidden clock only advanced ${sim.toFixed(3)}s`);
+if (draws !== 0) throw new Error(`hidden tab should not render, drew ${draws}`);
+console.log('hidden worker/timer clock ok', { sim: +sim.toFixed(3), draws });
