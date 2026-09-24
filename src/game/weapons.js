@@ -76,6 +76,7 @@ export class Weapons {
     this.grenadeCharge = 0;
     this.chargingGrenade = false;
     this.pendingThrow = 0;
+    this.session = null;
     this.pendingCharge = 0;
     this.previewVel = new THREE.Vector3();
     this.drone = new SuicideDrone(world, fx, audio, combat, fx.pipeline.scene);
@@ -296,6 +297,11 @@ export class Weapons {
       hit.drone.kill(shooter);
       return hit;
     }
+    if (hit.fighter?.net) {
+      if (shooter.isPlayer) this.session?.reportShot(from, dir, def.key, hit.fighter.id, hit.head);
+      return hit;
+    }
+    if (shooter.isPlayer && this.session?.multi) this.session.reportShot(from, dir, def.key);
     if (hit.fighter) this.combat.damage(hit.fighter, shooter, hit.head ? def.head : def.body, dir, { head: hit.head, weapon: def.key });
     else if (hit.body || hit.target) hit.scored = this.world.props.hit(hit, end, dir, def.force);
     return hit;
@@ -372,7 +378,7 @@ export class Weapons {
 
   // --- Grenades --------------------------------------------------------------
 
-  throwGrenade(owner, pos, vel) {
+  throwGrenade(owner, pos, vel, opts = {}) {
     const mesh = this.template.clone(true);
     mesh.matrixAutoUpdate = false;
     this.fx.pipeline.scene.add(mesh);
@@ -383,6 +389,7 @@ export class Weapons {
       fuse: WEAPONS.grenade.fuse, water: false, bounces: 0,
     };
     this.live.push(g);
+    if (!opts.silent && owner.isPlayer) this.session?.reportNade(pos, vel);
   }
 
   // Launch velocity that lands a grenade on `to`: the low arc, or the high

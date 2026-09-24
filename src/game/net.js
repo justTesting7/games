@@ -5,36 +5,42 @@ export class Net {
     this.ws = null;
     this.status = 'off';
     this.error = '';
-    this.room = 'lobby';
+    this.room = new URLSearchParams(location.search).get('room') || 'lobby';
     this.id = '';
-    this.peers = 0;
+    this.slot = 0;
+    this.inbox = [];
+    this.identity = null;
   }
 
   get enabled() {
     return !/^(localhost|127\.0\.0\.1)$/.test(location.hostname) || location.port === '8787';
   }
 
-  connect(room = 'lobby') {
+  get peers() {
+    return 0;
+  }
+
+  connect(identity) {
     if (!this.enabled) return;
-    this.room = room;
+    this.identity = identity || this.identity;
     if (this.ws) {
       this.ws.onclose = null;
       this.ws.close();
     }
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    const url = `${proto}://${location.host}/ws?room=${encodeURIComponent(room)}`;
+    const url = `${proto}://${location.host}/ws?room=${encodeURIComponent(this.room)}`;
     this.status = 'connecting';
     this.error = '';
     try {
       this.ws = new WebSocket(url);
-    } catch (e) {
+    } catch {
       this.status = 'error';
       this.error = 'open';
       return;
     }
     this.ws.onopen = () => {
       this.status = 'online';
-      this.ws.send(JSON.stringify({ t: 'hello', name: 'You' }));
+      if (this.identity) this.send({ t: 'hello', ...this.identity });
     };
     this.ws.onclose = () => {
       this.status = 'off';
@@ -49,11 +55,16 @@ export class Net {
       try { msg = JSON.parse(e.data); } catch { return; }
       if (msg.t === 'hello' && msg.id) {
         this.id = msg.id;
-        this.peers = Array.isArray(msg.peers) ? msg.peers.length : 0;
+        this.slot = msg.slot || 0;
       }
-      if (msg.t === 'join') this.peers += 1;
-      if (msg.t === 'leave') this.peers = Math.max(0, this.peers - 1);
+      this.inbox.push(msg);
     };
+  }
+
+  take() {
+    const q = this.inbox;
+    this.inbox = [];
+    return q;
   }
 
   send(msg) {

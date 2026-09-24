@@ -387,7 +387,7 @@ export class SuicideDrone {
     this.audio.explosion?.(dist, 0, underwater);
     if (!shotDown) {
       const r = underwater ? DRONE.radius * 0.5 : DRONE.radius;
-      this.combat.explode(this.world, pos, r, DRONE.damage, owner);
+      this.combat.explode(this.world, pos, r, DRONE.damage, owner, { weapon: 'drone' });
       this.world.props.blast?.(pos, r, 11);
     }
     this.world.weapons?.onExplosion?.(pos, dist);

@@ -35,6 +35,8 @@ npx wrangler secret put JEV_API_KEY   # optional; rivals work without it
 
 Live: https://relic-isle.noam-berman7.workers.dev
 
+Share that URL (or add `?room=yourcode`) and click Fight. Two or more humans in the same room play last-one-standing against each other; bots drop out. Alone on that host, or on Vite, you still fight the AI.
+
 ## Controls
 
 | Input | Action |

@@ -19,6 +19,7 @@ import { setupRosterMenu } from './game/rosterMenu.js';
 import { createRosterAvatarStudio } from './game/rosterAvatarStudio.js';
 import { Jev } from './game/jev.js';
 import { Net } from './game/net.js';
+import { Session } from './game/session.js';
 
 const $ = (id) => document.getElementById(id);
 const canvas = $('game');
@@ -89,7 +90,6 @@ const combat = new Combat();
 world.combat = combat;
 const jev = new Jev();
 const net = new Net();
-net.connect();
 
 const NO_INPUT = { forward: false, back: false, left: false, right: false, sprint: false, jump: false, aim: false, fire: false, toggleWalk: false, crouch: false };
 const input = { forward: false, back: false, left: false, right: false, sprint: false, jump: false, climb: false, aim: false, fire: false, toggleWalk: false, crouch: false, fastTime: false };
@@ -214,7 +214,7 @@ async function init() {
   character.addTo(pipeline.scene);
 
   const player = new Player(world, character, camera);
-  player.fighter = combat.add({ id: 'player', name: 'You', character, pos: player.pos, isPlayer: true, color: fighters[0].color });
+  player.fighter = combat.add({ id: 'player', name: fighters[0].name, character, pos: player.pos, isPlayer: true, color: fighters[0].color });
   player.spawn(spawn.x, spawn.z, facing);
   const fx = new Effects(pipeline, terrain, audio);
   const weapons = new Weapons(world, player, character, fx, audio, combat);
@@ -229,7 +229,18 @@ async function init() {
     ch.addTo(pipeline.scene);
     return new Rival(world, combat, weapons, jev, persona(entry), ch);
   });
-  window.__game = { world, pipeline, camera, input, rivals, combat, jev, net };
+  const you = byId(selection.player);
+  const session = new Session({
+    net, world, combat, weapons, player, rivals, charAssets,
+    scene: pipeline.scene, spawn, facing, mapId: mapDef.id,
+    onRoster: () => rebuildTags(),
+    onRound: (msg) => applyNetRound(msg),
+    onJoinedHuman: () => {
+      if (round.state === 'fight' || round.state === 'countdown' || round.state === 'over') startRound();
+    },
+  });
+  session.connect({ name: you.name, color: you.color, roster: you.id });
+  window.__game = { world, pipeline, camera, input, rivals, combat, jev, net, session };
 
   const rosterChars = new Map([[fighters[0].id, character]]);
   fighters.slice(1).forEach((e, i) => rosterChars.set(e.id, rivals[i].character));
@@ -283,11 +294,7 @@ async function init() {
     $('bannertitle').textContent = title;
     $('bannersub').textContent = sub;
   };
-  const startRound = () => {
-    if (!player.fighter.alive) {
-      player.spawn(spawn.x, spawn.z, facing);
-      player.vel.set(0, 0, 0);
-    }
+  const resetLocalKit = () => {
     combat.reset(player.fighter);
     player.fighter.loadout.reset();
     character.setWeapon('pistols');
@@ -301,10 +308,50 @@ async function init() {
     player.sniperPending = false;
     weapons.drone.clear();
     fx.decals.clear();
-    spawnRivals();
+  };
+
+  const startRound = () => {
+    resetLocalKit();
     $('feed').innerHTML = '';
+    if (session.multi) {
+      session.placeLocal();
+      session.ready();
+      banner('Waiting', 'The room is lining up. Last human standing wins.', 'show countdown');
+      round.state = 'waiting';
+      return;
+    }
+    if (!player.fighter.alive) {
+      player.spawn(spawn.x, spawn.z, facing);
+      player.vel.set(0, 0, 0);
+    }
+    spawnRivals();
     round.state = 'countdown';
     round.t = 3;
+    round.ends = 0;
+  };
+
+  const applyNetRound = (msg) => {
+    if (msg.state === 'countdown') {
+      resetLocalKit();
+      const slot = msg.slots?.[net.id] ?? session.slot;
+      session.placeLocal(slot);
+      round.state = 'countdown';
+      round.ends = msg.ends || (Date.now() + 3000);
+      round.t = Math.max(0, (round.ends - Date.now()) / 1000);
+    } else if (msg.state === 'fight') {
+      round.state = 'fight';
+      banner('', '', '');
+    } else if (msg.state === 'over') {
+      round.state = 'over';
+      const won = msg.winner === net.id;
+      banner(
+        won ? 'Victory' : 'Eliminated',
+        won ? 'You outlasted the other players. Press R to fight again.' : 'Press R when you are ready for another round.',
+        won ? 'show won' : 'show lost',
+      );
+    } else if (msg.state === 'waiting') {
+      round.state = 'waiting';
+    }
   };
 
   const feed = (html) => {
@@ -349,10 +396,12 @@ async function init() {
       hurt = 1;
       audio.hurt(true);
       if (attacker) pointDamage(attacker);
-      round.state = 'over';
-      const who = attacker === victim ? 'Your own grenade' : attacker ? attacker.name : 'A rival';
-      banner('Eliminated', `${who} got you. Press R to fight again.`, 'show lost');
-    } else if (rivals.every((r) => !r.fighter.alive) && player.fighter.alive) {
+      if (!session.multi) {
+        round.state = 'over';
+        const who = attacker === victim ? 'Your own grenade' : attacker ? attacker.name : 'A rival';
+        banner('Eliminated', `${who} got you. Press R to fight again.`, 'show lost');
+      }
+    } else if (!session.multi && rivals.every((r) => !r.fighter.alive) && player.fighter.alive) {
       round.state = 'over';
       banner('Victory', `You outlasted ${rivals.length > 1 ? `all ${rivals.length} rivals` : 'your rival'}. Press R to fight again.`, 'show won');
     }
@@ -363,14 +412,22 @@ async function init() {
     if (dist < 4 && player.fighter.alive) hurt = Math.max(hurt, 0.4);
   };
 
-  const tags = rivals.map((r) => {
-    const el = document.createElement('div');
-    el.className = 'tag';
-    el.innerHTML = `<b style="color:${r.persona.color}">${r.persona.name}</b><div class="hp"><i></i></div><small></small>`;
-    $('tags').appendChild(el);
-    return { r, el, bar: el.querySelector('i'), info: el.querySelector('small'), seen: 0, losT: 0 };
-  });
+  let tags = [];
   const tagPos = new THREE.Vector3();
+  const rebuildTags = () => {
+    $('tags').innerHTML = '';
+    const sources = session.multi ? [...session.remotes.values()] : rivals;
+    tags = sources.map((r) => {
+      const el = document.createElement('div');
+      el.className = 'tag';
+      const name = r.persona?.name || r.fighter.name;
+      const color = r.persona?.color || r.fighter.color;
+      el.innerHTML = `<b style="color:${color}">${name}</b><div class="hp"><i></i></div><small></small>`;
+      $('tags').appendChild(el);
+      return { r, el, bar: el.querySelector('i'), info: el.querySelector('small'), seen: 0, losT: 0 };
+    });
+  };
+  rebuildTags();
   const updateTags = (dt) => {
     for (const t of tags) {
       const f = t.r.fighter;
@@ -390,8 +447,11 @@ async function init() {
       t.el.style.opacity = (f.alive ? 1 : 0.55) * t.seen;
       t.el.style.transform = `translate(${((tagPos.x + 1) / 2) * innerWidth}px, ${((1 - tagPos.y) / 2) * innerHeight}px) translate(-50%, -100%)`;
       t.bar.style.width = `${(f.health / MAX_HEALTH) * 100}%`;
-      t.info.textContent = !f.alive ? 'eliminated'
-        : `${WEAPONS[f.loadout.current].short} · ${t.r.label}${t.r.target ? ` → ${t.r.target.isPlayer ? 'you' : t.r.target.name}` : ''} · ${t.r.source === 'jev' ? `Jev ${Math.round(t.r.confidence * 100)}%` : 'local AI'}`;
+      if (!f.alive) t.info.textContent = 'eliminated';
+      else if (session.multi) t.info.textContent = `${WEAPONS[f.loadout.current]?.short || ''} · human`;
+      else {
+        t.info.textContent = `${WEAPONS[f.loadout.current].short} · ${t.r.label}${t.r.target ? ` → ${t.r.target.isPlayer ? 'you' : t.r.target.name}` : ''} · ${t.r.source === 'jev' ? `Jev ${Math.round(t.r.confidence * 100)}%` : 'local AI'}`;
+      }
     }
   };
 
@@ -469,8 +529,12 @@ async function init() {
     }
     input.restart = false;
     if (round.state === 'countdown') {
-      round.t -= dt;
-      banner(round.t > 0 ? `${Math.ceil(round.t)}` : 'Fight', `${rivals.length > 1 ? `${rivals.length} rivals are` : '1 rival is'} closing in. Last one standing wins.`, 'show countdown');
+      if (round.ends) round.t = (round.ends - Date.now()) / 1000;
+      else round.t -= dt;
+      const crowd = session.multi
+        ? `${session.peerCount + 1} players. Last one standing wins.`
+        : `${rivals.length > 1 ? `${rivals.length} rivals are` : '1 rival is'} closing in. Last one standing wins.`;
+      banner(round.t > 0 ? `${Math.ceil(round.t)}` : 'Fight', crowd, 'show countdown');
       if (round.t <= -0.6) { round.state = 'fight'; banner('', '', ''); }
     }
 
@@ -490,7 +554,8 @@ async function init() {
     input.firePressed = false;
     input.fireReleased = false;
     const active = locked && (round.state === 'fight' || round.state === 'over');
-    rivals.forEach((r) => r.update(dt, active));
+    session.update(dt);
+    if (!session.multi) rivals.forEach((r) => r.update(dt, active));
     combat.update(dt);
     props.update(dt);
     fx.update(dt);
@@ -549,7 +614,9 @@ async function init() {
     $('hpbar').style.width = `${(hp / MAX_HEALTH) * 100}%`;
     $('hpbar').classList.toggle('low', hp <= 35);
     $('hpnum').textContent = Math.ceil(hp);
-    $('rivalsleft').textContent = rivals.filter((r) => r.fighter.alive).length;
+    $('rivalsleft').textContent = session.multi
+      ? Math.max(0, session.humansAlive() - (player.fighter.alive ? 1 : 0))
+      : rivals.filter((r) => r.fighter.alive).length;
     hurt = Math.max(0, hurt - dt * 1.6);
     $('damage').style.opacity = Math.max(hurt, alive ? Math.max(0, (45 - hp) / 45) * 0.45 : 0.7);
     const js = jev.stats;
@@ -558,7 +625,7 @@ async function init() {
     const ns = $('netstat');
     if (ns) {
       ns.textContent = !net.enabled ? 'net · local'
-        : net.status === 'online' ? `net · ${net.peers} other`
+        : net.status === 'online' ? `net · ${session.peerCount} other`
         : net.status === 'connecting' ? 'net · connecting'
         : net.status === 'error' ? `net · ${net.error || 'error'}`
         : 'net · offline';

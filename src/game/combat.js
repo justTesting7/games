@@ -109,7 +109,9 @@ export class Combat {
   }
 
   // Blast damage falls off with distance and is mostly stopped by cover.
-  explode(world, pos, radius, maxDamage, attacker) {
+  explode(world, pos, radius, maxDamage, attacker, opts = {}) {
+    const skipNet = opts.skipNet ?? !!world.weapons?.session?.multi;
+    const netHits = [];
     for (const f of this.fighters) {
       if (!f.alive) continue;
       const c = this.chest(f);
@@ -123,9 +125,14 @@ export class Combat {
       dir.divideScalar(len || 1);
       const hit = world.raycast(from, dir, len, null);
       const covered = hit && !hit.fighter && hit.t < len - 0.3;
-      const k = Math.pow(1 - d / radius, 1.4);
-      this.damage(f, attacker, Math.round(maxDamage * k * (covered ? 0.25 : 1)), to, { weapon: 'grenade' });
+      const k = Math.pow(1 - d / radius, 1.4) * (covered ? 0.25 : 1);
+      if (skipNet && f.net) {
+        if (attacker?.isPlayer) netHits.push({ id: f.id, k, dir: [to.x, to.y, to.z], w: opts.weapon || 'grenade' });
+        continue;
+      }
+      this.damage(f, attacker, Math.round(maxDamage * k), to, { weapon: opts.weapon || 'grenade' });
     }
+    if (netHits.length) world.weapons?.session?.reportBlast(netHits, opts.weapon || 'grenade');
   }
 
   // Whether `f` is currently pointing its guns at `other`.
