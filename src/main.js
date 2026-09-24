@@ -18,6 +18,7 @@ import { byId, loadSelection, persona, resolveLooks } from './game/roster.js';
 import { setupRosterMenu } from './game/rosterMenu.js';
 import { createRosterAvatarStudio } from './game/rosterAvatarStudio.js';
 import { Jev } from './game/jev.js';
+import { Net } from './game/net.js';
 
 const $ = (id) => document.getElementById(id);
 const canvas = $('game');
@@ -87,6 +88,8 @@ world.raycast = (o, d, maxDist, ignore) => {
 const combat = new Combat();
 world.combat = combat;
 const jev = new Jev();
+const net = new Net();
+net.connect();
 
 const NO_INPUT = { forward: false, back: false, left: false, right: false, sprint: false, jump: false, aim: false, fire: false, toggleWalk: false, crouch: false };
 const input = { forward: false, back: false, left: false, right: false, sprint: false, jump: false, climb: false, aim: false, fire: false, toggleWalk: false, crouch: false, fastTime: false };
@@ -226,7 +229,7 @@ async function init() {
     ch.addTo(pipeline.scene);
     return new Rival(world, combat, weapons, jev, persona(entry), ch);
   });
-  window.__game = { world, pipeline, camera, input, rivals, combat, jev };
+  window.__game = { world, pipeline, camera, input, rivals, combat, jev, net };
 
   const rosterChars = new Map([[fighters[0].id, character]]);
   fighters.slice(1).forEach((e, i) => rosterChars.set(e.id, rivals[i].character));
@@ -552,6 +555,15 @@ async function init() {
     const js = jev.stats;
     $('jevstat').textContent = js.online === null ? 'Jev · waiting' : js.online ? `Jev online · ${Math.round(js.latency)} ms` : `Jev offline (${js.error}) · local AI`;
     $('jevstat').className = js.online === false ? 'off' : '';
+    const ns = $('netstat');
+    if (ns) {
+      ns.textContent = !net.enabled ? 'net · local'
+        : net.status === 'online' ? `net · ${net.peers} other`
+        : net.status === 'connecting' ? 'net · connecting'
+        : net.status === 'error' ? `net · ${net.error || 'error'}`
+        : 'net · offline';
+      ns.className = net.status === 'online' ? 'on' : net.status === 'error' ? 'off' : '';
+    }
     updateTags(dt);
 
     renderer.info.reset();

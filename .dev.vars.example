@@ -1,0 +1,3 @@
+# Copied to .dev.vars for `wrangler dev` / `npm run cf:dev`.
+# Production: npx wrangler secret put JEV_API_KEY
+JEV_API_KEY=

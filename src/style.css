@@ -86,8 +86,9 @@ html, body {
 #health .bar { height: 6px; margin: 6px 0 4px; background: rgba(0, 0, 0, 0.35); border-radius: 3px; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5); }
 #hpbar { height: 100%; width: 100%; background: linear-gradient(90deg, #e9d3a3, #fff4dc); transition: width 0.15s; }
 #hpbar.low { background: linear-gradient(90deg, #b3261e, #ff5a4a); }
-#jevstat { margin-top: 4px; font-size: 11px; font-style: normal; font-weight: 500; letter-spacing: 1px; opacity: 0.7; }
-#jevstat.off { color: #ffb08a; }
+#jevstat, #netstat { margin-top: 4px; font-size: 11px; font-style: normal; font-weight: 500; letter-spacing: 1px; opacity: 0.7; }
+#jevstat.off, #netstat.off { color: #ffb08a; }
+#netstat.on { color: #9ee0a8; }
 
 #slots { display: flex; gap: 6px; margin-bottom: 6px; }
 #slots b {

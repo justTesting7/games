@@ -16,10 +16,34 @@ The rivals ask Jev for decisions through the Vite dev server, which proxies `/ap
 never reaches the browser, and `.env` is gitignored. Without a key, or in a static `npm run build`,
 the rivals fall back to a local heuristic, and the HUD shows "Jev offline".
 
+## Hosting (Cloudflare)
+
+The client (`dist/`) and a Durable Object room share one hostname, so assets have no CORS and `/ws` is same-origin.
+
+```bash
+npx wrangler login --device    # or: wrangler login
+npm run cf:deploy              # builds, then uploads Worker + assets + GameRoom
+npx wrangler secret put JEV_API_KEY   # optional; rivals work without it
+```
+
+`npm run cf:dev` serves the same Worker locally on port 8787. Vite (`npm run dev`) stays single-player; it has no `/ws`.
+
 Pick **Relic Isle** or **Dead District** (urban ruins) from the menu before you fight; the choice is saved in `localStorage`.
 
 The first `npm run dev` (or `npm run build`) downloads about 100 MB of third-party assets into
 `public/assets/vendor`, which is gitignored. Open the URL Vite prints and click **Fight**.
+
+## Hosting (Cloudflare)
+
+The client (`dist/`) and a Durable Object room share one hostname, so assets have no CORS and `/ws` is same-origin.
+
+```bash
+npx wrangler login --device    # or: wrangler login
+npm run cf:deploy              # builds, then uploads Worker + assets + GameRoom
+npx wrangler secret put JEV_API_KEY   # optional; rivals work without it
+```
+
+`npm run cf:dev` serves the same Worker locally on port 8787. Vite (`npm run dev`) stays single-player; it has no `/ws`.
 
 ## Controls
 

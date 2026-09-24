@@ -4,4 +4,6 @@ public/assets/vendor
 .env
 .env.*
 !.env.example
+.dev.vars
+.wrangler
 faces-src
