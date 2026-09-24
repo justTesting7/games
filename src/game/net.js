@@ -1,11 +1,12 @@
 // Same-origin WebSocket to the Cloudflare Durable Object room.
 // Vite has no /ws, so localhost stays offline unless you run `npm run cf:dev`.
 export class Net {
-  constructor() {
+  constructor({ wanted = false, room = 'lobby' } = {}) {
     this.ws = null;
     this.status = 'off';
     this.error = '';
-    this.room = new URLSearchParams(location.search).get('room') || 'lobby';
+    this.wanted = !!wanted;
+    this.room = room || 'lobby';
     this.id = '';
     this.slot = 0;
     this.inbox = [];
@@ -14,8 +15,12 @@ export class Net {
     this._retry = 0;
   }
 
-  get enabled() {
+  get hosted() {
     return !/^(localhost|127\.0\.0\.1)$/.test(location.hostname) || location.port === '8787';
+  }
+
+  get enabled() {
+    return this.wanted && this.hosted;
   }
 
   get peers() {
@@ -23,7 +28,12 @@ export class Net {
   }
 
   connect(identity) {
-    if (!this.enabled) return;
+    if (!this.wanted) return;
+    if (!this.hosted) {
+      this.status = 'error';
+      this.error = 'host';
+      return;
+    }
     if (this._retry) { clearTimeout(this._retry); this._retry = 0; }
     this.identity = identity || this.identity;
     if (this.ws) {

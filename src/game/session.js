@@ -93,7 +93,7 @@ class Remote {
 }
 
 export class Session {
-  constructor({ net, world, combat, weapons, player, rivals, charAssets, scene, spawn, facing, mapId, onRoster, onRound, onJoinedHuman }) {
+  constructor({ net, world, combat, weapons, player, rivals, charAssets, scene, spawn, facing, mapId, onRoster, onRound }) {
     this.net = net;
     this.world = world;
     this.combat = combat;
@@ -107,7 +107,6 @@ export class Session {
     this.mapId = mapId;
     this.onRoster = onRoster;
     this.onRound = onRound;
-    this.onJoinedHuman = onJoinedHuman;
     this.remotes = new Map();
     this.pending = new Map();
     this.drones = new Map();
@@ -116,14 +115,16 @@ export class Session {
     this.wantReady = false;
     this.readySent = false;
     this.botsParked = false;
+    this.wanted = !!net.wanted;
     this.slot = 0;
     weapons.session = this;
   }
 
-  get multi() { return this.net.status === 'online' && this.remotes.size > 0; }
+  get multi() { return this.wanted && this.net.status === 'online'; }
   get peerCount() { return this.remotes.size; }
 
   connect(identity) {
+    if (!this.wanted) return;
     this.net.connect({ ...identity, map: this.mapId });
   }
 
@@ -412,9 +413,9 @@ export class Session {
   }
 
   syncBots() {
-    const hide = this.multi;
+    if (!this.rivals.length) return;
+    const hide = this.wanted;
     if (hide === this.botsParked) return;
-    if (hide && !this.botsParked) this.onJoinedHuman?.();
     this.botsParked = hide;
     for (const r of this.rivals) {
       if (hide) {

@@ -20,6 +20,7 @@ import { createRosterAvatarStudio } from './game/rosterAvatarStudio.js';
 import { Jev } from './game/jev.js';
 import { Net } from './game/net.js';
 import { Session } from './game/session.js';
+import { modeUrl, persistMode, persistRoom, resolveMode, resolveRoom } from './game/mode.js';
 
 const $ = (id) => document.getElementById(id);
 const canvas = $('game');
@@ -92,8 +93,11 @@ world.raycast = (o, d, maxDist, ignore) => {
 };
 const combat = new Combat();
 world.combat = combat;
+const mode = resolveMode();
+const roomCode = resolveRoom();
+persistMode(mode);
 const jev = new Jev();
-const net = new Net();
+const net = new Net({ wanted: mode === 'multi', room: roomCode });
 
 const NO_INPUT = { forward: false, back: false, left: false, right: false, sprint: false, jump: false, aim: false, fire: false, toggleWalk: false, crouch: false };
 const input = { forward: false, back: false, left: false, right: false, sprint: false, jump: false, climb: false, aim: false, fire: false, toggleWalk: false, crouch: false, fastTime: false };
@@ -145,6 +149,45 @@ $('map').onchange = (e) => {
   location.reload();
 };
 
+const paintMode = () => {
+  $('mode-solo').classList.toggle('on', mode === 'solo');
+  $('mode-multi').classList.toggle('on', mode === 'multi');
+  $('roomrow').classList.toggle('hidden', mode !== 'multi');
+  $('jevstat').classList.toggle('hidden', mode === 'multi');
+  $('netstat').classList.toggle('hidden', mode !== 'multi');
+  const hosted = net.hosted;
+  if (mode === 'multi') {
+    $('modehint').textContent = hosted
+      ? 'Humans only. Share the room. Last player standing wins.'
+      : 'Multiplayer needs the hosted game or npm run cf:dev.';
+  } else {
+    $('modehint').textContent = 'You against Jev-driven rivals. Last one standing wins.';
+  }
+  const play = $('play');
+  if (!rosterMenu) return;
+  if (rosterMenu.changed()) play.textContent = 'Apply & reload';
+  else if (mode === 'multi' && !hosted) play.textContent = 'Needs host';
+  else play.textContent = mode === 'multi' ? 'Join fight' : 'Fight';
+};
+const switchMode = (next) => {
+  if (next === mode) return;
+  persistMode(next);
+  location.assign(modeUrl(next, $('roomcode')?.value || roomCode));
+};
+$('mode-solo').onclick = () => switchMode('solo');
+$('mode-multi').onclick = () => switchMode('multi');
+$('roomcode').value = roomCode;
+$('roomcode').onchange = () => {
+  const next = persistRoom($('roomcode').value);
+  if (mode === 'multi') location.assign(modeUrl('multi', next));
+};
+$('roomcode').oninput = () => {
+  const share = $('roomshare');
+  const next = ($('roomcode').value || 'lobby').trim() || 'lobby';
+  const url = modeUrl('multi', next);
+  share.textContent = `Share ${url.origin}${url.search || '?mode=multi'}`;
+};
+
 let timeOfDay = mapDef.timeOfDay;
 $('timeofday').value = Math.round(timeOfDay * 1000);
 $('timeofday').oninput = (e) => { timeOfDay = e.target.value / 1000; };
@@ -155,8 +198,10 @@ $('quality').onchange = (e) => {
 };
 const selection = loadSelection();
 const rosterMenu = setupRosterMenu(selection, $('roster'), () => {
-  $('play').textContent = rosterMenu.changed() ? 'Apply & reload' : 'Fight';
-});
+  paintMode();
+}, { opponents: mode === 'solo' });
+paintMode();
+$('roomcode').dispatchEvent(new Event('input'));
 const rosterStudio = createRosterAvatarStudio();
 
 $('volume').oninput = (e) => audio.setVolume(e.target.value / 100);
@@ -189,7 +234,9 @@ async function init() {
   world.props = props;
   let city = null;
   if (mapDef.id === 'city') city = new City(terrain, veg.colliders, pipeline);
-  const fighters = [selection.player, ...selection.rivals].map(byId);
+  const fighters = mode === 'solo'
+    ? [selection.player, ...selection.rivals].map(byId)
+    : [byId(selection.player)];
   const bodies = [...new Set(['f', 'm', ...fighters.map((e) => e.look.body)])];
   const [, charAssets, looks] = await Promise.all([
     mapDef.vegetation ? veg.load(progress) : Promise.resolve(),
@@ -239,11 +286,8 @@ async function init() {
     scene: pipeline.scene, spawn, facing, mapId: mapDef.id,
     onRoster: () => rebuildTags(),
     onRound: (msg) => applyNetRound(msg),
-    onJoinedHuman: () => {
-      if (round.state === 'fight' || round.state === 'countdown' || round.state === 'over') startRound();
-    },
   });
-  session.connect({ name: you.name, color: you.color, roster: you.id });
+  if (mode === 'multi') session.connect({ name: you.name, color: you.color, roster: you.id });
   window.__game = { world, pipeline, camera, input, rivals, combat, jev, net, session };
 
   const rosterChars = new Map([[fighters[0].id, character]]);
@@ -317,10 +361,15 @@ async function init() {
   const startRound = () => {
     resetLocalKit();
     $('feed').innerHTML = '';
-    if (session.multi) {
+    if (mode === 'multi') {
       session.placeLocal();
       session.ready();
-      banner('Waiting', 'The room is lining up. Last human standing wins.', 'show countdown');
+      const wait = net.status === 'online'
+        ? (session.peerCount ? 'The room is lining up. Last human standing wins.' : 'Waiting for another player. Share the room link.')
+        : net.error === 'host'
+          ? 'Open the hosted game or run npm run cf:dev to play multiplayer.'
+          : 'Connecting to the room…';
+      banner('Waiting', wait, 'show countdown');
       round.state = 'waiting';
       return;
     }
@@ -401,12 +450,12 @@ async function init() {
       hurt = 1;
       audio.hurt(true);
       if (attacker) pointDamage(attacker);
-      if (!session.multi) {
+      if (mode === 'solo') {
         round.state = 'over';
         const who = attacker === victim ? 'Your own grenade' : attacker ? attacker.name : 'A rival';
         banner('Eliminated', `${who} got you. Press R to fight again.`, 'show lost');
       }
-    } else if (!session.multi && rivals.every((r) => !r.fighter.alive) && player.fighter.alive) {
+    } else if (mode === 'solo' && rivals.every((r) => !r.fighter.alive) && player.fighter.alive) {
       round.state = 'over';
       banner('Victory', `You outlasted ${rivals.length > 1 ? `all ${rivals.length} rivals` : 'your rival'}. Press R to fight again.`, 'show won');
     }
@@ -421,7 +470,7 @@ async function init() {
   const tagPos = new THREE.Vector3();
   const rebuildTags = () => {
     $('tags').innerHTML = '';
-    const sources = session.multi ? [...session.remotes.values()] : rivals;
+    const sources = mode === 'multi' ? [...session.remotes.values()] : rivals;
     tags = sources.map((r) => {
       const el = document.createElement('div');
       el.className = 'tag';
@@ -453,7 +502,7 @@ async function init() {
       t.el.style.transform = `translate(${((tagPos.x + 1) / 2) * innerWidth}px, ${((1 - tagPos.y) / 2) * innerHeight}px) translate(-50%, -100%)`;
       t.bar.style.width = `${(f.health / MAX_HEALTH) * 100}%`;
       if (!f.alive) t.info.textContent = 'eliminated';
-      else if (session.multi) t.info.textContent = `${WEAPONS[f.loadout.current]?.short || ''} · human`;
+      else if (mode === 'multi') t.info.textContent = `${WEAPONS[f.loadout.current]?.short || ''} · human`;
       else {
         t.info.textContent = `${WEAPONS[f.loadout.current].short} · ${t.r.label}${t.r.target ? ` → ${t.r.target.isPlayer ? 'you' : t.r.target.name}` : ''} · ${t.r.source === 'jev' ? `Jev ${Math.round(t.r.confidence * 100)}%` : 'local AI'}`;
       }
@@ -488,8 +537,10 @@ async function init() {
   $('loading').classList.add('hidden');
   $('play').classList.remove('hidden');
   menu.classList.remove('loading');
+  paintMode();
   $('play').onclick = () => {
     if (rosterMenu.changed()) { rosterMenu.save(); location.reload(); return; }
+    if (mode === 'multi' && !net.hosted) return;
     audio.start();
     canvas.requestPointerLock();
   };
@@ -536,7 +587,7 @@ async function init() {
     if (round.state === 'countdown') {
       if (round.ends) round.t = (round.ends - Date.now()) / 1000;
       else round.t -= dt;
-      const crowd = session.multi
+      const crowd = mode === 'multi'
         ? `${session.peerCount + 1} players. Last one standing wins.`
         : `${rivals.length > 1 ? `${rivals.length} rivals are` : '1 rival is'} closing in. Last one standing wins.`;
       banner(round.t > 0 ? `${Math.ceil(round.t)}` : 'Fight', crowd, 'show countdown');
@@ -547,7 +598,8 @@ async function init() {
     const flying = weapons.drone.flying;
     const dying = weapons.drone.dying;
     const state = player.update(dt, alive && !flying ? input : NO_INPUT);
-    if (alive && round.state !== 'countdown') weapons.update(dt, input);
+    const canShoot = alive && round.state !== 'countdown' && !(mode === 'multi' && round.state === 'waiting');
+    if (canShoot) weapons.update(dt, input);
     else weapons.tick(player.fighter, dt);
     input.jump = false;
     input.toggleWalk = false;
@@ -560,7 +612,15 @@ async function init() {
     input.fireReleased = false;
     const active = locked && (round.state === 'fight' || round.state === 'over');
     session.update(dt);
-    if (!session.multi) rivals.forEach((r) => r.update(dt, active));
+    if (mode === 'multi' && round.state === 'waiting') {
+      const wait = net.status === 'online'
+        ? (session.peerCount ? `${session.peerCount + 1} in the room. Waiting for the fight to start.` : 'Waiting for another player. Share the room link.')
+        : net.error === 'host'
+          ? 'Open the hosted game or run npm run cf:dev to play multiplayer.'
+          : 'Connecting to the room…';
+      banner('Waiting', wait, 'show countdown');
+    }
+    if (mode === 'solo') rivals.forEach((r) => r.update(dt, active));
     combat.update(dt);
     props.update(dt);
     fx.update(dt);
@@ -619,19 +679,21 @@ async function init() {
     $('hpbar').style.width = `${(hp / MAX_HEALTH) * 100}%`;
     $('hpbar').classList.toggle('low', hp <= 35);
     $('hpnum').textContent = Math.ceil(hp);
-    $('rivalsleft').textContent = session.multi
+    $('rivalsleft').textContent = mode === 'multi'
       ? Math.max(0, session.humansAlive() - (player.fighter.alive ? 1 : 0))
       : rivals.filter((r) => r.fighter.alive).length;
     const leftLabel = document.querySelector('#round small');
-    if (leftLabel) leftLabel.textContent = session.multi ? 'players left' : 'rivals left';
+    if (leftLabel) leftLabel.textContent = mode === 'multi' ? 'players left' : 'rivals left';
     hurt = Math.max(0, hurt - dt * 1.6);
     $('damage').style.opacity = Math.max(hurt, alive ? Math.max(0, (45 - hp) / 45) * 0.45 : 0.7);
     const js = jev.stats;
-    $('jevstat').textContent = js.online === null ? 'Jev · waiting' : js.online ? `Jev online · ${Math.round(js.latency)} ms` : `Jev offline (${js.error}) · local AI`;
-    $('jevstat').className = js.online === false ? 'off' : '';
+    if (mode === 'solo') {
+      $('jevstat').textContent = js.online === null ? 'Jev · waiting' : js.online ? `Jev online · ${Math.round(js.latency)} ms` : `Jev offline (${js.error}) · local AI`;
+      $('jevstat').className = js.online === false ? 'off' : '';
+    }
     const ns = $('netstat');
-    if (ns) {
-      ns.textContent = !net.enabled ? 'net · local'
+    if (ns && mode === 'multi') {
+      ns.textContent = !net.hosted ? 'net · needs host'
         : net.status === 'online' ? `net · ${session.peerCount} other`
         : net.status === 'connecting' ? 'net · connecting'
         : net.status === 'error' ? `net · ${net.error || 'error'}`

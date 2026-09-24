@@ -74,6 +74,11 @@
       <div class="panel">
         <h1 id="maptitle">Relic Isle</h1>
         <p class="sub" id="mapsub">A pistol deathmatch on a photoreal island against two rivals who think with Jev</p>
+        <div id="modes" role="tablist">
+          <button type="button" id="mode-solo" class="mode on" data-mode="solo">Single player</button>
+          <button type="button" id="mode-multi" class="mode" data-mode="multi">Multiplayer</button>
+        </div>
+        <p class="sub modehint" id="modehint">You and Jev-driven rivals. Last one standing wins.</p>
         <div id="loading">
           <div class="bar"><div id="loadbar"></div></div>
           <div id="loadlabel">Starting…</div>
@@ -81,6 +86,10 @@
         <button id="play" class="hidden">Fight</button>
         <div id="roster"></div>
         <div class="settings">
+          <label id="roomrow" class="hidden">Room
+            <input id="roomcode" type="text" maxlength="16" placeholder="lobby" autocomplete="off" spellcheck="false" />
+            <small id="roomshare">Share this page to invite someone</small>
+          </label>
           <label>Map
             <select id="map">
               <option value="island">Relic Isle</option>

@@ -1,7 +1,7 @@
 # Relic Isle
 
 A third-person adventure on a photoreal island, running in the browser with Three.js and WebGL 2.
-You play a dual-pistol adventurer, with animated running, jumping and aiming, in a free-for-all deathmatch against two rivals whose tactics are chosen by [Jev](https://docs.typesafe.ai/introduction) (TypeSafe System One).
+Single player is a free-for-all against rivals whose tactics are chosen by [Jev](https://docs.typesafe.ai/introduction) (TypeSafe System One). Multiplayer is a separate last-player-standing match against other humans.
 
 ## Running
 
@@ -35,7 +35,12 @@ npx wrangler secret put JEV_API_KEY   # optional; rivals work without it
 
 Live: https://relic-isle.noam-berman7.workers.dev
 
-Share that URL (or add `?room=yourcode`) and click Fight. Two or more humans in the same room play last-one-standing against each other; bots drop out. Poses, shots, grenades, drones, and the round clock stay on the Durable Object. Alone on that host, or on Vite, you still fight the AI.
+The menu splits the two games:
+
+- **Single player** — you versus Jev-driven rivals. No socket. This is also what `npm run dev` runs.
+- **Multiplayer** — humans only, last player standing. Pick a room name, share the URL (`?mode=multi` or `?room=yourcode`), and click Join fight. Jevs do not join this match.
+
+Poses, shots, grenades, drones, and the round clock stay on the Durable Object.
 
 ## Controls
 
