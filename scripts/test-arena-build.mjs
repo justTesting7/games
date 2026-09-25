@@ -41,6 +41,26 @@ if (!arena.group.getObjectByName('msg-scoreboard')) {
   console.error('missing center-hung scoreboard');
   process.exit(1);
 }
+if (!arena.group.getObjectByName('concourse-ribbon')) {
+  console.error('missing concourse LED ribbon');
+  process.exit(1);
+}
+if (!arena.group.getObjectByName('suite-ribbon')) {
+  console.error('missing suite LED ribbon');
+  process.exit(1);
+}
+if (!arena.group.getObjectByName('crown-ribbon')) {
+  console.error('missing crown LED ribbon');
+  process.exit(1);
+}
+const board = arena.group.getObjectByName('msg-scoreboard');
+const bb = new THREE.Box3().setFromObject(board);
+const size = new THREE.Vector3();
+bb.getSize(size);
+if (size.x < 6 || size.x > 12) {
+  console.error('scoreboard should be a Garden-sized cube, not a room', size);
+  process.exit(1);
+}
 if (!arena.group.getObjectByName('msg-court')) {
   console.error('missing painted Garden court');
   process.exit(1);

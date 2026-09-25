@@ -119,6 +119,12 @@ float courtPaint(vec2 p, out float keyMask, out float logo) {
       * step(10.02, abs(p.x)) * step(abs(p.x), HX) * inCourt;
     paint = max(paint, cLine);
     paint = max(paint, stroke(sdBox2(p - vec2(hx, 0.0), vec2(0.08, 0.08)), 0.04) * inCourt);
+    for (int k = 0; k < 4; k++) {
+      float hy = mix(-KEYW + 0.35, KEYW - 0.35, (float(k) + 0.5) / 4.0);
+      vec2 ha = vec2(float(s) * (HX - 0.18), hy);
+      vec2 hb = vec2(float(s) * (HX - 0.55), hy);
+      paint = max(paint, stroke(sdSeg(p, ha, hb), 0.035) * inCourt);
+    }
   }
   for (int i = 0; i < 8; i++) {
     float t = (float(i) + 1.0) / 9.0;
@@ -227,7 +233,7 @@ export function makeCourtPaint(wood) {
   const decal = makeCourtDecal();
   mat.userData.courtDecal = decal;
   const ext = new THREE.Vector2(14.325 + COURT_BORDER[0], 7.62 + COURT_BORDER[1]);
-  return patch(mat, 'msg-court-v4', (shader) => {
+  return patch(mat, 'msg-court-v5', (shader) => {
     shader.uniforms.uDecal = { value: decal || new THREE.Texture() };
     shader.uniforms.uHasDecal = { value: decal ? 1 : 0 };
     shader.uniforms.uExt = { value: ext };
@@ -241,14 +247,14 @@ export function makeCourtPaint(wood) {
   float tone = aHash(vec3(plank, 2.7, 1.1));
   float grain = aFbm(vec3(p.x * 3.4, plank * 0.15, p.y * 0.35));
   float seam = 1.0 - smoothstep(0.0, 0.018, abs(fract(p.y * 8.2) - 0.5) - 0.46);
-  vec3 light = vec3(0.80, 0.63, 0.39);
-  vec3 dark = vec3(0.66, 0.50, 0.28);
+  vec3 light = vec3(0.90, 0.74, 0.44);
+  vec3 dark = vec3(0.74, 0.58, 0.30);
   vec3 wood = mix(dark, light, tone * 0.55 + grain * 0.45);
-  wood = mix(wood, wood * vec3(0.8, 0.72, 0.55), seam * 0.35);
+  wood = mix(wood, wood * vec3(0.82, 0.74, 0.52), seam * 0.28);
   float keyMask, logo;
   float paint = courtPaint(p, keyMask, logo);
   float outside = 1.0 - fill(sdBox2(p, vec2(14.325, 7.62)));
-  vec3 knicksBlue = vec3(0.012, 0.105, 0.47) * mix(0.94, 1.04, grain);
+  vec3 knicksBlue = vec3(0.02, 0.16, 0.62) * mix(0.94, 1.04, grain);
   wood = mix(wood, knicksBlue, max(outside, keyMask));
   if (uHasDecal < 0.5) {
     vec3 orange = vec3(0.87, 0.26, 0.02);
@@ -345,56 +351,238 @@ export function makeEmissive(color, intensity = 1.4) {
   });
 }
 
-/** Screens between events: dark grey LED panels lit by the house lights. */
+/** Live LED cube: warm/cool video blotches so the board reads from the court. */
 export function makeJumbotron() {
-  const mat = new THREE.MeshStandardMaterial({
-    color: 0x3a3d42, roughness: 0.5, metalness: 0.12, envMapIntensity: 0.2,
-  });
-  return patch(mat, 'msg-screen', (shader) => {
-    shader.fragmentShader = shader.fragmentShader
-      .replace('#include <color_fragment>', /* glsl */ `
-#include <color_fragment>
-{
-  vec2 g = fract(vec2(vLocalPos.x, vLocalPos.y) * 9.0);
-  float pix = step(0.78, max(g.x, g.y));
-  diffuseColor.rgb *= mix(1.0, 0.72, pix);
+  return new THREE.ShaderMaterial({
+    uniforms: { uTime: { value: 0 } },
+    vertexShader: /* glsl */ `
+varying vec2 vUv;
+varying vec3 vLocalPos;
+void main() {
+  vUv = uv;
+  vLocalPos = position;
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
 }
-`);
+`,
+    fragmentShader: /* glsl */ `
+uniform float uTime;
+varying vec2 vUv;
+varying vec3 vLocalPos;
+float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float vnoise(vec2 p) {
+  vec2 i = floor(p), f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(hash(i), hash(i + vec2(1, 0)), f.x), mix(hash(i + vec2(0, 1)), hash(i + vec2(1, 1)), f.x), f.y);
+}
+float fbm(vec2 p) {
+  float a = 0.0, w = 0.5;
+  for (int i = 0; i < 5; i++) { a += w * vnoise(p); p *= 2.07; w *= 0.5; }
+  return a;
+}
+void main() {
+  vec2 uv = vUv;
+  float t = uTime * 0.12;
+  float n = fbm(uv * vec2(3.2, 2.4) + vec2(t * 0.35, t * 0.08));
+  float n2 = fbm(uv * 7.0 - t);
+  vec3 warm = vec3(0.95, 0.74, 0.52);
+  vec3 cool = vec3(0.10, 0.22, 0.55);
+  vec3 orange = vec3(0.95, 0.42, 0.08);
+  vec3 col = mix(cool, warm, smoothstep(0.32, 0.72, n));
+  col = mix(col, orange, smoothstep(0.62, 0.9, n2) * 0.35);
+  float bolt = abs(uv.y - 0.52 - 0.08 * sin(uv.x * 18.0 + t * 4.0));
+  col = mix(col, vec3(1.0, 0.92, 0.55), 1.0 - smoothstep(0.0, 0.045, bolt));
+  vec2 g = fract(vec2(vLocalPos.x, vLocalPos.y) * 11.0);
+  float pix = step(0.82, max(g.x, g.y));
+  col *= mix(1.0, 0.55, pix);
+  float vign = smoothstep(0.0, 0.12, uv.x) * smoothstep(1.0, 0.88, uv.x)
+    * smoothstep(0.0, 0.1, uv.y) * smoothstep(1.0, 0.9, uv.y);
+  col *= 0.55 + 0.45 * vign;
+  col *= 1.15;
+  gl_FragColor = vec4(col, 1.0);
+}
+`,
+    toneMapped: false,
   });
 }
 
 export function makeGardenSign() {
   if (typeof document === 'undefined') {
     return new THREE.MeshStandardMaterial({
-      color: 0x08090b, emissive: 0xd8b25a, emissiveIntensity: 0.4, roughness: 0.55,
+      color: 0xc9a227, emissive: 0x6a4a10, emissiveIntensity: 0.55, roughness: 0.4, metalness: 0.35,
     });
   }
   const c = document.createElement('canvas');
   c.width = 2048;
   c.height = 256;
   const g = c.getContext('2d');
-  g.fillStyle = '#07080a';
+  g.fillStyle = '#d4b24a';
   g.fillRect(0, 0, 2048, 256);
-  g.fillStyle = '#e9c46c';
-  g.font = '600 150px Georgia, "Times New Roman", serif';
+  g.fillStyle = '#c49a2e';
+  g.fillRect(0, 0, 2048, 18);
+  g.fillRect(0, 238, 2048, 18);
+  g.fillStyle = '#1a1408';
+  g.font = '700 132px Arial, "Helvetica Neue", sans-serif';
   g.textAlign = 'center';
   g.textBaseline = 'middle';
   const text = 'MADISON SQUARE GARDEN';
-  const scale = Math.min(1, 1700 / g.measureText(text).width);
+  const scale = Math.min(1, 1480 / g.measureText(text).width);
   g.save();
-  g.translate(1024, 136);
+  g.translate(1024, 128);
   g.scale(scale, 1);
   g.fillText(text, 0, 0);
   g.restore();
-  g.fillStyle = '#c9ced6';
-  g.font = '700 58px Arial, sans-serif';
-  g.fillText('CHASE', 110, 132);
-  g.fillText('CHASE', 1938, 132);
+  g.fillStyle = '#1a1408';
+  g.font = '800 52px Arial, sans-serif';
+  g.fillText('CHASE', 128, 128);
+  g.fillText('CHASE', 1920, 128);
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.anisotropy = 8;
   return new THREE.MeshStandardMaterial({
-    color: 0x000000, emissive: 0xffffff, emissiveMap: tex, emissiveIntensity: 0.9, roughness: 0.5,
+    color: 0xffffff, map: tex, emissive: 0xffffff, emissiveMap: tex, emissiveIntensity: 0.35,
+    roughness: 0.38, metalness: 0.22,
+  });
+}
+
+export const AD_COUNT = 8;
+export const AD_MOVE = 2.8;
+export const AD_HOLD = 3.2;
+/** Brands wrap the bowl at 60% of the original tile width. */
+export const AD_SIZE = 0.6;
+export const AD_WRAP = 1 / AD_SIZE;
+
+/** Shared ticker: slide one ad, hold, slide the next. Units are atlas-widths. */
+export function adScroll(t) {
+  const period = AD_MOVE + AD_HOLD;
+  const idx = Math.floor(t / period);
+  const phase = t - idx * period;
+  const u = Math.min(1, Math.max(0, phase / AD_MOVE));
+  const k = phase < AD_MOVE ? u * u * (3 - 2 * u) : 1;
+  return (idx + k) / AD_COUNT;
+}
+
+const AD_SPOTS = [
+  { bg: [0.78, 0.06, 0.18], fg: [1, 0.97, 0.94] },
+  { bg: [0.00, 0.19, 0.53], fg: [0.91, 0.93, 1] },
+  { bg: [1.00, 0.42, 0.00], fg: [0.12, 0.05, 0] },
+  { bg: [0.96, 0.82, 0.00], fg: [0.12, 0.09, 0] },
+  { bg: [0.00, 0.42, 0.71], fg: [0.96, 0.52, 0.15] },
+  { bg: [0.07, 0.54, 0.24], fg: [0.96, 1, 0.94] },
+  { bg: [0.07, 0.07, 0.08], fg: [0.95, 0.76, 0.31] },
+  { bg: [0.48, 0.06, 0.19], fg: [1, 0.91, 0.78] },
+];
+
+function paintAds(ctx, W, H) {
+  const spots = [
+    { bg: '#c8102e', fg: '#fff8f0', name: 'RED RUSH', sub: 'CLASSIC COLA' },
+    { bg: '#003087', fg: '#e8eeff', name: 'NEXUS 2', sub: 'PLAY THE WORLD' },
+    { bg: '#ff6a00', fg: '#1a0800', name: 'BOLT-ADE', sub: 'GO THE DISTANCE' },
+    { bg: '#f5d000', fg: '#1a1400', name: 'BIG CRUNCH', sub: 'SNACK ATTACK' },
+    { bg: '#006bb6', fg: '#f58426', name: 'THE GARDEN', sub: 'NEW YORK' },
+    { bg: '#128a3c', fg: '#f4fff0', name: 'VOLT', sub: 'CHARGE UP' },
+    { bg: '#111111', fg: '#f2c14e', name: 'AERO', sub: 'FLY NIGHTS' },
+    { bg: '#7a1030', fg: '#ffe8c8', name: 'SLICE CO', sub: 'HOT & READY' },
+  ];
+  const slot = W / spots.length;
+  spots.forEach((ad, i) => {
+    const x = i * slot;
+    ctx.fillStyle = ad.bg;
+    ctx.fillRect(x, 0, slot, H);
+    ctx.fillStyle = i % 2 ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)';
+    ctx.fillRect(x, 0, 10, H);
+    ctx.fillRect(x + slot - 10, 0, 10, H);
+    ctx.fillStyle = ad.fg;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = `900 ${Math.round(H * 0.38)}px Arial, "Helvetica Neue", sans-serif`;
+    ctx.fillText(ad.name, x + slot * 0.5, H * 0.42);
+    ctx.font = `800 ${Math.round(H * 0.14)}px Arial, sans-serif`;
+    ctx.globalAlpha = 0.88;
+    ctx.fillText(ad.sub, x + slot * 0.5, H * 0.72);
+    ctx.globalAlpha = 1;
+  });
+}
+
+function makeAdAtlas() {
+  if (typeof document !== 'undefined') {
+    const c = document.createElement('canvas');
+    c.width = 4096;
+    c.height = 256;
+    paintAds(c.getContext('2d'), c.width, c.height);
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.wrapS = THREE.RepeatWrapping;
+    tex.wrapT = THREE.ClampToEdgeWrapping;
+    tex.anisotropy = 8;
+    tex.needsUpdate = true;
+    return tex;
+  }
+  const data = new Uint8Array(AD_COUNT * 4);
+  AD_SPOTS.forEach((ad, i) => {
+    data[i * 4] = Math.round(ad.bg[0] * 255);
+    data[i * 4 + 1] = Math.round(ad.bg[1] * 255);
+    data[i * 4 + 2] = Math.round(ad.bg[2] * 255);
+    data[i * 4 + 3] = 255;
+  });
+  const tex = new THREE.DataTexture(data, AD_COUNT, 1, THREE.RGBAFormat);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.magFilter = THREE.NearestFilter;
+  tex.needsUpdate = true;
+  return tex;
+}
+
+/** One stadium-wide LED ticker. Every ring shares this so ads move together. */
+export function makeRibbon() {
+  const atlas = makeAdAtlas();
+  return new THREE.ShaderMaterial({
+    uniforms: {
+      uTime: { value: 0 },
+      uAtlas: { value: atlas },
+    },
+    vertexShader: /* glsl */ `
+varying vec3 vWorldPos;
+varying vec2 vUv;
+void main() {
+  vec4 wp = modelMatrix * vec4(position, 1.0);
+  vWorldPos = wp.xyz;
+  vUv = uv;
+  gl_Position = projectionMatrix * viewMatrix * wp;
+}
+`,
+    fragmentShader: /* glsl */ `
+uniform float uTime;
+uniform sampler2D uAtlas;
+varying vec3 vWorldPos;
+varying vec2 vUv;
+float ticker(float t) {
+  const float MOVE = 2.8;
+  const float HOLD = 3.2;
+  const float ADS = 8.0;
+  float period = MOVE + HOLD;
+  float idx = floor(t / period);
+  float phase = t - idx * period;
+  float u = clamp(phase / MOVE, 0.0, 1.0);
+  float k = phase < MOVE ? u * u * (3.0 - 2.0 * u) : 1.0;
+  return (idx + k) / ADS;
+}
+void main() {
+  float ang = atan(vWorldPos.z, vWorldPos.x) / 6.2831853;
+  const float WRAP = 1.6666667;
+  float u = fract(-ang * WRAP + ticker(uTime));
+  float v = clamp(vUv.y, 0.02, 0.98);
+  vec3 col = texture2D(uAtlas, vec2(u, v)).rgb;
+  vec2 g = fract(vec2(u * 220.0, v * 18.0));
+  float pix = step(0.82, max(g.x, g.y));
+  col *= mix(1.0, 0.62, pix);
+  float edge = smoothstep(0.0, 0.08, v) * smoothstep(1.0, 0.92, v);
+  col *= 0.55 + 0.45 * edge;
+  col *= 1.25;
+  gl_FragColor = vec4(col, 1.0);
+}
+`,
+    toneMapped: false,
+    side: THREE.DoubleSide,
   });
 }
 
