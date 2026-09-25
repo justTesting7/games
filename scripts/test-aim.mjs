@@ -65,19 +65,34 @@ console.log('hip-fire follows the crosshair', {
   onHead: { onStartX },
 });
 
-// A hit 0.8 m in front of the chest would pitch the barrels into the dirt.
-// The pose should keep the look direction instead.
+// Pose follows the mouse look, not a floor hit or a chest→target line.
 const from = { x: 0, y: 1.4, z: 0 };
 const near = { x: 0.05, y: 0.3, z: 0.6 };
-const dx = near.x - from.x, dy = near.y - from.y, dz = near.z - from.z;
-const nearLen = Math.hypot(dx, dy, dz);
-if (nearLen >= 2.2) throw new Error('fixture is not a close aim point');
+const far = { x: 2.4, y: 0.2, z: 12 };
 const look = { x: 0.02, y: -0.05, z: 1 };
-const useLook = nearLen < 2.2;
-const ax = useLook ? look.x : dx / nearLen;
-const az = useLook ? look.z : dz / nearLen;
-if (Math.abs(ax - look.x) > 1e-9 || Math.abs(az - look.z) > 1e-9) {
-  throw new Error('close aim should follow the look, not the dirt');
+const nearLen = Math.hypot(near.x - from.x, near.y - from.y, near.z - from.z);
+const farLen = Math.hypot(far.x - from.x, far.y - from.y, far.z - from.z);
+if (nearLen >= 2.2) throw new Error('fixture is not a close aim point');
+if (farLen < 2.2) throw new Error('fixture is not a far aim point');
+const poseNear = look;
+const poseFar = look;
+if (Math.abs(poseNear.x - look.x) > 1e-9 || Math.abs(poseFar.x - look.x) > 1e-9) {
+  throw new Error('pose should follow the mouse look at any range');
 }
 
-console.log('close-aim look fallback ok', { nearLen });
+console.log('pose follows mouse look', { nearLen, farLen });
+
+// Body faces the mouse even when not holding aim.
+const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+function stepYaw(yaw, camYaw, aiming, dt) {
+  const err = wrap(camYaw - yaw);
+  const rate = aiming ? Math.max(Math.abs(err) * 16, 8) : Math.max(Math.abs(err) * 12, 5);
+  return yaw + Math.sign(err) * Math.min(Math.abs(err), rate * dt);
+}
+let yaw = 0;
+const camYaw = 1.15;
+for (let i = 0; i < 24; i++) yaw = stepYaw(yaw, camYaw, false, 0.05);
+if (Math.abs(wrap(camYaw - yaw)) > 0.08) {
+  throw new Error(`body should catch the mouse look without ADS: ${yaw} vs ${camYaw}`);
+}
+console.log('body faces mouse look', { yaw, camYaw });

@@ -115,14 +115,12 @@ export class Player {
       if (stick < 0.98) target *= stick;
     }
 
-    // Facing: free movement turns the body, aiming locks it to the camera.
-    if (aiming) {
+    // Face the mouse look so the body points where the reticle goes.
+    // Movement stays camera-relative; walk/strafe/back come from localDir.
+    {
       const err = wrapAngle(this.camYaw - this.yaw);
-      this.yaw += Math.sign(err) * Math.min(Math.abs(err), Math.max(Math.abs(err) * 16, 6) * dt);
-    } else if (moving) {
-      const goal = Math.atan2(wish.x, wish.z);
-      const turn = this.onGround ? 10 : 3;
-      this.yaw += wrapAngle(goal - this.yaw) * Math.min(1, dt * turn);
+      const rate = aiming ? Math.max(Math.abs(err) * 16, 8) : Math.max(Math.abs(err) * 12, 5);
+      this.yaw += Math.sign(err) * Math.min(Math.abs(err), rate * dt);
     }
 
     const horiz = new THREE.Vector3(this.vel.x, 0, this.vel.z);
@@ -198,7 +196,7 @@ export class Player {
     }
 
     ch.update(dt, {
-      speed, onGround: this.onGround, airTime: this.airTime, strafe: aiming, localDir: this.localDir,
+      speed, onGround: this.onGround, airTime: this.airTime, strafe: true, localDir: this.localDir,
       jumpStarted, predictedAir: (2 * JUMP_V) / GRAVITY, aiming, aimPoint: this.aimPoint,
       lookDir: this.lookDir(), crouch: this.crouchT,
     });
