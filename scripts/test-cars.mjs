@@ -77,12 +77,15 @@ const maps = await import('node:fs').then((fs) => fs.readFileSync(new URL('../sr
 if (!maps.includes("id: 'manhattan'")) throw new Error('maps must expose Midtown');
 
 const midtown = manhattanCarSpots();
-if (midtown.length < 40) throw new Error(`midtown should pack the avenues, got ${midtown.length}`);
+if (midtown.length < 48) throw new Error(`midtown should pack the avenues, got ${midtown.length}`);
 const midKeys = new Set(midtown.map((s) => `${s.x.toFixed(2)},${s.z.toFixed(2)}`));
 if (midKeys.size !== midtown.length) throw new Error('midtown spots must be unique');
 for (const s of midtown) {
   if (!spotOnRoad(s)) throw new Error(`midtown spot ${s.x},${s.z} is not on a road`);
-  if (Math.hypot(s.x, s.z) < 28) throw new Error('keep the plaza clear of parked cars');
+  if (Math.hypot(s.x, s.z) < 16) throw new Error('keep the plaza lawn clear of parked cars');
+}
+if (!midtown.some((s) => Math.hypot(s.x - 6.2, s.z - 40) < 18)) {
+  throw new Error('midtown must put cars on the street you spawn onto');
 }
 if (carSpotsForMap('manhattan').length !== midtown.length) throw new Error('manhattan map must use the packed fleet');
 if (carSpotsForMap('city').length !== 8) throw new Error('dead district still has eight cars');
