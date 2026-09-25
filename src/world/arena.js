@@ -654,9 +654,9 @@ export class Arena {
   buildJumbotron(mats) {
     const g = new THREE.Group();
     g.name = 'msg-scoreboard';
-    const cy = ARENA.baseY + 12.6;
+    const cy = ARENA.baseY + 15.4;
     g.position.set(0, cy, 0);
-    const W = 16.2, H = 9.0;
+    const W = 8.1, H = 4.5;
     g.add(mesh(new THREE.BoxGeometry(W, H, W), mats.housing, 0, 0, 0));
     const face = new THREE.PlaneGeometry(W - 0.35, H - 0.45);
     for (let i = 0; i < 4; i++) {
@@ -666,7 +666,7 @@ export class Arena {
       g.add(p);
     }
     const crownShape = new THREE.Shape();
-    const cw = W * 0.5 + 0.72, cr = 1.7;
+    const cw = W * 0.5 + 0.36, cr = 0.85;
     crownShape.moveTo(cw, -cw + cr);
     crownShape.lineTo(cw, cw - cr);
     crownShape.absarc(cw - cr, cw - cr, cr, 0, Math.PI / 2, false);
@@ -676,7 +676,7 @@ export class Arena {
     crownShape.absarc(-cw + cr, -cw + cr, cr, Math.PI, Math.PI * 1.5, false);
     crownShape.lineTo(cw - cr, -cw);
     crownShape.absarc(cw - cr, -cw + cr, cr, Math.PI * 1.5, Math.PI * 2, false);
-    const crownH = 1.35;
+    const crownH = 0.68;
     const crown = new THREE.Mesh(
       new THREE.ExtrudeGeometry(crownShape, { depth: crownH, bevelEnabled: false, curveSegments: 12 }),
       mats.gold,
@@ -698,7 +698,7 @@ export class Arena {
     g.add(belt);
     for (let i = 0; i < 16; i++) {
       const a = (i / 16) * Math.PI * 2;
-      g.add(mesh(new THREE.CylinderGeometry(0.18, 0.22, 0.32, 8), mats.fixture, Math.cos(a) * 4.6, -H * 0.5 - 0.44, Math.sin(a) * 4.6));
+      g.add(mesh(new THREE.CylinderGeometry(0.12, 0.15, 0.22, 8), mats.fixture, Math.cos(a) * (W * 0.28), -H * 0.5 - 0.36, Math.sin(a) * (W * 0.28)));
     }
     const cableLen = Math.max(2, ARENA.roofY - (cy + H * 0.5 + crownH));
     const cab = W * 0.38;
@@ -727,7 +727,7 @@ export class Arena {
     court.castShadow = false;
     this.group.add(court);
     const board = new THREE.PointLight(0xffe0a8, 22, 36, 1.4);
-    board.position.set(0, y0 + 12.6, 0);
+    board.position.set(0, y0 + 15.4, 0);
     board.castShadow = false;
     this.group.add(board);
   }

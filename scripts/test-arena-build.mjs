@@ -57,8 +57,8 @@ const board = arena.group.getObjectByName('msg-scoreboard');
 const bb = new THREE.Box3().setFromObject(board);
 const size = new THREE.Vector3();
 bb.getSize(size);
-if (size.x < 12 || size.y < 8) {
-  console.error('scoreboard too small to read as the Garden cube', size);
+if (size.x < 6 || size.x > 12) {
+  console.error('scoreboard should be a Garden-sized cube, not a room', size);
   process.exit(1);
 }
 if (!arena.group.getObjectByName('msg-court')) {
