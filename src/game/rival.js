@@ -18,7 +18,7 @@ export const TACTICS = {
   strafe: { label: 'strafing', text: 'sidestep left and right at the current range while shooting' },
   hold: { label: 'holding', text: 'stand still and take slow, accurate shots' },
   flank: { label: 'flanking', text: 'circle around the target to attack from the side' },
-  take_cover: { label: 'taking cover', text: 'sprint to solid cover first, then peek and shoot from safety' },
+  take_cover: { label: 'taking cover', text: 'break to cover only when badly hurt, then peek and return fire' },
   retreat: { label: 'retreating', text: 'back away from the target while returning fire' },
   hunt: { label: 'hunting', text: 'move towards where an enemy was last seen to find them' },
 };
@@ -62,7 +62,7 @@ export class Rival {
   }
 
   reset() {
-    this.tactic = this.persona.ruthless ? 'push' : 'take_cover';
+    this.tactic = 'push';
     this.target = null;
     this.confidence = 0;
     this.source = 'local';
@@ -70,7 +70,7 @@ export class Rival {
     this.thinking = false;
     this.epoch = (this.epoch || 0) + 1;
     this.perceiveT = 0;
-    this.cooldown = this.persona.ruthless ? 0.15 : 0.5;
+    this.cooldown = this.persona.ruthless ? 0.15 : 0.22;
     this.burst = 3;
     this.burstPause = 0;
     this.side = 0;
@@ -79,11 +79,11 @@ export class Rival {
     this.flankSide = Math.random() < 0.5 ? 1 : -1;
     this.errT = 0;
     this.cover = null;
-    this.reachedShelter = !!this.persona.ruthless;
-    this.needFirstCover = !this.persona.ruthless;
+    this.reachedShelter = true;
+    this.needFirstCover = false;
     this.exposedT = 0;
     this.safeT = 0;
-    this.runningToShelter = !this.persona.ruthless;
+    this.runningToShelter = false;
     this.coverScanT = 0;
     this.droneSightT = 0;
     this.peeking = false;
@@ -290,22 +290,21 @@ export class Rival {
       this.peeking = false;
       return;
     }
-    if (this.needFirstCover || !this.reachedShelter || !this.cover || !threat) {
+    if (!this.cover || !threat || this.runningToShelter) {
       this.peeking = false;
       return;
     }
-    if (this.runningToShelter && !this.peeking) return;
-    if (this.peeking && this.combat.time - this.fighter.lastHitT < 0.2) {
+    if (this.peeking && this.combat.time - this.fighter.lastHitT < 0.12 && this.fighter.health < 40) {
       this.peeking = false;
       this.peekT = 0;
-      this.peekWait = 0.2 + Math.random() * 0.2;
+      this.peekWait = 0.12 + Math.random() * 0.15;
       return;
     }
     if (this.peeking) {
       this.peekT -= dt;
       if (this.peekT <= 0) {
         this.peeking = false;
-        this.peekWait = 0.28 + Math.random() * 0.4;
+        this.peekWait = 0.12 + Math.random() * 0.22;
       }
       return;
     }
@@ -313,7 +312,7 @@ export class Rival {
     if (this.peekWait <= 0) {
       this.peeking = true;
       this.runningToShelter = false;
-      this.peekT = 0.55 + Math.random() * 0.65;
+      this.peekT = 1.15 + Math.random() * 0.85;
       this.strafeDir = Math.random() < 0.5 ? 1 : -1;
     }
   }
@@ -441,13 +440,10 @@ export class Rival {
 
   canFight() {
     if (this.isRuthless()) return true;
-    if (this.needFirstCover) return false;
-    if (this.peeking) return true;
-    return this.reachedShelter && !this.runningToShelter && this.onFarSide(this.anyThreat());
+    return this.fighter.alive;
   }
 
   inDanger() {
-    if (this.needFirstCover) return true;
     if (this.underFire() || this.shotsFlying()) return true;
     return this.enemies().some((e) => this.seen(e).visible || this.combat.time - this.seen(e).lastT < 3);
   }
@@ -461,8 +457,10 @@ export class Rival {
 
   shouldShelter() {
     if (this.isRuthless() || this.peeking) return false;
-    if (!this.inDanger()) return false;
-    return !this.onFarSide(this.anyThreat());
+    const hp = this.fighter.health;
+    if (hp < 26) return true;
+    if (this.persona.prefersCover && hp < 40 && this.underFire()) return true;
+    return false;
   }
 
   threatPos() {
@@ -529,7 +527,7 @@ export class Rival {
         type: 'choice',
         instructions: this.persona.ruthless
           ? `You are ${me.name}, ${this.persona.personality}. Never take cover. Never retreat. Always push and shoot. Last one standing wins. Pick your tactic for the next second, in character.`
-          : `You are ${me.name}, ${this.persona.personality}. Get to cover first, then peek out often to shoot and duck back. Be aggressive with fire. Last one standing wins. Pick your tactic for the next second, in character.`,
+          : `You are ${me.name}, ${this.persona.personality}. Fight aggressively. Push, flank, and shoot. Only take cover if you are badly wounded. Last one standing wins. Pick your tactic for the next second, in character.`,
         criteria: options,
       },
     };
@@ -574,21 +572,13 @@ export class Rival {
       return;
     }
 
-    if (this.needFirstCover || this.shouldShelter()) {
-      this.source = this.source === 'jev' ? 'jev' : 'local';
+    if (this.shouldShelter()) {
+      this.source = 'local';
       this.setTactic('take_cover', cover);
       return;
     }
 
     const t = ans?.tactic;
-    const seen = this.enemies().some((e) => this.seen(e).visible);
-    const holdCover = this.reachedShelter && this.cover && (seen || this.shotsFlying() || this.underFire());
-    if (holdCover && t && (t.choice === 'push' || t.choice === 'hunt' || t.choice === 'flank')) {
-      this.source = 'local';
-      this.setTactic(seen ? (Math.random() < 0.5 ? 'hold' : 'strafe') : 'take_cover', cover);
-      return;
-    }
-
     if (t && options[t.choice]) {
       this.source = 'jev';
       this.confidence = t.confidence;
@@ -658,15 +648,11 @@ export class Rival {
     const me = this.fighter;
     const visible = this.target && this.seen(this.target).visible;
     if (this.shouldShelter()) return cover ? 'take_cover' : 'retreat';
-    if (this.reachedShelter && cover) {
-      if (!visible) return 'take_cover';
-      return Math.random() < 0.55 ? 'hold' : 'strafe';
-    }
-    if (!visible) return this.shotsFlying() && cover ? 'take_cover' : 'hunt';
+    if (!visible) return 'hunt';
     const d = this.target.pos.distanceTo(this.pos);
-    if (me.health < 35) return cover ? 'take_cover' : 'retreat';
-    if (!this.shotsFlying() && !this.underFire() && d > 28) return 'push';
-    return cover ? 'take_cover' : 'hold';
+    if (me.health < 26 && cover && this.underFire()) return 'take_cover';
+    if (d > 7) return Math.random() < 0.38 ? 'flank' : 'push';
+    return Math.random() < 0.55 ? 'strafe' : 'push';
   }
 
   setTarget(t) {
@@ -731,25 +717,17 @@ export class Rival {
         }
       }
     }
-    const anySeen = this.enemies().some((e) => this.seen(e).visible);
-    const shots = this.underFire() || this.shotsFlying();
-    if (!anySeen && !shots) {
-      this.exposedT = 0;
-      if (this.safeT > 3.5) this.reachedShelter = false;
-    }
     const sheltered = this.onFarSide(threat);
     if (sheltered) {
       this.safeT += dt;
       this.exposedT = 0;
-      if (this.safeT > 0.2) {
+      if (this.safeT > 0.15) {
         this.reachedShelter = true;
         this.runningToShelter = false;
-        this.needFirstCover = false;
       }
     } else {
       this.exposedT += dt;
       this.safeT = 0;
-      if (this.shouldShelter()) this.reachedShelter = false;
     }
     if (this.shouldShelter()) {
       this.runningToShelter = true;
@@ -769,7 +747,7 @@ export class Rival {
       if (out.dir.lengthSq() < 1e-6) out.dir.copy(side);
       else out.dir.normalize();
       out.speed = SHELTER_SPRINT;
-      out.aim = false;
+      out.aim = visible;
       this.runningToShelter = true;
       this.reachedShelter = false;
       return;
@@ -780,7 +758,7 @@ export class Rival {
       if (out.dir.lengthSq() < 1e-6) out.dir.copy(side);
       else out.dir.normalize();
       out.speed = SHELTER_SPRINT;
-      out.aim = false;
+      out.aim = visible;
       return;
     }
     if (this.onFarSide(tp) && this.pos.distanceTo(dest) < 1.8) {
@@ -799,7 +777,7 @@ export class Rival {
     const len = to.length() || 1;
     out.dir.copy(to).divideScalar(len);
     out.speed = SHELTER_SPRINT;
-    out.aim = false;
+    out.aim = visible;
     this.runningToShelter = true;
     this.reachedShelter = false;
   }
@@ -832,8 +810,8 @@ export class Rival {
       }
     }
 
-    const exposed = !this.isRuthless() && (this.needFirstCover || this.shouldShelter() || (this.runningToShelter && !this.peeking));
-    if (this.peeking && this.cover && !this.needFirstCover) {
+    const exposed = !this.isRuthless() && (this.shouldShelter() || (this.runningToShelter && !this.peeking));
+    if (this.peeking && this.cover) {
       const dest = this.peekSpot(tp) || this.cover.spot;
       if (dest) {
         const step = new THREE.Vector3(dest.x - this.pos.x, 0, dest.z - this.pos.z);
@@ -846,10 +824,8 @@ export class Rival {
       out.aim = true;
     } else if (exposed || this.tactic === 'take_cover') {
       this.steerToCover(out, tp, side, visible);
-      if (exposed && !this.onFarSide(tp)) {
-        out.aim = false;
-        out.speed = SHELTER_SPRINT;
-      }
+      if (exposed && !this.onFarSide(tp)) out.speed = SHELTER_SPRINT;
+      out.aim = visible;
     } else switch (this.tactic) {
       case 'push':
         if (this.isRuthless()) {
@@ -886,8 +862,8 @@ export class Rival {
           if (d > 3.2) { out.dir.copy(to); out.speed = 5.4; }
           out.aim = visible;
         } else {
-          if (d > 4) { out.dir.copy(to); out.speed = d > 15 ? 4.6 : 3.2; }
-          out.aim = visible && this.canFight() && !this.shouldShelter();
+          if (d > 4) { out.dir.copy(to); out.speed = d > 15 ? 4.8 : 3.6; }
+          out.aim = visible;
         }
         break;
     }
@@ -1027,7 +1003,7 @@ export class Rival {
       this.droneSightT = 0;
       return false;
     }
-    if (this.needFirstCover || !this.canFight() || this.fighter.loadout.current === 'grenade') {
+    if (!this.canFight() || this.fighter.loadout.current === 'grenade') {
       this.droneSightT = 0;
       return false;
     }
@@ -1053,17 +1029,17 @@ export class Rival {
     this.cooldown -= dt;
     const T = this.target;
     const L = this.fighter.loadout;
-    if (this.needFirstCover || !this.canFight() || L.current === 'grenade') return;
+    if (!this.canFight() || L.current === 'grenade') return;
     if (this.tryShootDrone(dt)) return;
     if (!T || !wish.aim) return;
     const m = this.seen(T);
     const rifle = L.current === 'rifle';
-    const rush = this.peeking || this.isRuthless();
-    const react = this.persona.reaction * (rush ? 0.28 : 0.55) + (rifle ? 0.12 : 0);
+    const rush = this.peeking || this.isRuthless() || this.tactic === 'push' || this.tactic === 'flank';
+    const react = this.persona.reaction * (rush ? 0.28 : 0.4) + (rifle ? 0.12 : 0);
     if (!m.visible || m.sightT < react) return;
-    if (this.character.aimWeight < (rush ? 0.55 : 0.75)) return;
+    if (this.character.aimWeight < (rush ? 0.55 : 0.68)) return;
     const want = Math.atan2(this.aimPoint.x - this.pos.x, this.aimPoint.z - this.pos.z);
-    if (Math.abs(wrapAngle(want - this.yaw)) > (rush ? 0.5 : 0.3)) return;
+    if (Math.abs(wrapAngle(want - this.yaw)) > (rush ? 0.5 : 0.35)) return;
     if (this.burstPause > 0) { this.burstPause -= dt; return; }
     if (this.cooldown > 0) return;
     if (!this.weapons.trigger(this.fighter, this.aimPoint, rifle ? 0.002 : 0.005)) return;
@@ -1071,10 +1047,10 @@ export class Rival {
       this.cooldown = 0.22 + Math.random() * 0.28;
       return;
     }
-    this.cooldown = this.persona.fireInterval * (rush ? 0.38 : 0.62);
+    this.cooldown = this.persona.fireInterval * (rush ? 0.4 : 0.55);
     if (--this.burst <= 0) {
-      this.burst = rush ? 6 + Math.floor(Math.random() * 4) : 3 + Math.floor(Math.random() * 3);
-      this.burstPause = rush ? 0.08 + Math.random() * 0.14 : 0.35 + Math.random() * 0.4;
+      this.burst = rush ? 6 + Math.floor(Math.random() * 4) : 4 + Math.floor(Math.random() * 3);
+      this.burstPause = rush ? 0.08 + Math.random() * 0.14 : 0.18 + Math.random() * 0.22;
     }
   }
 
