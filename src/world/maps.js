@@ -41,7 +41,7 @@ export const MAPS = {
   manhattan: {
     id: 'manhattan',
     label: 'Midtown',
-    subtitle: 'Manhattan grid · clear avenues packed with cars',
+    subtitle: 'Manhattan grid · clear avenues, cars to take',
     loadLabel: 'Raising midtown',
     plantLabel: 'Lining the avenues',
     textures: {
@@ -56,7 +56,7 @@ export const MAPS = {
     timeOfDay: 0.18,
     fogDensity: 0.0018,
     radarRange: 120,
-    cars: 'packed',
+    cars: 'street',
   },
   garden: {
     id: 'garden',

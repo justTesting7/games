@@ -71,23 +71,23 @@ if (!room.includes("t === 'runover'")) throw new Error('room must accept run-ove
 if (!room.includes("t === 'car'")) throw new Error('room must sync enter/leave/drive');
 if (!room.includes("act === 'glass'")) throw new Error('room must sync broken glass');
 if (!room.includes("'manhattan'")) throw new Error('room must accept the midtown map');
-if (!room.includes('const FLEET = 64')) throw new Error('room fleet must cover the packed midtown cars');
+if (!room.includes('const FLEET = 64')) throw new Error('room fleet must cover midtown cars');
 
 const maps = await import('node:fs').then((fs) => fs.readFileSync(new URL('../src/world/maps.js', import.meta.url), 'utf8'));
 if (!maps.includes("id: 'manhattan'")) throw new Error('maps must expose Midtown');
 
 const midtown = manhattanCarSpots();
-if (midtown.length < 48) throw new Error(`midtown should pack the avenues, got ${midtown.length}`);
+if (midtown.length !== 16) throw new Error(`midtown should have a light fleet of 16, got ${midtown.length}`);
 const midKeys = new Set(midtown.map((s) => `${s.x.toFixed(2)},${s.z.toFixed(2)}`));
 if (midKeys.size !== midtown.length) throw new Error('midtown spots must be unique');
 for (const s of midtown) {
   if (!spotOnRoad(s)) throw new Error(`midtown spot ${s.x},${s.z} is not on a road`);
   if (Math.hypot(s.x, s.z) < 16) throw new Error('keep the plaza lawn clear of parked cars');
 }
-if (!midtown.some((s) => Math.hypot(s.x - 6.2, s.z - 40) < 18)) {
-  throw new Error('midtown must put cars on the street you spawn onto');
+if (!midtown.some((s) => Math.hypot(s.x - 6.2, s.z - 40) < 28)) {
+  throw new Error('midtown must put a car on the street you spawn onto');
 }
-if (carSpotsForMap('manhattan').length !== midtown.length) throw new Error('manhattan map must use the packed fleet');
+if (carSpotsForMap('manhattan').length !== midtown.length) throw new Error('manhattan map must use the midtown fleet');
 if (carSpotsForMap('city').length !== 8) throw new Error('dead district still has eight cars');
 if (carSpotsForMap('island').length) throw new Error('island should not spawn street cars');
 

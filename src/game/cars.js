@@ -81,12 +81,12 @@ export function cityCarSpots() {
   ];
 }
 
-/** Lane-packed supercars on the Midtown grid. */
-export function manhattanCarSpots(limit = 64) {
+/** A light street fleet on the Midtown grid. */
+export function manhattanCarSpots(limit = 16) {
   const raw = [];
   const { pitch, halfBlocks, playRadius, plazaLawn } = CITY;
   const lane = 2.85;
-  const step = 6.4;
+  const step = 22;
   const lim = halfBlocks * pitch;
   const keep = (x, z, yaw) => {
     if (Math.hypot(x, z) > playRadius - 14) return;
@@ -110,17 +110,14 @@ export function manhattanCarSpots(limit = 64) {
   }
   raw.sort((a, b) => Math.hypot(a.x - 6.2, a.z - 40) - Math.hypot(b.x - 6.2, b.z - 40));
   if (raw.length <= limit) return raw;
-  const nearN = Math.min(20, limit);
-  const out = raw.slice(0, nearN);
-  const rest = raw.slice(nearN);
-  const need = limit - nearN;
-  const stride = rest.length / need;
-  const used = new Set();
-  for (let i = 0; i < need; i++) {
-    let idx = Math.min(rest.length - 1, Math.floor(i * stride));
-    while (used.has(idx) && idx < rest.length - 1) idx++;
+  const out = [raw[0]];
+  const stride = raw.length / limit;
+  const used = new Set([0]);
+  for (let i = 1; i < limit; i++) {
+    let idx = Math.min(raw.length - 1, Math.floor(i * stride));
+    while (used.has(idx) && idx < raw.length - 1) idx++;
     used.add(idx);
-    out.push(rest[idx]);
+    out.push(raw[idx]);
   }
   return out;
 }
@@ -361,6 +358,7 @@ function extrudePlan(name, half, depth, bevel = 0.05) {
       curveSegments: 1,
     });
     g.rotateX(-Math.PI * 0.5);
+    g.rotateY(Math.PI);
     g.computeVertexNormals();
     return g;
   });
