@@ -127,8 +127,9 @@ function drawSmear(ctx, ox, oy, rand) {
 
 /**
  * Turns a "thickness" canvas (alpha = amount of blood) into a colour map and a
- * normal map. Fresh films stay a dark wet red; thick pools go almost black.
- * Bright candy-red albedo blows out under the HDR sun and reads as paint.
+ * normal map. Colour is a wet crimson that stays red as it thickens — never
+ * candy-paint, never black sludge. The material uses this as emissive so the
+ * HDR sun / floor shadows cannot blow it out or crush it.
  */
 function finishTextures(src, strength = 3) {
   const w = src.width, h = src.height;
@@ -150,10 +151,10 @@ function finishTextures(src, strength = 3) {
       const i = y * w + x;
       const t = H[i];
       const a = data[i * 4 + 3] / 255;
-      cImg.data[i * 4] = 28 - 16 * t;
-      cImg.data[i * 4 + 1] = 4 - 3 * t;
-      cImg.data[i * 4 + 2] = 3 - 2 * t;
-      cImg.data[i * 4 + 3] = Math.min(255, a * 1.45 * 255);
+      cImg.data[i * 4] = 88 - 20 * t;
+      cImg.data[i * 4 + 1] = 16 - 6 * t;
+      cImg.data[i * 4 + 2] = 14 - 5 * t;
+      cImg.data[i * 4 + 3] = Math.min(255, a * 1.7 * 255);
       const dx = (at(x + 1, y) - at(x - 1, y)) * strength;
       const dy = (at(x, y + 1) - at(x, y - 1)) * strength;
       const l = Math.hypot(dx, dy, 1);
@@ -176,11 +177,15 @@ function finishTextures(src, strength = 3) {
 function bloodMaterial(tex) {
   return new THREE.MeshStandardMaterial({
     map: tex.map,
+    color: 0x000000,
+    emissiveMap: tex.map,
+    emissive: new THREE.Color(1, 1, 1),
+    emissiveIntensity: 0.85,
     normalMap: tex.normalMap,
     normalScale: new THREE.Vector2(1.2, 1.2),
     roughness: 0.28,
     metalness: 0,
-    envMapIntensity: 0.12,
+    envMapIntensity: 0.18,
     transparent: true,
     depthWrite: false,
     polygonOffset: true,
@@ -237,7 +242,7 @@ export class BloodDecals {
     this.drops = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2), this.dropMaterial, maxDrops);
     this.drops.count = 0;
     this.drops.frustumCulled = false;
-    this.drops.receiveShadow = true;
+    this.drops.receiveShadow = false;
     this.drops.renderOrder = 2;
     this.dropNext = 0;
     scene.add(this.drops);
@@ -304,7 +309,7 @@ export class BloodDecals {
     const tt = vertical ? t : t.clone().applyAxisAngle(nn, (Math.random() - 0.5) * 0.25);
     const mesh = new THREE.Mesh(this.geometry(point, nn, tt, size, tile, onGround), this.material);
     mesh.position.copy(point);
-    mesh.receiveShadow = true;
+    mesh.receiveShadow = false;
     mesh.renderOrder = 2;
     this.scene.add(mesh);
     this.splats.push(mesh);
