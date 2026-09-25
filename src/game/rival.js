@@ -1196,6 +1196,7 @@ export class Rival {
     ch.update(dt, {
       speed, onGround: this.onGround, airTime: this.airTime, strafe: wish.aim, localDir: this.localDir,
       jumpStarted, predictedAir: (2 * JUMP_V) / GRAVITY, aiming: wish.aim, aimPoint: this.lookPoint,
+      lookDir: this.lookPoint.clone().sub(this.pos).normalize(),
     });
     if (active) this.shoot(dt, wish);
     this.weapons.tick(this.fighter, dt);

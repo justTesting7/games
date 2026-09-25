@@ -81,6 +81,7 @@ class Remote {
       predictedAir: 0.6,
       aiming: this.aiming,
       aimPoint,
+      lookDir: look,
       crouch: this.crouch,
     });
   }

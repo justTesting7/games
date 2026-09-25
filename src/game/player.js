@@ -193,7 +193,7 @@ export class Player {
     ch.update(dt, {
       speed, onGround: this.onGround, airTime: this.airTime, strafe: aiming, localDir: this.localDir,
       jumpStarted, predictedAir: (2 * JUMP_V) / GRAVITY, aiming, aimPoint: this.aimPoint,
-      crouch: this.crouchT,
+      lookDir: this.lookDir(), crouch: this.crouchT,
     });
     return { speed, aiming };
   }

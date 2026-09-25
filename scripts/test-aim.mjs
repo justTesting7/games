@@ -18,3 +18,20 @@ if (Math.abs(newHitX - target.x) > 0.02) {
 }
 
 console.log('pistol aim offset ok', { oldHitX, newHitX, targetX: target.x, miss: target.x - oldHitX });
+
+// A hit 0.8 m in front of the chest would pitch the barrels into the dirt.
+// The pose should keep the look direction instead.
+const from = { x: 0, y: 1.4, z: 0 };
+const near = { x: 0.05, y: 0.3, z: 0.6 };
+const dx = near.x - from.x, dy = near.y - from.y, dz = near.z - from.z;
+const nearLen = Math.hypot(dx, dy, dz);
+if (nearLen >= 2.2) throw new Error('fixture is not a close aim point');
+const look = { x: 0.02, y: -0.05, z: 1 };
+const useLook = nearLen < 2.2;
+const ax = useLook ? look.x : dx / nearLen;
+const az = useLook ? look.z : dz / nearLen;
+if (Math.abs(ax - look.x) > 1e-9 || Math.abs(az - look.z) > 1e-9) {
+  throw new Error('close aim should follow the look, not the dirt');
+}
+
+console.log('close-aim look fallback ok', { nearLen });

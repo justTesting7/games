@@ -337,6 +337,7 @@ export class Character {
     this.grenadeWindup = 0;
     this.aimTarget = new THREE.Vector3();
     this.aimDir = new THREE.Vector3(0, 0, 1);
+    this.lookDir = new THREE.Vector3(0, 0, 1);
     this.recoil = [0, 0];
     this.drawn = 0;
     this.dead = null;
@@ -733,6 +734,13 @@ export class Character {
     this.aimWeight = e * e * (3 - 2 * e);
     this.drawn = this.weapon === 'pistols' && (this.aimT > 0.12 || act?.type === 'pistolReload') ? 1 : 0;
     this.aimTarget.copy(s.aimPoint);
+    if (s.lookDir) this.lookDir.copy(s.lookDir);
+    else {
+      this.lookDir.subVectors(s.aimPoint, this.root.position);
+      this.lookDir.y -= 1.45;
+      if (this.lookDir.lengthSq() < 1e-6) this.lookDir.set(0, 0, 1);
+      else this.lookDir.normalize();
+    }
     this.recoil[0] *= Math.exp(-dt * 13);
     this.recoil[1] *= Math.exp(-dt * 13);
     this.rifleKick *= Math.exp(-dt * 11);
@@ -798,7 +806,7 @@ export class Character {
       const a = this.action;
       const w = this.aimWeight;
       const butt1 = sh.clone().addScaledVector(left, 0.07).addScaledVector(UP, -0.06).addScaledVector(fwd, 0.04);
-      const f1 = new THREE.Vector3().subVectors(this.aimTarget, butt1).normalize();
+      const f1 = this.aimFrom(butt1);
       const butt0 = sh.clone().addScaledVector(UP, -0.3).addScaledVector(fwd, 0.14).addScaledVector(left, 0.04);
       const f0 = fwd.clone().multiplyScalar(0.82).addScaledVector(UP, -0.45).addScaledVector(left, 0.35).normalize();
       const butt = butt0.lerp(butt1, w);
@@ -929,6 +937,18 @@ export class Character {
     g.children.forEach((c) => c.updateMatrixWorld(true));
   }
 
+  // Direction the guns and arms should take so they match the crosshair hit.
+  // Nearby hits would yank the barrels into the dirt; use the look instead.
+  aimFrom(from, out = new THREE.Vector3()) {
+    out.subVectors(this.aimTarget, from);
+    const len = out.length();
+    if (len < 2.2 || len < 1e-4) {
+      if (this.lookDir.lengthSq() > 1e-6) return out.copy(this.lookDir).normalize();
+      if (len < 1e-4) return out.set(0, 0, 1);
+    }
+    return out.multiplyScalar(1 / len);
+  }
+
   handPosition(out = new THREE.Vector3()) {
     const mid = this.bones.RightHandMiddle1 || this.bones.RightHand;
     return this.bones.RightHand.getWorldPosition(out).lerp(mid.getWorldPosition(V[1]), 0.75);
@@ -1009,7 +1029,7 @@ export class Character {
       this.aimTarget.y += 1.05;
     }
     const chest = B.Spine2.getWorldPosition(t.d);
-    const dir = new THREE.Vector3().subVectors(this.aimTarget, chest).normalize();
+    const dir = this.aimFrom(chest);
     this.aimDir.copy(dir);
 
     // Twist and bend the spine towards the aim direction.
@@ -1048,22 +1068,18 @@ export class Character {
       qk.multiply(new THREE.Quaternion().setFromAxisAngle(right, -kickAll * 0.12 * w));
       rotateBoneWorld(B.Spine2, qk, t);
     }
-    // Both arms extend towards the target, like a two-gun stance.
+    // Both arms extend towards the same aim point the shots use.
     const pitchAxis = new THREE.Vector3().crossVectors(dir, new THREE.Vector3(0, 1, 0)).normalize();
-    const sides = [['Right', -1], ['Left', 1]];
-    sides.forEach(([side, sgn], i) => {
+    const sides = ['Right', 'Left'];
+    sides.forEach((side, i) => {
       const upper = B[`${side}Arm`], fore = B[`${side}ForeArm`], hand = B[`${side}Hand`];
       const finger = B[`${side}HandMiddle1`];
       const sh = upper.getWorldPosition(t.a);
-      const aim = this.aimTarget.clone();
-      aim.addScaledVector(right, sgn * 0.12);
-      const d = aim.sub(sh).normalize();
-      d.addScaledVector(right, sgn * 0.06).normalize();
+      const d = this.aimFrom(sh);
       rotateBoneToward(upper, fore, d, w, t);
       const fp = fore.getWorldPosition(t.a);
-      const d2 = new THREE.Vector3().subVectors(this.aimTarget, fp).normalize();
+      const d2 = this.aimFrom(fp);
       rotateBoneToward(fore, hand, d2, w, t);
-      // Straight wrist, so the pistol lines up with the forearm.
       if (finger) rotateBoneToward(hand, finger, d2, w, t);
       const r = this.recoil[i] * w;
       if (r > 1e-3) {
@@ -1184,11 +1200,15 @@ export class Character {
         const hp = hand.getWorldPosition(t.a);
         const finger = this.bones[sides[i].replace('Hand', 'HandMiddle1')] || this.bones[sides[i].replace('Hand', 'ForeArm')];
         const fp = finger.getWorldPosition(t.b);
-        const x = finger === this.bones[sides[i].replace('Hand', 'HandMiddle1')] ? t.c.subVectors(fp, hp).normalize() : t.c.subVectors(hp, fp).normalize();
+        const alongHand = finger === this.bones[sides[i].replace('Hand', 'HandMiddle1')]
+          ? t.c.subVectors(fp, hp).normalize()
+          : t.c.subVectors(hp, fp).normalize();
+        const x = this.aimWeight > 0.15 ? this.aimFrom(hp) : alongHand;
         const upW = new THREE.Vector3(0, 1, 0);
         const z = new THREE.Vector3().crossVectors(x, upW).normalize();
+        if (z.lengthSq() < 1e-6) z.set(0, 0, 1);
         const y = new THREE.Vector3().crossVectors(z, x).normalize();
-        const tilt = (i === 0 ? 1 : -1) * 0.25;
+        const tilt = (i === 0 ? 1 : -1) * 0.12 * (1 - this.aimWeight);
         y.applyAxisAngle(x, tilt);
         z.crossVectors(x, y);
         const pos = hp.clone().addScaledVector(x, 0.07).addScaledVector(y, -0.015);
