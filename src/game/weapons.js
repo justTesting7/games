@@ -20,6 +20,7 @@ export const WEAPONS = {
     key: 'drone', name: 'Suicide drone', short: 'drone', slot: 4,
     count: 10, radius: 9.5, damage: 150,
   },
+  car: { key: 'car', name: 'Car', short: 'car' },
 };
 export const SLOTS = ['pistols', 'rifle', 'grenade', 'drone'];
 const THROW_DUR = 0.8;
@@ -525,6 +526,16 @@ export class Weapons {
       }
     }
     if (input.reload) this.reload(f);
+    if (this.player.vehicle) {
+      this.chargingGrenade = false;
+      this.grenadeCharge = 0;
+      this.character.grenadeWindup = 0;
+      this.sniperHeld = false;
+      this.player.sniperPending = false;
+      this.updateArc(false);
+      this.tick(f, dt);
+      return;
+    }
     if (L.current === 'drone' || this.drone.flying) {
       this.updateDrone(dt, input, f, L, ch);
       this.tick(f, dt);

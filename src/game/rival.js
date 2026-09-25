@@ -1132,6 +1132,7 @@ export class Rival {
     }
     this.world.veg.colliders.resolveXZ(next, RADIUS, next.y, next.y + 1.7);
     this.world.props.collidePlayer(next, RADIUS, this.vel);
+    this.world.cars?.collideWalker(next, RADIUS, null);
     for (const f of this.combat.fighters) {
       if (f === this.fighter || !f.alive) continue;
       const dx = next.x - f.pos.x, dz = next.z - f.pos.z;

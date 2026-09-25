@@ -7,7 +7,8 @@ const main = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
 for (const [file, src, needle] of [
   ['player.js', player, 'update(dt, input, follow = null)'],
   ['player.js', player, 'this.updateCamera(dt, look.aiming, spd > 4.5 && !look.aiming, spd, follow)'],
-  ['player.js', player, 'const body = follow?.pos || this.pos'],
+  ['player.js', player, 'const ride = follow?.vehicle || (!follow && this.vehicle)'],
+  ['player.js', player, 'const body = ride ? new THREE.Vector3(ride.x, ride.y, ride.z) : (follow?.pos || this.pos)'],
   ['main.js', main, 'const refreshSpectate = ()'],
   ['main.js', main, 'const spec = refreshSpectate()'],
   ['main.js', main, 'player.update(dt, alive && !flying ? input : NO_INPUT, spec)'],

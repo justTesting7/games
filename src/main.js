@@ -27,6 +27,7 @@ import { Session } from './game/session.js';
 import { modeUrl, persistMode, persistRoom, resolveMode, resolveRoom } from './game/mode.js';
 import { isTouchDevice, setupTouch } from './game/touch.js';
 import { DRONE } from './game/drone.js';
+import { Cars } from './game/cars.js';
 import { createGameRenderer } from './engine/webgl.js';
 import { RADAR_RANGE, radarBlips, radarSubjects, drawRadar } from './game/radar.js';
 
@@ -114,8 +115,8 @@ const net = new Net({ wanted: mode === 'multi', room: roomCode });
 net.watchFocus();
 let session = null;
 
-const NO_INPUT = { forward: false, back: false, left: false, right: false, sprint: false, jump: false, aim: false, fire: false, toggleWalk: false, crouch: false, moveX: 0, moveY: 0 };
-const input = { forward: false, back: false, left: false, right: false, sprint: false, jump: false, climb: false, aim: false, fire: false, toggleWalk: false, crouch: false, fastTime: false, moveX: 0, moveY: 0 };
+const NO_INPUT = { forward: false, back: false, left: false, right: false, sprint: false, jump: false, aim: false, fire: false, toggleWalk: false, crouch: false, moveX: 0, moveY: 0, interact: false };
+const input = { forward: false, back: false, left: false, right: false, sprint: false, jump: false, climb: false, aim: false, fire: false, toggleWalk: false, crouch: false, fastTime: false, moveX: 0, moveY: 0, interact: false };
 let inPlay = false;
 const keymap = { KeyW: 'forward', ArrowUp: 'forward', KeyS: 'back', ArrowDown: 'back', KeyA: 'left', ArrowLeft: 'left', KeyD: 'right', ArrowRight: 'right', ShiftLeft: 'sprint', ShiftRight: 'sprint', ControlLeft: 'crouch', ControlRight: 'crouch', KeyT: 'fastTime' };
 addEventListener('keydown', (e) => {
@@ -130,6 +131,7 @@ addEventListener('keydown', (e) => {
   if (e.code === 'KeyF') { input.climb = true; if (!e.repeat) input.jump = true; }
   if (e.code === 'KeyC' && !e.repeat) input.toggleCrouch = true;
   if (e.code === 'KeyV' && !e.repeat) input.toggleWalk = true;
+  if (e.code === 'KeyE' && !e.repeat) input.interact = true;
   if (e.code === 'KeyR' && !e.repeat) input.reload = true;
   if (e.code === 'Enter' && !e.repeat) input.restart = true;
   if (/^Digit[1-4]$/.test(e.code)) input.slot = Number(e.code.slice(5));
@@ -340,9 +342,12 @@ async function init() {
     props.place(spawn, facing);
     pipeline.scene.add(props.group);
   }
+  const cars = new Cars(world, pipeline.scene);
+  world.cars = cars;
   if (city && data.layout) {
     city.build(data.layout);
     pipeline.scene.add(city.group);
+    cars.spawnCity();
   }
   if (arena && data.layout) {
     arena.build(data.layout);
@@ -362,7 +367,7 @@ async function init() {
   weapons.setGrenadeModel(charAssets.grenadeGltf);
   player.fighter.loadout = new Loadout(3);
   player.onScope = () => audio.mech('scope');
-  Object.assign(world, { grass, character, player, fx, weapons, data, city, arena, mapDef });
+  Object.assign(world, { grass, character, player, fx, weapons, data, city, arena, mapDef, cars, audio });
 
   const rivals = fighters.slice(1).map((entry, i) => {
     const ch = new Character();
@@ -524,6 +529,7 @@ async function init() {
     player.sniperPending = false;
     weapons.drone.clear();
     fx.decals.clear();
+    cars.reset();
   };
 
   const startRound = () => {
@@ -625,6 +631,7 @@ async function init() {
     const by = attacker === victim ? '' : attacker ? tagName(attacker) : '';
     feed(`${by} <span class="gun">▸ ${how} ▸</span> ${tagName(victim)}`);
     if (victim === player.fighter) {
+      if (player.vehicle) cars.leave(player);
       weapons.drone.clear();
       hurt = 1;
       audio.hurt(true);
@@ -807,6 +814,16 @@ async function init() {
     const dying = weapons.drone.dying;
     const spec = refreshSpectate();
     touchPad.setDrone(flying);
+    if (alive && !flying && (input.interact || input.jump) && cars.canToggle(player)) {
+      cars.toggle(player);
+      input.jump = false;
+    }
+    input.interact = false;
+    const driving = !!player.vehicle;
+    cars.update(dt, alive && !flying ? input : NO_INPUT, player, {
+      active: alive && !flying && !spec,
+      squash: round.state === 'fight' ? combat : null,
+    });
     const state = player.update(dt, alive && !flying ? input : NO_INPUT, spec);
     const canShoot = alive && round.state !== 'countdown' && !(mode === 'multi' && round.state === 'waiting');
     if (canShoot) weapons.update(dt, input);
@@ -857,7 +874,7 @@ async function init() {
 
     $('crosshair').classList.toggle('idle', !state.aiming && !flying);
     $('crosshair').classList.toggle('enemy', !!player.aimHit?.fighter);
-    $('crosshair').classList.toggle('hidden', !alive || player.scopeT > 0.35 || dying);
+    $('crosshair').classList.toggle('hidden', !alive || player.scopeT > 0.35 || dying || driving);
     $('crosshair').classList.toggle('drone', flying && !dying);
     const scoped = alive && player.scopeT > 0.45;
     $('scope').classList.toggle('show', scoped);
@@ -873,6 +890,7 @@ async function init() {
       : L.current === 'drone' ? `${L.drones}` : `${L.mag[L.current]} / ${L.reserve[L.current]}`;
     $('weaponname').textContent = spec
       ? `Spectating ${spec.persona?.name || spec.fighter.name}`
+      : driving ? 'driving · E to leave'
       : dying ? 'drone shot down — returning'
       : flying ? 'space to explode · you are exposed'
       : weapons.chargingGrenade ? 'pull back… release to throw'
@@ -909,8 +927,16 @@ async function init() {
     $('grenadewarn').classList.toggle('show', alive && near);
     const swimEl = $('swimhint');
     if (swimEl) {
-      swimEl.classList.toggle('show', alive && player.swimming);
+      swimEl.classList.toggle('show', alive && player.swimming && !driving);
       swimEl.textContent = player.diving ? 'F swim up · surface to breathe' : 'F swim up / exit · Ctrl dive';
+    }
+    const carEl = $('carhint');
+    if (carEl) {
+      const prompt = cars.prompt;
+      carEl.classList.toggle('show', alive && !!prompt && !player.swimming);
+      carEl.textContent = prompt?.mode === 'drive'
+        ? `E leave · WASD drive · ${Math.abs(prompt.speed).toFixed(0)} m/s`
+        : 'E enter car';
     }
     const hp = spec ? spec.fighter.health : player.fighter.health;
     $('hpbar').style.width = `${(hp / MAX_HEALTH) * 100}%`;

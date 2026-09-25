@@ -8,6 +8,7 @@ const DAMAGE = {
   rifle: { body: 80, head: 200 },
   grenade: { body: 120, head: 120 },
   drone: { body: 150, head: 150 },
+  car: { body: 200, head: 200 },
 };
 const ROSTERS = new Set(['adventurer', 'redpolo', 'greytee', 'checkers', 'denim', 'linen']);
 const WEAPONS = new Set(['pistols', 'rifle', 'grenade', 'drone']);
@@ -32,6 +33,8 @@ export class GameRoom extends DurableObject {
     this.map = this.settings.map || (await this.ctx.storage.get('map')) || '';
     this.hostId = (await this.ctx.storage.get('hostId')) || '';
     this.nextSlot = 0;
+    this.fleet = Array.from({ length: 8 }, () => null);
+    this.seats = Array(8).fill(null);
     const saved = (await this.ctx.storage.get('players')) || {};
     for (const [id, rec] of Object.entries(saved)) {
       this.adopt(null, { ...rec, id, away: true, awayAt: rec.awayAt || Date.now() });
@@ -78,6 +81,7 @@ export class GameRoom extends DurableObject {
       yaw: a.yaw || 0,
       w: WEAPONS.has(a.w) ? a.w : 'pistols',
       drone: a.drone || null,
+      car: Number.isFinite(a.car) ? a.car : null,
       away: !!a.away && !ws,
       awayAt: a.awayAt || 0,
     };
@@ -90,6 +94,7 @@ export class GameRoom extends DurableObject {
     return {
       id: p.id, name: p.name, color: p.color, roster: p.roster, slot: p.slot,
       p: p.p, yaw: p.yaw, hp: p.hp, alive: p.alive, w: p.w, drone: p.drone || undefined,
+      car: Number.isFinite(p.car) ? p.car : undefined,
       away: !!p.away,
     };
   }
@@ -113,6 +118,17 @@ export class GameRoom extends DurableObject {
 
   packSettings() {
     return { map: this.map, time: this.settings.time, min: this.minPlayers() };
+  }
+
+  packFleet() {
+    return this.fleet.map((c, i) => (c ? { i, ...c } : null)).filter(Boolean);
+  }
+
+  freeSeat(id) {
+    if (!this.seats) return;
+    for (let i = 0; i < this.seats.length; i++) {
+      if (this.seats[i] === id) this.seats[i] = null;
+    }
   }
 
   takeHostSettings(msg) {
@@ -171,6 +187,7 @@ export class GameRoom extends DurableObject {
         hostId: this.hostId,
         settings: this.packSettings(),
         round: this.round,
+        cars: this.packFleet(),
         peers: [...this.players.values()].filter((o) => o.id !== existing.id).map((o) => this.snap(o)),
       });
       await this.persist();
@@ -189,6 +206,7 @@ export class GameRoom extends DurableObject {
       hostId: this.hostId,
       settings: this.packSettings(),
       round: this.round,
+      cars: this.packFleet(),
       peers: [...this.players.values()].filter((o) => o.id !== id).map((o) => this.snap(o)),
     });
     await this.persist();
@@ -246,10 +264,13 @@ export class GameRoom extends DurableObject {
       mine.cr = num(msg.cr);
       mine.aim = !!msg.aim;
       if (WEAPONS.has(msg.w)) mine.w = msg.w;
+      if (msg.car === null) mine.car = null;
+      else if (Number.isFinite(+msg.car)) mine.car = Math.max(0, Math.min(7, Math.round(+msg.car)));
       this.broadcast(ws, {
         t: 'pose', id: mine.id, p: mine.p, yaw: mine.yaw, pitch: num(msg.pitch),
         spd: mine.spd, g: mine.g, cr: mine.cr, aim: mine.aim, w: mine.w,
         alive: mine.alive, hp: mine.hp,
+        car: Number.isFinite(mine.car) ? mine.car : null,
       });
       return;
     }
@@ -289,11 +310,48 @@ export class GameRoom extends DurableObject {
       return;
     }
 
+    if (msg.t === 'car') {
+      await this.onCar(mine, ws, msg);
+      return;
+    }
+
+    if (msg.t === 'runover' && typeof msg.hid === 'string') {
+      if (this.round.state !== 'fight' || !mine.alive) return;
+      const vic = this.players.get(msg.hid);
+      if (!vic || !vic.alive) return;
+      await this.applyHit(mine, vic, false, 'car', msg.dir);
+      return;
+    }
+
     if (msg.t === 'ready') {
       mine.ready = true;
       await this.persist();
       await this.tryStart();
     }
+  }
+
+  async onCar(mine, ws, msg) {
+    const i = Math.round(num(msg.i));
+    if (i < 0 || i > 7) return;
+    const act = str(msg.a, 8);
+    const p = Array.isArray(msg.p) ? msg.p.slice(0, 3).map(num) : mine.p;
+    const yaw = num(msg.yaw);
+    const spd = num(msg.spd);
+    if (act === 'in') {
+      if (this.seats[i] && this.seats[i] !== mine.id) return;
+      this.freeSeat(mine.id);
+      this.seats[i] = mine.id;
+      mine.car = i;
+    } else if (act === 'out') {
+      if (this.seats[i] === mine.id) this.seats[i] = null;
+      if (mine.car === i) mine.car = null;
+    } else if (act === 'pose') {
+      if (this.seats[i] !== mine.id) return;
+    } else {
+      return;
+    }
+    this.fleet[i] = { p, yaw, spd: act === 'out' ? 0 : spd };
+    this.broadcast(ws, { t: 'car', a: act, id: mine.id, i, p, yaw, spd: this.fleet[i].spd });
   }
 
   async onDrone(mine, ws, msg) {
@@ -355,7 +413,10 @@ export class GameRoom extends DurableObject {
       p.alive = true;
       p.ready = false;
       p.drone = null;
+      p.car = null;
     }
+    this.fleet = Array.from({ length: 8 }, () => null);
+    this.seats = Array(8).fill(null);
     this.round = { state: 'countdown', ends: Date.now() + 3000 };
     this.broadcast(null, {
       t: 'round',
@@ -363,6 +424,7 @@ export class GameRoom extends DurableObject {
       ends: this.round.ends,
       slots: Object.fromEntries([...this.players.values()].map((p) => [p.id, p.slot])),
       peers: [...this.players.values()].map((p) => this.snap(p)),
+      cars: [],
     });
     await this.persist();
     await this.armAlarm(this.round.ends);
@@ -413,6 +475,7 @@ export class GameRoom extends DurableObject {
   }
 
   async drop(p) {
+    this.freeSeat(p.id);
     this.players.delete(p.id);
     this.broadcast(null, { t: 'leave', id: p.id });
     if (p.id === this.hostId) {
