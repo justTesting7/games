@@ -45,12 +45,12 @@ if (!arena.group.getObjectByName('concourse-ribbon')) {
   console.error('missing concourse LED ribbon');
   process.exit(1);
 }
-if (!arena.group.getObjectByName('suite-windows')) {
-  console.error('missing suite windows');
-  process.exit(1);
-}
 if (!arena.group.getObjectByName('suite-ribbon')) {
   console.error('missing suite LED ribbon');
+  process.exit(1);
+}
+if (!arena.group.getObjectByName('crown-ribbon')) {
+  console.error('missing crown LED ribbon');
   process.exit(1);
 }
 const board = arena.group.getObjectByName('msg-scoreboard');

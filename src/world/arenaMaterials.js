@@ -444,38 +444,136 @@ export function makeGardenSign() {
   });
 }
 
-/** Digital ribbon board that wraps the bowl — orange/white ads, not a painted bar. */
+export const AD_COUNT = 8;
+export const AD_MOVE = 2.8;
+export const AD_HOLD = 3.2;
+
+/** Shared ticker: slide one ad, hold, slide the next. Units are atlas-widths. */
+export function adScroll(t) {
+  const period = AD_MOVE + AD_HOLD;
+  const idx = Math.floor(t / period);
+  const phase = t - idx * period;
+  const u = Math.min(1, Math.max(0, phase / AD_MOVE));
+  const k = phase < AD_MOVE ? u * u * (3 - 2 * u) : 1;
+  return (idx + k) / AD_COUNT;
+}
+
+const AD_SPOTS = [
+  { bg: [0.78, 0.06, 0.18], fg: [1, 0.97, 0.94] },
+  { bg: [0.00, 0.19, 0.53], fg: [0.91, 0.93, 1] },
+  { bg: [1.00, 0.42, 0.00], fg: [0.12, 0.05, 0] },
+  { bg: [0.96, 0.82, 0.00], fg: [0.12, 0.09, 0] },
+  { bg: [0.00, 0.42, 0.71], fg: [0.96, 0.52, 0.15] },
+  { bg: [0.07, 0.54, 0.24], fg: [0.96, 1, 0.94] },
+  { bg: [0.07, 0.07, 0.08], fg: [0.95, 0.76, 0.31] },
+  { bg: [0.48, 0.06, 0.19], fg: [1, 0.91, 0.78] },
+];
+
+function paintAds(ctx, W, H) {
+  const spots = [
+    { bg: '#c8102e', fg: '#fff8f0', name: 'RED RUSH', sub: 'CLASSIC COLA' },
+    { bg: '#003087', fg: '#e8eeff', name: 'NEXUS 2', sub: 'PLAY THE WORLD' },
+    { bg: '#ff6a00', fg: '#1a0800', name: 'BOLT-ADE', sub: 'GO THE DISTANCE' },
+    { bg: '#f5d000', fg: '#1a1400', name: 'BIG CRUNCH', sub: 'SNACK ATTACK' },
+    { bg: '#006bb6', fg: '#f58426', name: 'THE GARDEN', sub: 'NEW YORK' },
+    { bg: '#128a3c', fg: '#f4fff0', name: 'VOLT', sub: 'CHARGE UP' },
+    { bg: '#111111', fg: '#f2c14e', name: 'AERO', sub: 'FLY NIGHTS' },
+    { bg: '#7a1030', fg: '#ffe8c8', name: 'SLICE CO', sub: 'HOT & READY' },
+  ];
+  const slot = W / spots.length;
+  spots.forEach((ad, i) => {
+    const x = i * slot;
+    ctx.fillStyle = ad.bg;
+    ctx.fillRect(x, 0, slot, H);
+    ctx.fillStyle = i % 2 ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)';
+    ctx.fillRect(x, 0, 10, H);
+    ctx.fillRect(x + slot - 10, 0, 10, H);
+    ctx.fillStyle = ad.fg;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = `900 ${Math.round(H * 0.38)}px Arial, "Helvetica Neue", sans-serif`;
+    ctx.fillText(ad.name, x + slot * 0.5, H * 0.42);
+    ctx.font = `800 ${Math.round(H * 0.14)}px Arial, sans-serif`;
+    ctx.globalAlpha = 0.88;
+    ctx.fillText(ad.sub, x + slot * 0.5, H * 0.72);
+    ctx.globalAlpha = 1;
+  });
+}
+
+function makeAdAtlas() {
+  if (typeof document !== 'undefined') {
+    const c = document.createElement('canvas');
+    c.width = 4096;
+    c.height = 256;
+    paintAds(c.getContext('2d'), c.width, c.height);
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.wrapS = THREE.RepeatWrapping;
+    tex.wrapT = THREE.ClampToEdgeWrapping;
+    tex.anisotropy = 8;
+    tex.needsUpdate = true;
+    return tex;
+  }
+  const data = new Uint8Array(AD_COUNT * 4);
+  AD_SPOTS.forEach((ad, i) => {
+    data[i * 4] = Math.round(ad.bg[0] * 255);
+    data[i * 4 + 1] = Math.round(ad.bg[1] * 255);
+    data[i * 4 + 2] = Math.round(ad.bg[2] * 255);
+    data[i * 4 + 3] = 255;
+  });
+  const tex = new THREE.DataTexture(data, AD_COUNT, 1, THREE.RGBAFormat);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.magFilter = THREE.NearestFilter;
+  tex.needsUpdate = true;
+  return tex;
+}
+
+/** One stadium-wide LED ticker. Every ring shares this so ads move together. */
 export function makeRibbon() {
+  const atlas = makeAdAtlas();
   return new THREE.ShaderMaterial({
-    uniforms: { uTime: { value: 0 } },
+    uniforms: {
+      uTime: { value: 0 },
+      uAtlas: { value: atlas },
+    },
     vertexShader: /* glsl */ `
 varying vec3 vWorldPos;
+varying vec2 vUv;
 void main() {
   vec4 wp = modelMatrix * vec4(position, 1.0);
   vWorldPos = wp.xyz;
+  vUv = uv;
   gl_Position = projectionMatrix * viewMatrix * wp;
 }
 `,
     fragmentShader: /* glsl */ `
 uniform float uTime;
+uniform sampler2D uAtlas;
 varying vec3 vWorldPos;
+varying vec2 vUv;
+float ticker(float t) {
+  const float MOVE = 2.8;
+  const float HOLD = 3.2;
+  const float ADS = 8.0;
+  float period = MOVE + HOLD;
+  float idx = floor(t / period);
+  float phase = t - idx * period;
+  float u = clamp(phase / MOVE, 0.0, 1.0);
+  float k = phase < MOVE ? u * u * (3.0 - 2.0 * u) : 1.0;
+  return (idx + k) / ADS;
+}
 void main() {
-  float u = atan(vWorldPos.z, vWorldPos.x) / 6.2831853;
-  float v = fract(vWorldPos.y * 0.85);
-  float t = uTime;
-  vec3 bg = vec3(0.04, 0.05, 0.07);
-  vec3 orange = vec3(0.98, 0.45, 0.08);
-  vec3 blue = vec3(0.05, 0.22, 0.62);
-  vec3 white = vec3(0.92, 0.93, 0.9);
-  float cell = floor(u * 96.0 + t * 3.2);
-  float lane = step(0.5, fract(cell * 0.137));
-  vec3 brand = mix(orange, blue, lane);
-  float dash = step(0.18, fract(u * 44.0 - t * 1.4));
-  float mid = step(0.16, v) * step(v, 0.84);
-  vec3 col = mix(bg, mix(brand, white, 0.15), mid * dash);
-  float pix = step(0.75, fract(u * 180.0)) + step(0.7, fract(v * 10.0));
-  col *= mix(1.0, 0.55, step(0.5, pix));
-  col *= 0.85 + 0.15 * sin(t * 2.0 + cell);
+  float ang = atan(vWorldPos.z, vWorldPos.x) / 6.2831853;
+  float u = fract(-ang + ticker(uTime));
+  float v = clamp(vUv.y, 0.02, 0.98);
+  vec3 col = texture2D(uAtlas, vec2(u, v)).rgb;
+  vec2 g = fract(vec2(u * 220.0, v * 18.0));
+  float pix = step(0.82, max(g.x, g.y));
+  col *= mix(1.0, 0.62, pix);
+  float edge = smoothstep(0.0, 0.08, v) * smoothstep(1.0, 0.92, v);
+  col *= 0.55 + 0.45 * edge;
+  col *= 1.25;
   gl_FragColor = vec4(col, 1.0);
 }
 `,

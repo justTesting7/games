@@ -27,7 +27,7 @@ const C_FASCIA = new THREE.Color(0x2a2e36);
 const C_SPANDREL = new THREE.Color(0x16181d);
 const C_MULLION = new THREE.Color(0x0c0d10);
 const C_WALL = new THREE.Color(0x1b1c20);
-const C_HALL = new THREE.Color(0x6e6a64);
+const C_HALL = new THREE.Color(0x2a2c30);
 
 function mesh(geo, mat, x, y, z, rx = 0, ry = 0, rz = 0) {
   const m = new THREE.Mesh(geo, mat);
@@ -81,30 +81,33 @@ class GeoBuilder {
     this.pos = [];
     this.nrm = [];
     this.col = [];
+    this.uv = [];
     this.idx = [];
   }
 
-  vert(x, y, z, nx, ny, nz, c) {
+  vert(x, y, z, nx, ny, nz, c, u = 0, v = 0) {
     this.pos.push(x, y, z);
     this.nrm.push(nx, ny, nz);
     this.col.push(c.r, c.g, c.b);
+    this.uv.push(u, v);
     return this.pos.length / 3 - 1;
   }
 
   /** Quad from four vertices given counter-clockwise when seen from the front. */
-  quad(v, c) {
-    const [a, b, cc, d] = v.map((p) => this.vert(p[0], p[1], p[2], p[3], p[4], p[5], c));
+  quad(verts, c) {
+    const [a, b, cc, d] = verts.map((p) => this.vert(p[0], p[1], p[2], p[3], p[4], p[5], c, p[6] || 0, p[7] || 0));
     this.idx.push(a, b, cc, a, cc, d);
   }
 
   /** Horizontal band between offsets r0..r1 at height y. */
   flat(sec, r0, r1, y, c, span = FULL) {
     for (const p of sectionPieces(sec, span)) {
-      const a0 = bowlFrame(r0, p.at(r0)), b0 = bowlFrame(r0, p.bt(r0));
+      const ta = p.at(r0), tb = p.bt(r0);
+      const a0 = bowlFrame(r0, ta), b0 = bowlFrame(r0, p.bt(r0));
       const a1 = bowlFrame(r1, p.at(r1)), b1 = bowlFrame(r1, p.bt(r1));
       this.quad([
-        [a0.x, y, a0.z, 0, 1, 0], [b0.x, y, b0.z, 0, 1, 0],
-        [b1.x, y, b1.z, 0, 1, 0], [a1.x, y, a1.z, 0, 1, 0],
+        [a0.x, y, a0.z, 0, 1, 0, ta, 0], [b0.x, y, b0.z, 0, 1, 0, tb, 0],
+        [b1.x, y, b1.z, 0, 1, 0, tb, 1], [a1.x, y, a1.z, 0, 1, 0, ta, 1],
       ], c);
     }
   }
@@ -113,12 +116,14 @@ class GeoBuilder {
   wall(sec, r, y0, y1, c, span = FULL, outward = false) {
     const s = outward ? 1 : -1;
     for (const p of sectionPieces(sec, span)) {
-      const a = bowlFrame(r, p.at(r)), b = bowlFrame(r, p.bt(r));
-      const va = [a.x, 0, a.z, a.nx * s, 0, a.nz * s];
-      const vb = [b.x, 0, b.z, b.nx * s, 0, b.nz * s];
-      const at = (v, y) => [v[0], y, v[2], v[3], v[4], v[5]];
-      if (outward) this.quad([at(vb, y0), at(va, y0), at(va, y1), at(vb, y1)], c);
-      else this.quad([at(va, y0), at(vb, y0), at(vb, y1), at(va, y1)], c);
+      const ta = p.at(r), tb = p.bt(r);
+      const a = bowlFrame(r, ta), b = bowlFrame(r, tb);
+      const qa = [a.x, y0, a.z, a.nx * s, 0, a.nz * s, ta, 0];
+      const qb = [b.x, y0, b.z, b.nx * s, 0, b.nz * s, tb, 0];
+      const qc = [b.x, y1, b.z, b.nx * s, 0, b.nz * s, tb, 1];
+      const qd = [a.x, y1, a.z, a.nx * s, 0, a.nz * s, ta, 1];
+      if (outward) this.quad([qb, qa, qd, qc], c);
+      else this.quad([qa, qb, qc, qd], c);
     }
   }
 
@@ -127,6 +132,7 @@ class GeoBuilder {
     g.setAttribute('position', new THREE.Float32BufferAttribute(this.pos, 3));
     g.setAttribute('normal', new THREE.Float32BufferAttribute(this.nrm, 3));
     g.setAttribute('color', new THREE.Float32BufferAttribute(this.col, 3));
+    g.setAttribute('uv', new THREE.Float32BufferAttribute(this.uv, 2));
     g.setIndex(this.idx);
     g.computeBoundingSphere();
     return g;
@@ -279,7 +285,7 @@ export class Arena {
     const table = mesh(new THREE.BoxGeometry(12.5, 0.08, 0.72), mats.pad, 0, y0 + 0.78, -(hz + 1.2));
     table.userData.shadow = true;
     this.group.add(table);
-    const front = mesh(new THREE.BoxGeometry(12.5, 0.72, 0.08), mats.jumbo, 0, y0 + 0.4, -(hz + 0.82));
+    const front = mesh(new THREE.BoxGeometry(12.5, 0.72, 0.08), mats.ribbon, 0, y0 + 0.4, -(hz + 0.82));
     this.group.add(front);
     addBox(this.colliders, 0, -(hz + 1.2), y0, 6.25, 0.4, 1.0, 'cover');
     for (const side of [-1, 1]) {
@@ -441,24 +447,33 @@ export class Arena {
     this.group.add(postMesh);
   }
 
+  /** Continuous LED band. Every ring uses the same ad material so they scroll as one. */
+  addAdBand(mats, name, r, y0, y1, span = FULL) {
+    const frame = new GeoBuilder();
+    const ribbon = new GeoBuilder();
+    const pad = Math.min(0.1, (y1 - y0) * 0.08);
+    for (let sec = 0; sec < S; sec++) {
+      frame.wall(sec, r + 0.05, y0, y1, C_MULLION, span);
+      ribbon.wall(sec, r - 0.02, y0 + pad, y1 - pad, C_FASCIA, span);
+    }
+    const f = new THREE.Mesh(frame.build(), mats.steel);
+    f.name = `${name}-frame`;
+    const rib = new THREE.Mesh(ribbon.build(), mats.ribbon);
+    rib.name = name;
+    this.group.add(f, rib);
+    return rib;
+  }
+
   /** Tall court-facing LED fascia so the concourse does not read as a painted bar. */
   buildParapet(mats) {
-    const g = new GeoBuilder();
-    const ribbon = new GeoBuilder();
     const r = ARENA.concIn * ARENA.RU + 0.02;
     const y0 = ARENA.concY;
     const lastLowY = LOWER_ROWS[LOWER_ROWS.length - 1].y;
     const faceTop = y0 + 2.55;
-    const ribY0 = lastLowY + 0.18;
-    const ribY1 = faceTop - 0.22;
+    this.addAdBand(mats, 'concourse-ribbon', r, lastLowY + 0.06, faceTop, INNER);
     const dummy = new THREE.Object3D();
     const posts = [];
     for (let sec = 0; sec < S; sec++) {
-      g.wall(sec, r, lastLowY, ribY0, C_SPANDREL, INNER);
-      g.wall(sec, r, ribY1, faceTop, C_SPANDREL, INNER);
-      g.wall(sec, r + 0.28, y0, faceTop, C_WALL, INNER, true);
-      g.flat(sec, r, r + 0.28, faceTop, C_MULLION, INNER);
-      ribbon.wall(sec, r - 0.04, ribY0, ribY1, C_FASCIA, INNER);
       const L = rowLength(r, sec / S, (sec + 1) / S);
       for (const d of [AISLE_W + 0.08, L - AISLE_W - 0.08]) {
         posts.push(bowlFrame(r - 0.03, paramAt(sec, r, d)));
@@ -468,12 +483,6 @@ export class Arena {
         addBox(this.colliders, f.x, f.z, y0 - 0.3, 0.22, 0.22, faceTop - y0 + 0.3, 'cover');
       }
     }
-    const m = new THREE.Mesh(g.build(), mats.trim);
-    m.name = 'concourse-fascia';
-    this.group.add(m);
-    const rib = new THREE.Mesh(ribbon.build(), mats.ribbon);
-    rib.name = 'concourse-ribbon';
-    this.group.add(rib);
     const cap = new THREE.InstancedMesh(new THREE.BoxGeometry(0.2, faceTop - lastLowY, 0.28), mats.steel, posts.length);
     cap.name = 'fascia-pilasters';
     posts.forEach((p, i) => {
@@ -486,57 +495,22 @@ export class Arena {
     this.group.add(cap);
   }
 
-  /** Suite bays and a press band — glass boxes, not beige stripes. */
+  /** Upper bowl rings are LED tickers — no empty beige suite / press bars. */
   buildBackWall(mats) {
     const g = new GeoBuilder();
-    const bands = new GeoBuilder();
-    const ribbon = new GeoBuilder();
     const r = ARENA.hallIn * ARENA.RU;
     const top = ARENA.topY;
     const roofY = ARENA.roofY;
-    const lintel = top + 0.85;
-    const glass0 = top + 1.05;
-    const glass1 = top + 5.15;
-    const press0 = top + 5.85;
-    const press1 = top + 7.45;
     const doorL = (L) => [0, (L - DOOR_W) * 0.5];
     const doorR = (L) => [(L + DOOR_W) * 0.5, L];
-    const panes = [];
-    const mullions = [];
     for (let sec = 0; sec < S; sec++) {
       const L = rowLength(r, sec / S, (sec + 1) / S);
       const wallSpan = HALL_DOORS.has(sec) ? [doorL, doorR] : [FULL];
       for (const span of wallSpan) {
-        g.wall(sec, r, top, lintel, C_SPANDREL, span);
-        bands.wall(sec, r - 0.04, lintel, glass0, C_FASCIA, span);
-        bands.wall(sec, r - 0.06, glass0, glass1, C_MULLION, span);
-        bands.wall(sec, r - 0.04, glass1, press0, C_FASCIA, span);
-        bands.wall(sec, r - 0.05, press0, press1, C_SPANDREL, span);
-        bands.wall(sec, r - 0.04, press1, press1 + 0.55, C_FASCIA, span);
+        g.wall(sec, r, top, top + 0.7, C_SPANDREL, span);
       }
-      if (HALL_DOORS.has(sec)) {
-        bands.wall(sec, r - 0.04, top + DOOR_H, glass0, C_FASCIA);
-      }
-      ribbon.wall(sec, r - 0.08, lintel + 0.04, glass0 - 0.04, C_FASCIA, HALL_DOORS.has(sec) ? FULL : INNER);
-      bands.flat(sec, r - 2.4, r, press1 + 0.55, C_WALL);
-      g.wall(sec, r, press1 + 0.55, roofY + 0.2, C_WALL);
-
-      const usable = L - AISLE_W * 2;
-      const paneW = 2.15;
-      const gap = 0.2;
-      const n = Math.max(1, Math.floor((usable + gap) / (paneW + gap)));
-      const used = n * paneW + (n - 1) * gap;
-      const start = AISLE_W + Math.max(0, (usable - used) * 0.5);
-      for (let i = 0; i < n; i++) {
-        const d = start + i * (paneW + gap) + paneW * 0.5;
-        if (HALL_DOORS.has(sec) && Math.abs(d - L * 0.5) < DOOR_W * 0.55) continue;
-        const f = bowlFrame(r - 0.03, paramAt(sec, r - 0.03, d));
-        panes.push({ f, w: paneW * 0.92 });
-        if (i > 0) {
-          const md = start + i * (paneW + gap) - gap * 0.5;
-          mullions.push(bowlFrame(r - 0.05, paramAt(sec, r - 0.05, md)));
-        }
-      }
+      g.flat(sec, r - 2.2, r, top + 7.7, C_WALL);
+      g.wall(sec, r, top + 7.7, roofY + 0.2, C_WALL);
       for (let d = 0.4; d < L; d += 0.8) {
         if (HALL_DOORS.has(sec) && Math.abs(d - L * 0.5) < DOOR_W * 0.5) continue;
         const f = bowlFrame(r + 0.45, paramAt(sec, r + 0.45, d));
@@ -546,60 +520,8 @@ export class Arena {
     const wall = new THREE.Mesh(g.build(), mats.steps);
     wall.name = 'msg-suite-wall';
     this.group.add(wall);
-    const bandMesh = new THREE.Mesh(bands.build(), mats.trim);
-    bandMesh.name = 'msg-suite-bands';
-    this.group.add(bandMesh);
-    const rib = new THREE.Mesh(ribbon.build(), mats.ribbon);
-    rib.name = 'suite-ribbon';
-    this.group.add(rib);
-
-    const dummy = new THREE.Object3D();
-    const gh = glass1 - glass0 - 0.12;
-    const glow = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), mats.suiteGlow, panes.length);
-    const glass = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), mats.suiteGlass, panes.length);
-    glow.name = 'suite-glow';
-    glass.name = 'suite-windows';
-    panes.forEach((p, i) => {
-      dummy.position.set(p.f.x, (glass0 + glass1) * 0.5, p.f.z);
-      dummy.quaternion.setFromAxisAngle(UP, Math.atan2(-p.f.nx, -p.f.nz));
-      dummy.scale.set(p.w, gh, 0.08);
-      dummy.updateMatrix();
-      glow.setMatrixAt(i, dummy.matrix);
-      dummy.position.addScaledVector(new THREE.Vector3(p.f.nx, 0, p.f.nz), -0.06);
-      dummy.scale.set(p.w, gh, 0.04);
-      dummy.updateMatrix();
-      glass.setMatrixAt(i, dummy.matrix);
-    });
-    glow.instanceMatrix.needsUpdate = true;
-    glass.instanceMatrix.needsUpdate = true;
-    this.group.add(glow, glass);
-
-    const pressH = press1 - press0 - 0.1;
-    const pressGlass = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), mats.suiteGlass, panes.length);
-    pressGlass.name = 'press-windows';
-    panes.forEach((p, i) => {
-      dummy.position.set(p.f.x, (press0 + press1) * 0.5, p.f.z);
-      dummy.quaternion.setFromAxisAngle(UP, Math.atan2(-p.f.nx, -p.f.nz));
-      dummy.scale.set(p.w * 0.95, pressH, 0.05);
-      dummy.updateMatrix();
-      pressGlass.setMatrixAt(i, dummy.matrix);
-    });
-    pressGlass.instanceMatrix.needsUpdate = true;
-    this.group.add(pressGlass);
-
-    if (mullions.length) {
-      const posts = new THREE.InstancedMesh(new THREE.BoxGeometry(0.14, gh + 0.2, 0.18), mats.steel, mullions.length);
-      posts.name = 'suite-mullions';
-      dummy.scale.set(1, 1, 1);
-      mullions.forEach((f, i) => {
-        dummy.position.set(f.x, (glass0 + glass1) * 0.5, f.z);
-        dummy.quaternion.setFromAxisAngle(UP, Math.atan2(-f.nx, -f.nz));
-        dummy.updateMatrix();
-        posts.setMatrixAt(i, dummy.matrix);
-      });
-      posts.instanceMatrix.needsUpdate = true;
-      this.group.add(posts);
-    }
+    this.addAdBand(mats, 'suite-ribbon', r - 0.06, top + 0.72, top + 5.45, FULL);
+    this.addAdBand(mats, 'crown-ribbon', r - 0.08, top + 5.55, top + 7.65, FULL);
   }
 
   /** Outer ring hall behind the suites: concourse floor, concessions, the building shell. */
@@ -771,6 +693,9 @@ export class Arena {
       g.add(s);
     }
     g.add(mesh(new THREE.BoxGeometry(W + 0.4, 0.28, W + 0.4), mats.housing, 0, -H * 0.5 - 0.14, 0));
+    const belt = mesh(new THREE.BoxGeometry(W + 0.55, 0.62, W + 0.55), mats.ribbon, 0, -H * 0.5 - 0.52, 0);
+    belt.name = 'scoreboard-ribbon';
+    g.add(belt);
     for (let i = 0; i < 16; i++) {
       const a = (i / 16) * Math.PI * 2;
       g.add(mesh(new THREE.CylinderGeometry(0.18, 0.22, 0.32, 8), mats.fixture, Math.cos(a) * 4.6, -H * 0.5 - 0.44, Math.sin(a) * 4.6));
