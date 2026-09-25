@@ -533,16 +533,6 @@ export class Rival {
         criteria: options,
       },
     };
-    if (enemies.length > 1) {
-      const crit = {};
-      enemies.forEach((e) => { crit[e.id] = `${e.name}${e.isPlayer ? ' (the human player)' : ''}`; });
-      questions.target = {
-        type: 'choice',
-        instructions: `You are ${me.name}. Which enemy should you fight right now? Prefer enemies you can see, that threaten you, or that are weak.`,
-        criteria: crit,
-      };
-    }
-
     const weapons = {};
     if (L.has('pistols')) weapons.pistols = GUNS.pistols;
     if (L.has('rifle')) weapons.rifle = GUNS.rifle;
@@ -576,11 +566,7 @@ export class Rival {
   decide(ans, options, enemies, cover) {
     const alive = enemies.filter((e) => e.alive);
     if (!alive.length) return;
-    let target = null;
-    if (ans?.target) target = alive.find((e) => e.id === ans.target.choice);
-    if (!target && alive.length === 1) target = alive[0];
-    if (!target) target = this.localTarget(alive);
-    this.setTarget(target);
+    this.setTarget(this.closestEnemy(alive));
 
     if (this.isRuthless()) {
       this.source = ans?.tactic ? 'jev' : 'local';
@@ -648,14 +634,23 @@ export class Rival {
     return best;
   }
 
-  localTarget(alive) {
-    let best = null, bestS = Infinity;
-    for (const e of alive) {
-      const m = this.seen(e);
-      const s = e.pos.distanceTo(this.pos) * (m.visible ? 1 : 2.5) + e.health * 0.1 - (this.fighter.lastAttacker === e ? 15 : 0);
-      if (s < bestS) { bestS = s; best = e; }
+  // First target is always the closest living enemy. If anyone is in sight,
+  // shoot the nearest visible one instead of a closer body behind a wall.
+  closestEnemy(alive = this.enemies()) {
+    const list = alive.filter((e) => e.alive);
+    if (!list.length) return null;
+    const seen = list.filter((e) => this.seen(e).visible);
+    const pool = seen.length ? seen : list;
+    let best = pool[0], bestD = best.pos.distanceTo(this.pos);
+    for (let i = 1; i < pool.length; i++) {
+      const d = pool[i].pos.distanceTo(this.pos);
+      if (d < bestD) { best = pool[i]; bestD = d; }
     }
     return best;
+  }
+
+  localTarget(alive) {
+    return this.closestEnemy(alive);
   }
 
   localTactic(options, cover) {
@@ -1166,7 +1161,7 @@ export class Rival {
     let wish = { dir: new THREE.Vector3(), speed: 0, aim: false, jump: false };
     if (active) {
       this.perceive(dt);
-      if (!this.target || !this.target.alive) this.setTarget(this.localTarget(this.enemies()));
+      this.setTarget(this.closestEnemy(this.enemies()));
       // Getting shot or losing the target calls for a quick rethink.
       if (this.combat.time - this.fighter.lastHitT < dt * 1.5) this.thinkT = Math.min(this.thinkT, 0.12);
       this.thinkT -= dt;
