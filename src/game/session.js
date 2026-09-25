@@ -3,6 +3,7 @@ import { Character } from './character.js';
 import { Loadout } from './weapons.js';
 import { byId, resolveLooks } from './roster.js';
 import { RemoteDrone } from './drone.js';
+import { standSpawn } from '../world/arenaLayout.js';
 
 const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 const vec = (a, fallback = [0, 0, 0]) => new THREE.Vector3(a?.[0] ?? fallback[0], a?.[1] ?? fallback[1], a?.[2] ?? fallback[2]);
@@ -64,7 +65,13 @@ class Remote {
     this.yaw += wrap(this.targetYaw - this.yaw) * Math.min(1, dt * 10);
     const ch = this.character;
     ch.root.position.copy(this.pos);
-    if (!ch.dead) ch.root.rotation.y = this.yaw;
+    const swimming = this.pos.y < 0.15;
+    if (!ch.dead) {
+      ch.root.rotation.order = 'YXZ';
+      ch.root.rotation.x = swimming && this.pos.y < -1.6 ? 0.9 : swimming ? 0.3 : 0;
+      ch.root.rotation.y = this.yaw;
+      ch.root.rotation.z = 0;
+    }
     const look = new THREE.Vector3(
       Math.sin(this.yaw) * Math.cos(this.pitch || 0),
       Math.sin(this.pitch || 0),
@@ -79,10 +86,12 @@ class Remote {
       localDir: new THREE.Vector3(0, 0, 1),
       jumpStarted: false,
       predictedAir: 0.6,
-      aiming: this.aiming,
+      aiming: this.aiming && !swimming,
       aimPoint,
       lookDir: look,
       crouch: this.crouch,
+      swimming,
+      diving: swimming && this.pos.y < -1.5,
     });
   }
 
@@ -185,8 +194,10 @@ export class Session {
 
   reportShot(o, d, w, hid, head) {
     if (!this.multi) return;
+    this.shotSeq = (this.shotSeq || 0) + 1;
     this.net.send({
       t: 'shot',
+      n: this.shotSeq,
       o: [o.x, o.y, o.z],
       d: [d.x, d.y, d.z],
       w,
@@ -247,10 +258,15 @@ export class Session {
   }
 
   placeLocal(slot = this.slot) {
-    const ang = slot * 2.15;
-    const x = this.spawn.x + Math.sin(ang) * 14;
-    const z = this.spawn.z + Math.cos(ang) * 14;
-    this.player.spawn(x, z, ang + Math.PI);
+    if (this.mapId === 'garden') {
+      const s = standSpawn(slot);
+      this.player.spawn(s.x, s.z, s.yaw);
+    } else {
+      const ang = slot * 2.15;
+      const x = this.spawn.x + Math.sin(ang) * 14;
+      const z = this.spawn.z + Math.cos(ang) * 14;
+      this.player.spawn(x, z, ang + Math.PI);
+    }
     this.player.vel.set(0, 0, 0);
   }
 
@@ -464,13 +480,15 @@ export class Session {
     const r = this.remotes.get(msg.id);
     if (!r) return;
     const from = vec(msg.o);
-    const dir = vec(msg.d);
+    const dir = vec(msg.d, [0, 0, 1]);
+    if (!dir.lengthSq()) dir.set(Math.sin(r.yaw || 0), 0, Math.cos(r.yaw || 0));
     if (!dir.lengthSq()) return;
     dir.normalize();
     const ch = r.character;
     const rifle = msg.w === 'rifle';
     const flash = rifle && ch.rifleMuzzle ? ch.rifleMuzzle() : ch.muzzleWorld?.(0) || from;
     this.world.fx.muzzle(flash, dir, rifle ? 2.4 : 1);
+    if (!rifle) ch.fired?.(0);
     const hit = this.world.raycast(from, dir, 900, r.fighter);
     const end = hit ? from.clone().addScaledVector(dir, hit.t) : from.clone().addScaledVector(dir, 80);
     this.world.fx.tracer(flash, end);

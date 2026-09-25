@@ -20,6 +20,7 @@
       <div id="crosshair"><i></i><i></i><i></i><i></i><b></b></div>
       <div id="grenadecharge"><i></i><small>hold to throw farther</small></div>
       <div id="hitmarker"></div>
+      <div id="radar"><canvas id="radarcanvas" width="148" height="148"></canvas><small>radar</small></div>
       <div id="round"><span id="rivalsleft">3</span><small>rivals left</small><em id="jevstat">Jev · waiting</em><em id="netstat">net · local</em></div>
       <div id="feed"></div>
       <div id="health"><span id="hpnum">100</span><div class="bar"><div id="hpbar"></div></div><small>health</small></div>
@@ -68,6 +69,7 @@
           <i id="breathbar"></i>
         </div>
       </div>
+      <div id="swimhint">F surface · Ctrl dive</div>
       <div id="grenadewarn">grenade!</div>
       <div id="banner"><div id="bannertitle"></div><div id="bannersub"></div></div>
       <div id="debug" class="hidden"></div>
@@ -114,6 +116,7 @@
             <select id="map">
               <option value="island">Relic Isle</option>
               <option value="city">Dead District</option>
+              <option value="garden">Madison Square Garden</option>
             </select>
           </label>
           <label>Graphics
@@ -124,7 +127,7 @@
               <option value="ultra">Ultra</option>
             </select>
           </label>
-          <label>Time of day
+          <label id="todrow">Time of day
             <input id="timeofday" type="range" min="0" max="1000" value="90" />
           </label>
           <label id="minrow" class="hidden">Min players
@@ -145,10 +148,10 @@
             <input id="volume" type="range" min="0" max="100" value="70" />
           </label>
         </div>
-        <p class="sub touch-hint">Left stick move · drag right to look · Fire shoots. Landscape is easier.</p>
+        <p class="sub touch-hint">Left stick move · drag right to look · Fire shoots. Jump swims up, Crouch dives. Landscape is easier.</p>
         <div class="controls">
           <div><b>WASD</b> move</div><div><b>Shift</b> sprint</div>
-          <div><b>F</b> jump</div><div><b>Ctrl</b> / <b>C</b> crouch</div>
+          <div><b>F</b> jump / swim up</div><div><b>Ctrl</b> / <b>C</b> crouch / dive</div>
           <div><b>V</b> walk / jog toggle</div>
           <div><b>Right mouse</b> aim pistols / show throw arc</div><div><b>Space</b> fire / throw</div>
           <div><b>Space hold / release</b> sniper aim / shot</div><div><b>Shift</b> (scoped) hold breath</div>

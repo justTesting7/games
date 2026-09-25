@@ -3,6 +3,7 @@ import { GRID_N, GRID_SPACING, WORLD_SIZE, HALF_WORLD, CHUNK_SIZE, CHUNKS, WORLD
 import { heightSampleGLSL } from '../engine/shaders.js';
 import { loadTextureArray, VENDOR } from '../engine/assets.js';
 import { CITY } from './cityLayout.js';
+import { ARENA } from './arenaLayout.js';
 
 export const LAYERS = ['sand', 'grass', 'forest', 'rock'];
 
@@ -16,7 +17,7 @@ export function generateHeightmap(mapId = 'island') {
 }
 
 export async function loadTerrainTextures(map) {
-  const pre = map?.id === 'city' ? 'city_' : '';
+  const pre = map?.id === 'city' || map?.id === 'garden' ? 'city_' : '';
   const url = (k, t) => `${VENDOR}/textures/${pre}${k}_${t}.jpg`;
   const [albedo, normal, arm] = await Promise.all([
     loadTextureArray(LAYERS.map((k) => url(k, 'diff')), 1024, { srgb: true }),
@@ -101,6 +102,9 @@ uniform highp sampler2DArray tArm;
 uniform float uWorldSize;
 uniform float uTime;
 uniform float uUrban;
+uniform float uArena;
+uniform vec2 uArenaCore;
+uniform vec2 uArenaShell;
 uniform float uStreetPitch;
 uniform float uBlockW;
 uniform float uStreetW;
@@ -185,7 +189,14 @@ float tRough = mix(tArmS.g, 0.22, wet);
 float tAO = mix(tArmS.r, 1.0, 0.3);
 tNrmW = normalize(mix(tNrmW, nW, wet * 0.6 + smoothstep(60.0, 300.0, dist) * 0.5));
 
-if (uUrban > 0.5) {
+if (uArena > 0.5) {
+  vec2 aq = abs(vWPos.xz) - uArenaCore;
+  float ar = length(max(aq, 0.0)) + min(max(aq.x, aq.y), 0.0);
+  if (ar > uArenaShell.x && ar < uArenaShell.y) discard;
+  tAlb = vec3(0.018, 0.019, 0.022) * mix(0.85, 1.15, tNoise(vWPos.xz * 0.8));
+  tRough = 0.82;
+  tNrmW = nW;
+} else if (uUrban > 0.5) {
   float pr = length(vWPos.xz);
   if (pr < uPlazaLawn) {
     float gN = tNoise(vWPos.xz * 1.1) * 0.55 + tNoise(vWPos.xz * 3.4 + 4.0) * 0.45;
@@ -236,12 +247,15 @@ if (uUrban > 0.5) {
   }
 }
 
-diffuseColor.rgb *= tAlb;
+if (uArena > 0.5) diffuseColor.rgb = tAlb;
+else diffuseColor.rgb *= tAlb;
 `;
 
 export class Terrain {
-  constructor(data, textures, { urban = false } = {}) {
+  constructor(data, textures, { urban = false, arena = false, heightFn = null } = {}) {
     this.urban = urban;
+    this.arena = arena;
+    this.heightFn = heightFn;
     this.heights = data.heights;
     this.normalsData = data.normals;
     this.biomeData = data.biome;
@@ -274,6 +288,9 @@ export class Terrain {
       uWorldSize: { value: WORLD_SIZE },
       uTime: { value: 0 },
       uUrban: { value: urban ? 1 : 0 },
+      uArena: { value: arena ? 1 : 0 },
+      uArenaCore: { value: new THREE.Vector2(ARENA.courtHX, ARENA.courtHZ) },
+      uArenaShell: { value: new THREE.Vector2(ARENA.bowlR - 0.05, ARENA.facadeOut * ARENA.RU + 0.5) },
       uStreetPitch: { value: CITY.pitch },
       uBlockW: { value: CITY.blockW },
       uStreetW: { value: CITY.streetW },
@@ -295,7 +312,7 @@ export class Terrain {
         .replace('#include <normal_fragment_maps>', 'normal = normalize((viewMatrix * vec4(tNrmW, 0.0)).xyz);')
         .replace('#include <aomap_fragment>', 'reflectedLight.indirectDiffuse *= tAO; reflectedLight.indirectSpecular *= tAO;');
     };
-    this.material.customProgramCacheKey = () => (urban ? 'terrain-splat-urban' : 'terrain-splat');
+    this.material.customProgramCacheKey = () => (arena ? 'terrain-splat-arena' : urban ? 'terrain-splat-urban' : 'terrain-splat');
 
     this.depthMaterial = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
     this.depthMaterial.onBeforeCompile = (shader) => {
@@ -332,7 +349,7 @@ export class Terrain {
           const m = new THREE.Mesh(g, this.material);
           m.customDepthMaterial = this.depthMaterial;
           m.receiveShadow = true;
-          m.castShadow = li < 2;
+          m.castShadow = li < 2 && !arena;
           lod.addLevel(m, d);
         });
         this.group.add(lod);
@@ -345,6 +362,7 @@ export class Terrain {
   }
 
   heightAt(x, z) {
+    if (this.heightFn) return this.heightFn(x, z);
     const N = GRID_N;
     const gx = Math.min(N - 1.001, Math.max(0, (x + HALF_WORLD) / GRID_SPACING));
     const gz = Math.min(N - 1.001, Math.max(0, (z + HALF_WORLD) / GRID_SPACING));

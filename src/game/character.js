@@ -682,7 +682,12 @@ export class Character {
     };
 
     let fade = 0.18;
-    if (s.jumpStarted) {
+    if (s.swimming) {
+      this.jump = null;
+      target.fall = s.diving ? 0.85 : 0.35;
+      target.idle = s.diving ? 0.15 : 0.65;
+      fade = 0.22;
+    } else if (s.jumpStarted) {
       const kind = s.speed > 4.6 ? 'jumpRun' : 'jumpJog';
       const info = JUMPS[kind];
       const a = this.actions[kind];
@@ -692,7 +697,7 @@ export class Character {
       a.play();
       this.jump = { kind, info, t: 0, landed: false, airTime: s.predictedAir };
     }
-    if (this.jump) {
+    if (!s.swimming && this.jump) {
       const j = this.jump;
       const a = this.actions[j.kind];
       j.t += dt;
@@ -712,6 +717,8 @@ export class Character {
         fade = 0.05;
         if (blend >= 1) this.jump = null;
       }
+    } else if (s.swimming) {
+      // Swim weights already set.
     } else if (!s.onGround && s.airTime > 0.35) {
       target.fall = 1;
       fade = 0.3;
@@ -749,6 +756,7 @@ export class Character {
       this.flinch *= Math.exp(-dt * 9);
     }
     this.applyAim(s);
+    if (s.swimming) this.applySwim(s, dt);
     if (this.weapon === 'grenade') this.applyThrow(dt);
     this.placeRifle(dt);
     this.placeGrenade();
@@ -937,16 +945,14 @@ export class Character {
     g.children.forEach((c) => c.updateMatrixWorld(true));
   }
 
-  // Direction the guns and arms should take so they match the crosshair hit.
-  // Nearby hits would yank the barrels into the dirt; use the look instead.
-  aimFrom(from, out = new THREE.Vector3()) {
-    out.subVectors(this.aimTarget, from);
-    const len = out.length();
-    if (len < 2.2 || len < 1e-4) {
-      if (this.lookDir.lengthSq() > 1e-6) return out.copy(this.lookDir).normalize();
-      if (len < 1e-4) return out.set(0, 0, 1);
-    }
-    return out.multiplyScalar(1 / len);
+  // Direction the guns and arms should take. Follow the mouse look so the
+  // pose matches the reticle; a nearby floor hit would yank the barrels down.
+  aimFrom(_from, out = new THREE.Vector3()) {
+    if (this.lookDir.lengthSq() > 1e-6) return out.copy(this.lookDir).normalize();
+    out.subVectors(this.aimTarget, this.root.position);
+    out.y -= 1.45;
+    if (out.lengthSq() < 1e-8) return out.set(0, 0, 1);
+    return out.normalize();
   }
 
   handPosition(out = new THREE.Vector3()) {
@@ -1019,6 +1025,28 @@ export class Character {
     }
   }
 
+  applySwim(s, dt) {
+    const B = this.bones;
+    if (!B.RightArm || !B.LeftArm) return;
+    this.swimT = (this.swimT || 0) + dt * (0.9 + Math.min(2.2, s.speed));
+    const t = this.swimT;
+    const { fwd, left, right } = this.bodyAxes();
+    const stroke = (side, sign) => {
+      const phase = Math.sin(t * 5.2 + (sign > 0 ? 0 : Math.PI));
+      const sh = B[`${side}Arm`].getWorldPosition(new THREE.Vector3());
+      const reach = sh.clone()
+        .addScaledVector(fwd, 0.22 + phase * 0.28)
+        .addScaledVector(sign > 0 ? right : left, 0.22)
+        .addScaledVector(UP, -0.08 + phase * 0.16);
+      solveArm(B, side, reach,
+        sh.clone().addScaledVector(UP, -0.35).addScaledVector(sign > 0 ? right : left, 0.4),
+        fwd.clone().addScaledVector(UP, -0.2).normalize(),
+        sign > 0 ? right : left, 0.85, this.tmp);
+    };
+    stroke('Right', 1);
+    stroke('Left', -1);
+  }
+
   applyAim(s) {
     const w = this.aimWeight;
     const t = this.tmp;
@@ -1038,21 +1066,22 @@ export class Character {
     const yawErr = Math.atan2(fwd.x * flat.z - fwd.z * flat.x, fwd.dot(flat));
     const pitch = Math.asin(THREE.MathUtils.clamp(dir.y, -1, 1));
     const lookingGun = this.action?.type === 'reload' || this.action?.type === 'pistolReload';
-    const lookW = lookingGun ? 0.82 : Math.max(w, 0.35);
+    const lookW = lookingGun ? 0.82 : Math.max(w, 0.7);
     const right = new THREE.Vector3().crossVectors(new THREE.Vector3(0, 1, 0), flat).normalize();
     for (const [name, share] of [['Spine', 0.2], ['Spine1', 0.3], ['Spine2', 0.3]]) {
       const qy = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), -yawErr * share * w);
       const qp = new THREE.Quaternion().setFromAxisAngle(right, -pitch * share * w * 0.9);
       rotateBoneWorld(B[name], qy.multiply(qp), t);
     }
-    // Head follows the camera even when not aiming.
+    // Head follows the mouse look even when the guns are down.
     const head = B.Head;
-    const hp = head.getWorldPosition(t.a);
-    const hd = new THREE.Vector3().subVectors(this.aimTarget, hp).normalize();
+    const hd = this.lookDir.lengthSq() > 1e-6
+      ? this.lookDir.clone().normalize()
+      : new THREE.Vector3().subVectors(this.aimTarget, head.getWorldPosition(t.a)).normalize();
     const headFwd = new THREE.Vector3(0, 0, 1).applyQuaternion(head.getWorldQuaternion(t.q));
-    const clampDir = headFwd.clone().lerp(hd, 0.6).normalize();
+    const clampDir = headFwd.clone().lerp(hd, 0.75).normalize();
     const angle = headFwd.angleTo(hd);
-    if (angle < 1.4) {
+    if (angle < 1.6) {
       const q = new THREE.Quaternion().setFromUnitVectors(headFwd, clampDir);
       q.copy(new THREE.Quaternion().slerp(q, lookW));
       rotateBoneWorld(head, q, t);

@@ -1,5 +1,6 @@
 import { makeNoise, mulberry32 } from './noise.js';
 import { buildCityHeightmap } from './cityLayout.js';
+import { buildArenaHeightmap } from './arenaLayout.js';
 import { GRID_N, GRID_SPACING, HALF_WORLD } from './constants.js';
 
 const smoothstep = (a, b, x) => {
@@ -120,7 +121,9 @@ function generateIsland(seed) {
 self.onmessage = (e) => {
   const t0 = performance.now();
   const { seed, map = 'island' } = e.data;
-  const out = map === 'city' ? buildCityHeightmap(seed) : generateIsland(seed);
+  const out = map === 'city' ? buildCityHeightmap(seed)
+    : map === 'garden' ? buildArenaHeightmap(seed)
+    : generateIsland(seed);
   out.ms = performance.now() - t0;
   out.map = map;
   self.postMessage(out, [out.heights.buffer, out.normals.buffer, out.biome.buffer]);

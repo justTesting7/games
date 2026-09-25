@@ -11,7 +11,7 @@ const DAMAGE = {
 };
 const ROSTERS = new Set(['adventurer', 'redpolo', 'greytee', 'checkers', 'denim', 'linen']);
 const WEAPONS = new Set(['pistols', 'rifle', 'grenade', 'drone']);
-const MAPS = new Set(['island', 'city']);
+const MAPS = new Set(['island', 'city', 'garden']);
 const clampMin = (v) => {
   const n = Math.round(num(v));
   return Number.isFinite(n) ? Math.max(2, Math.min(12, n)) : 2;
@@ -256,7 +256,9 @@ export class GameRoom extends DurableObject {
 
     if (msg.t === 'shot') {
       if (this.round.state !== 'fight' || !mine.alive) return;
-      this.broadcast(ws, { t: 'shot', id: mine.id, o: msg.o, d: msg.d, w: WEAPONS.has(msg.w) ? msg.w : mine.w });
+      const o = Array.isArray(msg.o) ? msg.o.slice(0, 3).map(num) : [mine.p[0], mine.p[1] + 1.4, mine.p[2]];
+      const d = Array.isArray(msg.d) ? msg.d.slice(0, 3).map(num) : [Math.sin(mine.yaw || 0), 0, Math.cos(mine.yaw || 0)];
+      this.broadcast(ws, { t: 'shot', id: mine.id, n: num(msg.n), o, d, w: WEAPONS.has(msg.w) ? msg.w : mine.w });
       if (typeof msg.hid === 'string' && this.players.has(msg.hid)) {
         await this.applyHit(mine, this.players.get(msg.hid), !!msg.head, WEAPONS.has(msg.w) ? msg.w : mine.w, msg.d);
       }

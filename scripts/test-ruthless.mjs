@@ -10,11 +10,17 @@ if (!roster.includes('ruthless: true')) throw new Error('ruthless flag missing')
 
 for (const needle of [
   'isRuthless()',
-  "if (this.isRuthless()) return true;",
-  "Never take cover. Never retreat.",
-  "this.persona.ruthless ? 'push' : 'take_cover'",
+  'if (this.isRuthless()) return true;',
+  'Never take cover. Never retreat.',
+  'Fight aggressively. Push, flank, and shoot.',
 ]) {
   if (!rival.includes(needle)) throw new Error(`rival.js missing ${needle}`);
+}
+if (rival.includes("this.persona.ruthless ? 'push' : 'take_cover'")) {
+  throw new Error('non-Nagar Jevs still start in take_cover');
+}
+if (rival.includes('if (this.needFirstCover) return false;')) {
+  throw new Error('non-Nagar Jevs still cannot fight until they hide');
 }
 
 console.log('nagar ruthless ok');

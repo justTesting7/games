@@ -7,6 +7,9 @@ import { Grass } from './world/grass.js';
 import { Vegetation } from './world/vegetation.js';
 import { getMap } from './world/maps.js';
 import { City } from './world/city.js';
+import { Arena } from './world/arena.js';
+import { arenaHeightAt, standSpawn } from './world/arenaLayout.js';
+import { Fish } from './world/fish.js';
 import { Character } from './game/character.js';
 import { Player } from './game/player.js';
 import { Props } from './game/props.js';
@@ -25,6 +28,7 @@ import { modeUrl, persistMode, persistRoom, resolveMode, resolveRoom } from './g
 import { isTouchDevice, setupTouch } from './game/touch.js';
 import { DRONE } from './game/drone.js';
 import { createGameRenderer } from './engine/webgl.js';
+import { RADAR_RANGE, radarBlips, radarSubjects, drawRadar } from './game/radar.js';
 
 const $ = (id) => document.getElementById(id);
 const menu = $('menu');
@@ -175,6 +179,7 @@ const paintMode = () => {
   if (mode === 'multi') {
     if (!hosted) $('modehint').textContent = 'Multiplayer needs the hosted game or npm run cf:dev.';
     else if (session && !session.isHost) $('modehint').textContent = `Host chose ${mapDef.label}. Pick a fighter and join.`;
+    else if (mapDef.fixedTime) $('modehint').textContent = 'You are the host. Map and min players apply to everyone who joins.';
     else $('modehint').textContent = 'You are the host. Map, time, and min players apply to everyone who joins.';
   } else {
     $('modehint').textContent = 'You against Jev-driven rivals. Last one standing wins.';
@@ -207,6 +212,7 @@ $('roomcode').oninput = () => {
 
 let timeOfDay = mapDef.timeOfDay;
 $('timeofday').value = Math.round(timeOfDay * 1000);
+$('todrow').classList.toggle('hidden', !!mapDef.fixedTime);
 let timeSend = 0;
 $('timeofday').oninput = (e) => {
   timeOfDay = e.target.value / 1000;
@@ -231,10 +237,11 @@ $('minplayers').onchange = () => {
 const applyHostUi = (host) => {
   const lock = mode === 'multi' && host === false;
   $('map').disabled = lock;
-  $('timeofday').disabled = lock;
+  $('timeofday').disabled = lock || !!mapDef.fixedTime;
   $('minplayers').disabled = lock;
   $('map').parentElement?.classList.toggle('locked', lock);
   $('timeofday').parentElement?.classList.toggle('locked', lock);
+  $('todrow').classList.toggle('hidden', !!mapDef.fixedTime);
   $('minrow').classList.toggle('locked', lock);
   paintMode();
 };
@@ -264,7 +271,7 @@ async function init() {
         location.reload();
         return;
       }
-      if (Number.isFinite(info.settings?.time)) {
+      if (Number.isFinite(info.settings?.time) && !mapDef.fixedTime) {
         timeOfDay = info.settings.time;
         $('timeofday').value = Math.round(timeOfDay * 1000);
       }
@@ -278,7 +285,11 @@ async function init() {
     progress.task(mapDef.loadLabel, 3, () => generateHeightmap(mapDef.id)),
     progress.task('Loading terrain materials', 3, () => loadTerrainTextures(mapDef)),
   ]);
-  const terrain = new Terrain(data, textures, { urban: mapDef.id === 'city' });
+  const indoor = mapDef.id === 'garden';
+  pipeline.indoor = indoor;
+  const terrain = new Terrain(data, textures, {
+    urban: mapDef.id === 'city' || indoor, arena: indoor, heightFn: indoor ? arenaHeightAt : null,
+  });
   world.terrain = terrain;
   pipeline.scene.add(terrain.group);
 
@@ -298,7 +309,10 @@ async function init() {
   world.veg = veg;
   world.props = props;
   let city = null;
+  let arena = null;
+  let fish = null;
   if (mapDef.id === 'city') city = new City(terrain, veg.colliders, pipeline);
+  if (indoor) arena = new Arena(terrain, veg.colliders, pipeline);
   const fighters = mode === 'solo'
     ? [selection.player, ...selection.rivals].map(byId)
     : [byId(selection.player)];
@@ -309,12 +323,14 @@ async function init() {
     resolveLooks(fighters),
     mapDef.waterCamp ? props.load(progress) : Promise.resolve(),
     city ? city.load(progress) : Promise.resolve(),
+    arena ? arena.load(progress) : Promise.resolve(),
   ]);
   character.load(charAssets, looks[0]);
   character.lookId = fighters[0].id;
 
-  const spawn = data.spawn;
-  const facing = Math.atan2(data.peak.x - spawn.x, data.peak.z - spawn.z);
+  const gardenSpot = indoor ? standSpawn(0) : null;
+  const spawn = gardenSpot ? { x: gardenSpot.x, z: gardenSpot.z } : data.spawn;
+  const facing = gardenSpot ? gardenSpot.yaw : Math.atan2(data.peak.x - spawn.x, data.peak.z - spawn.z);
   if (mapDef.vegetation) {
     await progress.task(mapDef.plantLabel, 1, async () => veg.scatter(terrain, spawn));
     veg.scale = pipeline.quality.trees;
@@ -328,6 +344,14 @@ async function init() {
     city.build(data.layout);
     pipeline.scene.add(city.group);
   }
+  if (arena && data.layout) {
+    arena.build(data.layout);
+    pipeline.scene.add(arena.group);
+  }
+  if (mapDef.fish) {
+    fish = new Fish(terrain);
+    pipeline.scene.add(fish.group);
+  }
   character.addTo(pipeline.scene);
 
   const player = new Player(world, character, camera);
@@ -338,7 +362,7 @@ async function init() {
   weapons.setGrenadeModel(charAssets.grenadeGltf);
   player.fighter.loadout = new Loadout(3);
   player.onScope = () => audio.mech('scope');
-  Object.assign(world, { grass, character, player, fx, weapons, data, city, mapDef });
+  Object.assign(world, { grass, character, player, fx, weapons, data, city, arena, mapDef });
 
   const rivals = fighters.slice(1).map((entry, i) => {
     const ch = new Character();
@@ -353,7 +377,7 @@ async function init() {
     onRoster: () => rebuildTags(),
     onRound: (msg) => applyNetRound(msg),
     onSettings: (s) => {
-      if (Number.isFinite(s?.time)) {
+      if (Number.isFinite(s?.time) && !mapDef.fixedTime) {
         timeOfDay = s.time;
         $('timeofday').value = Math.round(timeOfDay * 1000);
       }
@@ -423,8 +447,16 @@ async function init() {
   );
 
   // Rivals appear 18-28 m away, ahead of the player on either side, on
-  // open, dry, walkable ground.
+  // open, dry, walkable ground. In the Garden each fighter starts on a
+  // different 18th-row stand.
   const spawnRivals = () => {
+    if (indoor) {
+      rivals.forEach((r, i) => {
+        const s = standSpawn(i + 1);
+        r.spawn(s.x, s.z, s.yaw);
+      });
+      return;
+    }
     const p = player.pos;
     const tmp = [];
     rivals.forEach((r, i) => {
@@ -515,7 +547,11 @@ async function init() {
       round.state = 'waiting';
       return;
     }
-    if (!player.fighter.alive) {
+    if (indoor) {
+      const s = standSpawn(0);
+      player.spawn(s.x, s.z, s.yaw);
+      player.vel.set(0, 0, 0);
+    } else if (!player.fighter.alive) {
       player.spawn(spawn.x, spawn.z, facing);
       player.vel.set(0, 0, 0);
     }
@@ -742,7 +778,7 @@ async function init() {
   let fpsT = 0, frames = 0, fps = 0;
   const clock = startClock((dt, draw) => {
     elapsed += dt;
-    if (input.fastTime && (mode !== 'multi' || session?.isHost)) {
+    if (input.fastTime && !mapDef.fixedTime && (mode !== 'multi' || session?.isHost)) {
       timeOfDay = (timeOfDay + dt * 0.03) % 1;
       $('timeofday').value = Math.round(timeOfDay * 1000);
     }
@@ -811,6 +847,8 @@ async function init() {
       if (grass) grass.update(elapsed, camera.position, viewPos);
       if (mapDef.vegetation) veg.update(elapsed, camera.position);
       if (city) city.update(dt, fx, camera);
+      if (arena) arena.update(dt, fx, camera);
+      if (fish) fish.update(dt, camera);
       const coast = THREE.MathUtils.clamp(1 - (terrain.heightAt(viewPos.x, viewPos.z) - 1) / 25, 0, 1);
       audio.updateAmbience(dt, { altitude: player.pos.y, coast, underwater: player.underwater });
     }
@@ -871,6 +909,11 @@ async function init() {
     $('dronesplit').classList.toggle('far', flying && !dying && far);
     const near = weapons.live.some((g) => g.pos.distanceTo(player.pos) < WEAPONS.grenade.radius && g.owner !== player.fighter);
     $('grenadewarn').classList.toggle('show', alive && near);
+    const swimEl = $('swimhint');
+    if (swimEl) {
+      swimEl.classList.toggle('show', alive && player.swimming);
+      swimEl.textContent = player.diving ? 'F swim up · surface to breathe' : 'F swim up / exit · Ctrl dive';
+    }
     const hp = spec ? spec.fighter.health : player.fighter.health;
     $('hpbar').style.width = `${(hp / MAX_HEALTH) * 100}%`;
     $('hpbar').classList.toggle('low', hp <= 35);
@@ -880,6 +923,16 @@ async function init() {
       : rivals.filter((r) => r.fighter.alive).length;
     const leftLabel = document.querySelector('#round small');
     if (leftLabel) leftLabel.textContent = mode === 'multi' ? 'players left' : 'rivals left';
+    const radarSelf = spec || player;
+    const radarYaw = spec ? (spec.yaw ?? player.camYaw) : player.camYaw;
+    const radarOthers = radarSubjects(mode === 'multi' ? [...session.remotes.values()] : rivals)
+      .filter((o) => o.id !== radarSelf.fighter?.id);
+    drawRadar($('radarcanvas'), {
+      blips: radarBlips({ x: radarSelf.pos.x, z: radarSelf.pos.z }, radarYaw, radarOthers, mapDef.radarRange || RADAR_RANGE),
+      range: mapDef.radarRange || RADAR_RANGE,
+      time: elapsed,
+    });
+    $('radar').classList.toggle('scoped', scoped);
     $('damage').style.opacity = spec ? 0 : Math.max(hurt, alive ? Math.max(0, (45 - hp) / 45) * 0.45 : 0.7);
     if (spec && (round.state === 'fight' || (mode === 'solo' && round.state === 'over'))) {
       const who = spec.persona?.name || spec.fighter.name;

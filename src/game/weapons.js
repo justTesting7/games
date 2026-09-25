@@ -238,23 +238,22 @@ export class Weapons {
   shoot(shooter, side, aimPoint, spread, def) {
     const ch = shooter.character;
     const rifle = side < 0;
-    const throughScope = rifle && shooter.isPlayer && (this.sniperWasScoped || this.player.scopeT > 0.35);
     const flashAt = rifle ? ch.rifleMuzzle() : ch.muzzleWorld(side);
     const flashAxis = rifle ? ch.rifleAxis() : ch.pistolAxis(side);
     let from, dir;
     if (shooter.isPlayer) {
-      // Hitscan from the body along the look, not from the shoulder camera or
-      // an offset muzzle that can sneak around a tree the player is behind.
-      from = this.player.losOrigin();
-      if (throughScope) {
-        dir = this.player.lookDir();
-      } else {
-        const target = aimPoint.clone();
-        const r = spread * target.distanceTo(from);
-        target.add(new THREE.Vector3().randomDirection().multiplyScalar(r * Math.random()));
-        dir = target.sub(from).normalize();
-      }
-      from.addScaledVector(dir, 0.2);
+      // Same ray as the crosshair. A chest→aimPoint line sits left of the
+      // reticle and still clips a head the player already aimed past.
+      const origin = new THREE.Vector3();
+      const look = new THREE.Vector3();
+      this.player.aimRay(origin, look);
+      from = origin;
+      const target = aimPoint.clone();
+      const r = (spread ?? 0) * Math.max(1, target.distanceTo(from));
+      if (r > 0) target.add(new THREE.Vector3().randomDirection().multiplyScalar(r * Math.random()));
+      dir = target.sub(from);
+      if (dir.lengthSq() < 1e-8) dir.copy(look);
+      else dir.normalize();
     } else {
       from = rifle ? ch.rifleMuzzle() : ch.muzzleWorld(side);
       const target = aimPoint.clone();
@@ -262,7 +261,19 @@ export class Weapons {
       target.add(new THREE.Vector3().randomDirection().multiplyScalar(r * Math.random()));
       dir = target.sub(from).normalize();
     }
-    const hit = this.world.raycast(from, dir, 900, shooter);
+    let hit = this.world.raycast(from, dir, 900, shooter);
+    // Cover the chest is standing behind still stops the shot. A fighter
+    // on that chest line that the crosshair missed is ignored.
+    if (shooter.isPlayer && hit && !hit.drone) {
+      const body = this.player.losOrigin();
+      const to = from.clone().addScaledVector(dir, hit.t).sub(body);
+      const len = to.length();
+      if (len > 0.35) {
+        to.multiplyScalar(1 / len);
+        const cover = this.world.raycast(body, to, len - 0.15, shooter);
+        if (cover && !cover.fighter && !cover.drone) hit = cover;
+      }
+    }
     this.fx.muzzle(flashAt, flashAxis, rifle ? 2.4 : 1);
     if (!rifle) {
       const up = new THREE.Vector3().setFromMatrixColumn(ch.pistols[side].matrixWorld, 1);
@@ -277,6 +288,11 @@ export class Weapons {
     const end = hit ? from.clone().addScaledVector(dir, hit.t) : from.clone().addScaledVector(dir, 500);
     this.fx.tracer(flashAt, end);
     if (!shooter.isPlayer) this.checkNearMiss(from, end, hit);
+    // Open-air misses used to return here, so the room never heard the
+    // round. The other player only saw the aim pose until a hit landed.
+    if (shooter.isPlayer && this.session?.multi && !hit?.drone) {
+      this.session.reportShot(from, dir, def.key, hit?.fighter?.net ? hit.fighter.id : undefined, !!hit?.head);
+    }
     if (!hit) return null;
     const hitDist = end.distanceTo(this.player.camera.position);
     if (hit.fighter) {
@@ -308,11 +324,9 @@ export class Weapons {
       return hit;
     }
     if (hit.fighter?.net) {
-      if (shooter.isPlayer) this.session?.reportShot(from, dir, def.key, hit.fighter.id, hit.head);
       this.combat.damage(hit.fighter, shooter, hit.head ? def.head : def.body, dir, { head: hit.head, weapon: def.key, at: end });
       return hit;
     }
-    if (shooter.isPlayer && this.session?.multi) this.session.reportShot(from, dir, def.key);
     if (hit.fighter) this.combat.damage(hit.fighter, shooter, hit.head ? def.head : def.body, dir, { head: hit.head, weapon: def.key, at: end });
     else if (hit.body || hit.target) hit.scored = this.world.props.hit(hit, end, dir, def.force);
     return hit;

@@ -168,6 +168,7 @@ export class Pipeline {
       uSunDir: this.u.uSunDir,
       uMoonDir: { value: this.moonDir },
     });
+    this.indoorSkyMaterial = fsMaterial(S.indoorSkyFrag, {});
 
     this.skyMaterial = new THREE.ShaderMaterial({
       vertexShader: S.fullscreenVert,
@@ -239,6 +240,7 @@ export class Pipeline {
       uTime: this.u.uTime,
       uExposureBias: { value: 1.0 },
       uAutoExposure: { value: 1 },
+      uScotopic: { value: 1 },
       uVignette: { value: 0.55 },
       uFlash: { value: 0 },
     });
@@ -324,6 +326,28 @@ export class Pipeline {
   }
 
   setTimeOfDay(t, elapsed) {
+    this.u.uTime.value = elapsed;
+    const cu = this.compositeMaterial.uniforms;
+    if (this.indoor) {
+      this.sunDir.set(0.16, 1, 0.1).normalize();
+      this.moonDir.copy(this.sunDir).negate();
+      this.lightDir.copy(this.sunDir);
+      this.sunColor.set(0, 0, 0);
+      this.lightColor.set(0.3, 0.29, 0.27);
+      this.sun.color.setRGB(1, 0.96, 0.9, THREE.LinearSRGBColorSpace);
+      this.sun.intensity = this.indoorKey ?? 2.4;
+      this.sun.castShadow = true;
+      this.night = 0;
+      if (this.hemi) this.hemi.visible = false;
+      cu.uAutoExposure.value = 0;
+      cu.uExposureBias.value = this.indoorExposure ?? 1.5;
+      cu.uScotopic.value = 0;
+      return;
+    }
+    if (this.hemi) this.hemi.visible = true;
+    cu.uAutoExposure.value = this.mobile ? 0 : 1;
+    cu.uExposureBias.value = this.mobile ? 0.72 : 1.0;
+    cu.uScotopic.value = 1;
     const a = t * Math.PI * 2;
     this.sunDir.set(Math.cos(a), Math.sin(a), 0.38).normalize();
     this.moonDir.copy(this.sunDir).negate();
@@ -347,7 +371,6 @@ export class Pipeline {
     if (li > 0) this.sun.color.setRGB(lc.x / li, lc.y / li, lc.z / li, THREE.LinearSRGBColorSpace);
     this.sun.castShadow = li > 1e-3;
     this.night = smoothstep(0.08, -0.18, this.sunDir.y);
-    this.u.uTime.value = elapsed;
   }
 
   updateShadowCamera(center) {
@@ -374,7 +397,9 @@ export class Pipeline {
     this.frame++;
     r.autoClear = false;
 
-    if (this.firstFrame || this.frame % 6 === 1) this.quad.render(r, this.skyGenMaterial, this.skyRT);
+    if (this.firstFrame || this.frame % 6 === 1) {
+      this.quad.render(r, this.indoor ? this.indoorSkyMaterial : this.skyGenMaterial, this.skyRT);
+    }
     this.envAge += dt;
     if (this.mobile) {
       this.scene.environment = null;
@@ -396,9 +421,9 @@ export class Pipeline {
     this.skyMaterial.uniforms.uInvViewProj.value.copy(invVP);
     this.skyMaterial.uniforms.uNight.value = this.night;
     r.setRenderTarget(this.sceneRT);
-    r.setClearColor(0x000000, 0);
+    r.setClearColor(this.indoor ? 0x0c0d10 : 0x000000, 0);
     r.clear(true, true, false);
-    r.render(this.skyMesh, camera);
+    if (!this.indoor) r.render(this.skyMesh, camera);
     r.render(this.scene, camera);
 
     this.copyMaterial.uniforms.tDiffuse.value = this.sceneRT.texture;
