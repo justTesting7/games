@@ -19,6 +19,60 @@ const wrapDist = (v, period) => {
   return Math.min(r, period - r);
 };
 
+/** Walkable street / plaza spots around a player so Jevs do not stack. */
+export function urbanRivalSpots(px, pz, count, opts = {}) {
+  const { pitch, halfBlocks, playRadius, plazaLawn, plazaRoad } = CITY;
+  const minPlayer = opts.minPlayer ?? 14;
+  const maxPlayer = opts.maxPlayer ?? 40;
+  const minSep = opts.minSep ?? 10;
+  const taken = [...(opts.taken || []), { x: px, z: pz }];
+  const candidates = [];
+  const consider = (x, z) => {
+    const d = Math.hypot(x - px, z - pz);
+    if (d < minPlayer || d > maxPlayer) return;
+    if (Math.hypot(x, z) > playRadius - 12) return;
+    const r = Math.hypot(x, z);
+    if (r < 6) return;
+    const cell = cityCell(x, z);
+    const plazaRing = r >= plazaLawn && r <= plazaRoad + 2;
+    if (!cell.onRoad && !plazaRing) return;
+    candidates.push({ x, z, d });
+  };
+  const lim = halfBlocks * pitch;
+  for (let n = -halfBlocks; n < halfBlocks; n++) {
+    const c = pitch * 0.5 + n * pitch;
+    for (let t = -lim; t <= lim; t += 7) {
+      consider(c, t);
+      consider(t, c);
+    }
+  }
+  for (let i = 0; i < 16; i++) {
+    const a = (i / 16) * Math.PI * 2;
+    consider(Math.sin(a) * 19, Math.cos(a) * 19);
+  }
+  candidates.sort((a, b) => a.d - b.d);
+  const spots = [];
+  for (const c of candidates) {
+    if (spots.length >= count) break;
+    if (taken.some((t) => Math.hypot(t.x - c.x, t.z - c.z) < minSep)) continue;
+    spots.push({
+      x: c.x,
+      z: c.z,
+      yaw: Math.atan2(px - c.x, pz - c.z),
+    });
+    taken.push(c);
+  }
+  for (let i = spots.length; i < count; i++) {
+    const a = (i + 1) * ((Math.PI * 2) / (count + 1));
+    spots.push({
+      x: px + Math.sin(a) * (16 + i * 2),
+      z: pz + Math.cos(a) * (16 + i * 2),
+      yaw: a + Math.PI,
+    });
+  }
+  return spots;
+}
+
 export function cityCell(x, z) {
   const { pitch, halfBlocks, blockW, streetW, sidewalkW } = CITY;
   const bx = Math.floor(x / pitch + (halfBlocks + 0.5));

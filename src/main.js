@@ -6,6 +6,7 @@ import { generateHeightmap, loadTerrainTextures, Terrain } from './world/terrain
 import { Grass } from './world/grass.js';
 import { Vegetation } from './world/vegetation.js';
 import { getMap } from './world/maps.js';
+import { urbanRivalSpots } from './world/cityLayout.js';
 import { City } from './world/city.js';
 import { Arena } from './world/arena.js';
 import { arenaHeightAt, standSpawn } from './world/arenaLayout.js';
@@ -465,6 +466,12 @@ async function init() {
       });
       return;
     }
+    if (mapDef.id === 'city' || mapDef.id === 'manhattan') {
+      const taken = (world.cars?.list || []).map((c) => ({ x: c.x, z: c.z }));
+      const spots = urbanRivalSpots(player.pos.x, player.pos.z, rivals.length, { taken });
+      rivals.forEach((r, i) => r.spawn(spots[i].x, spots[i].z, spots[i].yaw));
+      return;
+    }
     const p = player.pos;
     const tmp = [];
     rivals.forEach((r, i) => {
@@ -475,13 +482,14 @@ async function init() {
         const dist = 18 + Math.random() * 10;
         const x = p.x + Math.sin(ang) * dist, z = p.z + Math.cos(ang) * dist;
         const h = terrain.heightAt(x, z);
-        if (!terrain.inBounds(x, z) || h < (urban ? 1.2 : 0.6)) continue;
-        if (terrain.normalAt(x, z).y < (urban ? 0.75 : 0.8)) continue;
+        if (!terrain.inBounds(x, z) || h < 0.6) continue;
+        if (terrain.normalAt(x, z).y < 0.8) continue;
         if (veg.colliders.query(x, z, 1.2, tmp).length) continue;
         if (rivals.some((o, j) => j < i && Math.hypot(o.pos.x - x, o.pos.z - z) < 8)) continue;
         at = { x, z };
       }
-      at ||= { x: p.x + (i ? -5 : 5), z: p.z + 10 };
+      const ang = (i + 1) * 2.1;
+      at ||= { x: p.x + Math.sin(ang) * (12 + i * 3), z: p.z + Math.cos(ang) * (12 + i * 3) };
       r.spawn(at.x, at.z, Math.atan2(p.x - at.x, p.z - at.z));
     });
   };
