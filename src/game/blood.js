@@ -126,10 +126,10 @@ function drawSmear(ctx, ox, oy, rand) {
 }
 
 /**
- * Turns a "thickness" canvas (alpha = amount of blood) into a colour map and a
- * normal map. Colour is a wet crimson that stays red as it thickens — never
- * candy-paint, never black sludge. The material uses this as emissive so the
- * HDR sun / floor shadows cannot blow it out or crush it.
+ * Turns a "thickness" canvas (alpha = amount of blood) into a multiply tint
+ * and a normal map. RGB is a linear stain factor, not a lit albedo: high red,
+ * tiny green/blue. Alpha-over of a dark red on HDR sunlit ground punches a
+ * black hole; multiplying the floor keeps the existing light and just tints it.
  */
 function finishTextures(src, strength = 3) {
   const w = src.width, h = src.height;
@@ -151,10 +151,10 @@ function finishTextures(src, strength = 3) {
       const i = y * w + x;
       const t = H[i];
       const a = data[i * 4 + 3] / 255;
-      cImg.data[i * 4] = 88 - 20 * t;
-      cImg.data[i * 4 + 1] = 16 - 6 * t;
-      cImg.data[i * 4 + 2] = 14 - 5 * t;
-      cImg.data[i * 4 + 3] = Math.min(255, a * 1.7 * 255);
+      cImg.data[i * 4] = 168 - 48 * t;
+      cImg.data[i * 4 + 1] = 22 - 8 * t;
+      cImg.data[i * 4 + 2] = 18 - 6 * t;
+      cImg.data[i * 4 + 3] = Math.min(255, a * 1.9 * 255);
       const dx = (at(x + 1, y) - at(x - 1, y)) * strength;
       const dy = (at(x, y + 1) - at(x, y - 1)) * strength;
       const l = Math.hypot(dx, dy, 1);
@@ -167,7 +167,8 @@ function finishTextures(src, strength = 3) {
   col.getContext('2d').putImageData(cImg, 0, 0);
   nrm.getContext('2d').putImageData(nImg, 0, 0);
   const map = new THREE.CanvasTexture(col);
-  map.colorSpace = THREE.SRGBColorSpace;
+  // Linear multipliers — do not sRGB-decode or the stain goes near-black.
+  map.colorSpace = THREE.NoColorSpace;
   map.anisotropy = 8;
   const normalMap = new THREE.CanvasTexture(nrm);
   normalMap.anisotropy = 8;
@@ -175,26 +176,21 @@ function finishTextures(src, strength = 3) {
 }
 
 function bloodMaterial(tex) {
-  return new THREE.MeshStandardMaterial({
+  return new THREE.MeshBasicMaterial({
     map: tex.map,
-    color: 0x000000,
-    emissiveMap: tex.map,
-    emissive: new THREE.Color(1, 1, 1),
-    emissiveIntensity: 0.85,
-    normalMap: tex.normalMap,
-    normalScale: new THREE.Vector2(1.2, 1.2),
-    roughness: 0.28,
-    metalness: 0,
-    envMapIntensity: 0.18,
+    color: 0xffffff,
     transparent: true,
     depthWrite: false,
+    fog: false,
+    toneMapped: false,
+    premultipliedAlpha: true,
     polygonOffset: true,
     polygonOffsetFactor: -4,
     polygonOffsetUnits: -4,
-    // Scene alpha stores depth for fog / SSR, so decals must leave it untouched.
+    // dest * (1 - a + a * tint): stain the lit ground, leave scene depth alone.
     blending: THREE.CustomBlending,
     blendEquation: THREE.AddEquation,
-    blendSrc: THREE.SrcAlphaFactor,
+    blendSrc: THREE.DstColorFactor,
     blendDst: THREE.OneMinusSrcAlphaFactor,
     blendSrcAlpha: THREE.ZeroFactor,
     blendDstAlpha: THREE.OneFactor,
