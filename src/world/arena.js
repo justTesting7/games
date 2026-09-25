@@ -23,7 +23,6 @@ const C_TREAD = new THREE.Color(0x5c5e62);
 const C_RISER = new THREE.Color(0x303236);
 const C_AISLE = new THREE.Color(0xa4a5a4);
 const C_AISLE_RISER = new THREE.Color(0x7c7d7e);
-const C_CONC = new THREE.Color(0x4a4b4e);
 const C_FASCIA = new THREE.Color(0x2a2e36);
 const C_SPANDREL = new THREE.Color(0x16181d);
 const C_MULLION = new THREE.Color(0x0c0d10);
@@ -219,11 +218,11 @@ export class Arena {
       chrome: makeMetal(0xb8bec6, 0.25),
       glass: makeGlass(),
       suiteGlass: new THREE.MeshStandardMaterial({
-        color: 0x6a88a0, roughness: 0.08, metalness: 0.22, transparent: true, opacity: 0.38,
-        envMapIntensity: 1.15, depthWrite: false, side: THREE.DoubleSide,
+        color: 0x1a2836, roughness: 0.06, metalness: 0.35, transparent: true, opacity: 0.55,
+        envMapIntensity: 1.2, depthWrite: false, side: THREE.DoubleSide,
       }),
       suiteGlow: new THREE.MeshStandardMaterial({
-        color: 0x1a140e, roughness: 0.7, metalness: 0.05, emissive: 0xc48a48, emissiveIntensity: 0.55,
+        color: 0x0c1016, roughness: 0.7, metalness: 0.05, emissive: 0x3a4a62, emissiveIntensity: 0.32,
       }),
       gold: new THREE.MeshStandardMaterial({
         color: 0xc9a227, roughness: 0.32, metalness: 0.55, emissive: 0x5a3e0c, emissiveIntensity: 0.28,
@@ -363,7 +362,7 @@ export class Arena {
     const lastLow = bank(LOWER_ROWS, ARENA.baseY);
     const concIn = ARENA.concIn * ARENA.RU, concOut = ARENA.concOut * ARENA.RU;
     for (let sec = 0; sec < S; sec++) {
-      steps.flat(sec, LOWER_ROWS[LOWER_ROWS.length - 1].r1, concOut, ARENA.concY, C_CONC);
+      steps.flat(sec, LOWER_ROWS[LOWER_ROWS.length - 1].r1, concOut, ARENA.concY, C_SPANDREL);
       steps.wall(sec, concIn, lastLow, ARENA.concY, C_RISER);
     }
     bank(UPPER_ROWS, ARENA.concY);
@@ -442,31 +441,31 @@ export class Arena {
     this.group.add(postMesh);
   }
 
-  /** Dark concourse fascia with a digital ribbon — not a painted beige bar. */
+  /** Tall court-facing LED fascia so the concourse does not read as a painted bar. */
   buildParapet(mats) {
     const g = new GeoBuilder();
     const ribbon = new GeoBuilder();
-    const r = ARENA.concIn * ARENA.RU + 0.05;
+    const r = ARENA.concIn * ARENA.RU + 0.02;
     const y0 = ARENA.concY;
-    const h = 1.18;
     const lastLowY = LOWER_ROWS[LOWER_ROWS.length - 1].y;
-    const ribY0 = y0 + 0.28;
-    const ribY1 = y0 + 0.82;
+    const faceTop = y0 + 2.55;
+    const ribY0 = lastLowY + 0.18;
+    const ribY1 = faceTop - 0.22;
     const dummy = new THREE.Object3D();
     const posts = [];
     for (let sec = 0; sec < S; sec++) {
-      g.wall(sec, r, lastLowY, ribY0, C_FASCIA, INNER);
-      g.wall(sec, r, ribY1, y0 + h, C_FASCIA, INNER);
-      g.wall(sec, r + 0.22, y0, y0 + h, C_WALL, INNER, true);
-      g.flat(sec, r, r + 0.22, y0 + h, C_MULLION, INNER);
-      ribbon.wall(sec, r - 0.03, ribY0, ribY1, C_FASCIA, INNER);
+      g.wall(sec, r, lastLowY, ribY0, C_SPANDREL, INNER);
+      g.wall(sec, r, ribY1, faceTop, C_SPANDREL, INNER);
+      g.wall(sec, r + 0.28, y0, faceTop, C_WALL, INNER, true);
+      g.flat(sec, r, r + 0.28, faceTop, C_MULLION, INNER);
+      ribbon.wall(sec, r - 0.04, ribY0, ribY1, C_FASCIA, INNER);
       const L = rowLength(r, sec / S, (sec + 1) / S);
       for (const d of [AISLE_W + 0.08, L - AISLE_W - 0.08]) {
-        posts.push(bowlFrame(r - 0.02, paramAt(sec, r, d)));
+        posts.push(bowlFrame(r - 0.03, paramAt(sec, r, d)));
       }
       for (let d = AISLE_W + 0.3; d < L - AISLE_W - 0.2; d += 0.55) {
-        const f = bowlFrame(r + 0.11, paramAt(sec, r + 0.11, d));
-        addBox(this.colliders, f.x, f.z, y0 - 0.3, 0.2, 0.2, h + 0.3, 'cover');
+        const f = bowlFrame(r + 0.12, paramAt(sec, r + 0.12, d));
+        addBox(this.colliders, f.x, f.z, y0 - 0.3, 0.22, 0.22, faceTop - y0 + 0.3, 'cover');
       }
     }
     const m = new THREE.Mesh(g.build(), mats.trim);
@@ -475,19 +474,16 @@ export class Arena {
     const rib = new THREE.Mesh(ribbon.build(), mats.ribbon);
     rib.name = 'concourse-ribbon';
     this.group.add(rib);
-    const cap = new THREE.InstancedMesh(new THREE.BoxGeometry(0.16, 1.05, 0.22), mats.steel, posts.length);
+    const cap = new THREE.InstancedMesh(new THREE.BoxGeometry(0.2, faceTop - lastLowY, 0.28), mats.steel, posts.length);
     cap.name = 'fascia-pilasters';
     posts.forEach((p, i) => {
-      dummy.position.set(p.x, y0 + h * 0.5, p.z);
+      dummy.position.set(p.x, (lastLowY + faceTop) * 0.5, p.z);
       dummy.quaternion.setFromAxisAngle(UP, Math.atan2(-p.nx, -p.nz));
       dummy.updateMatrix();
       cap.setMatrixAt(i, dummy.matrix);
     });
     cap.instanceMatrix.needsUpdate = true;
     this.group.add(cap);
-    const rail = new GeoBuilder();
-    for (let sec = 0; sec < S; sec++) rail.flat(sec, r - 0.04, r + 0.18, y0 + h + 0.03, C_MULLION, INNER);
-    this.group.add(new THREE.Mesh(rail.build(), mats.chrome));
   }
 
   /** Suite bays and a press band — glass boxes, not beige stripes. */
@@ -498,11 +494,11 @@ export class Arena {
     const r = ARENA.hallIn * ARENA.RU;
     const top = ARENA.topY;
     const roofY = ARENA.roofY;
-    const lintel = top + 1.15;
-    const glass0 = top + 1.35;
-    const glass1 = top + 4.35;
-    const press0 = top + 5.15;
-    const press1 = top + 6.85;
+    const lintel = top + 0.85;
+    const glass0 = top + 1.05;
+    const glass1 = top + 5.15;
+    const press0 = top + 5.85;
+    const press1 = top + 7.45;
     const doorL = (L) => [0, (L - DOOR_W) * 0.5];
     const doorR = (L) => [(L + DOOR_W) * 0.5, L];
     const panes = [];
@@ -736,9 +732,9 @@ export class Arena {
   buildJumbotron(mats) {
     const g = new THREE.Group();
     g.name = 'msg-scoreboard';
-    const cy = ARENA.baseY + 13.8;
+    const cy = ARENA.baseY + 12.6;
     g.position.set(0, cy, 0);
-    const W = 13.4, H = 7.6;
+    const W = 16.2, H = 9.0;
     g.add(mesh(new THREE.BoxGeometry(W, H, W), mats.housing, 0, 0, 0));
     const face = new THREE.PlaneGeometry(W - 0.35, H - 0.45);
     for (let i = 0; i < 4; i++) {
@@ -806,7 +802,7 @@ export class Arena {
     court.castShadow = false;
     this.group.add(court);
     const board = new THREE.PointLight(0xffe0a8, 22, 36, 1.4);
-    board.position.set(0, y0 + 13.8, 0);
+    board.position.set(0, y0 + 12.6, 0);
     board.castShadow = false;
     this.group.add(board);
   }
