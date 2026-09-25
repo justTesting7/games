@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
-export const VENDOR = `${import.meta.env.BASE_URL}assets/vendor`;
+export const VENDOR = `${import.meta.env?.BASE_URL || '/'}assets/vendor`;
 
 // Tracks weighted loading tasks so the loading screen can show real progress.
 export class Progress {
