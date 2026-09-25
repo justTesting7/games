@@ -283,15 +283,28 @@ export class Player {
     return out;
   }
 
+  // Same origin + look the crosshair uses. Hip-fire must travel this ray:
+  // a chest→aimPoint line sits left of the reticle and still clips a head
+  // the player already aimed past on the right.
+  aimRay(outOrigin = new THREE.Vector3(), outDir = new THREE.Vector3()) {
+    this.lookDir(outDir);
+    const through = this.scopeT > 0.4;
+    if (through) this.losOrigin(outOrigin).addScaledVector(outDir, 0.2);
+    else {
+      const along = Math.max(0.35, this.smoothDist ?? this.camDist ?? 1.55);
+      outOrigin.copy(this.camera.position).addScaledVector(outDir, along);
+    }
+    return { origin: outOrigin, dir: outDir };
+  }
+
   // The on-screen crosshair is the camera look. Hip-fire aim must use that
   // ray — a body-center ray sits ~0.5 m left of the shoulder camera, so the
   // reticle went red while the pistols still missed to the left.
   updateAim() {
-    const d = this.lookDir();
-    const through = this.scopeT > 0.4;
+    const d = new THREE.Vector3();
     const start = new THREE.Vector3();
-    if (through) this.losOrigin(start).addScaledVector(d, 0.2);
-    else start.copy(this.camera.position).addScaledVector(d, Math.max(0.35, this.smoothDist ?? this.camDist));
+    this.aimRay(start, d);
+    const through = this.scopeT > 0.4;
     const reach = through ? 900 : 600;
     const hit = this.world.raycast(start, d, reach, this.fighter);
     if (hit) { this.aimPoint.copy(start).addScaledVector(d, hit.t); this.aimHit = hit; }
