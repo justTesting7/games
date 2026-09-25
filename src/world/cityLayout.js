@@ -19,6 +19,60 @@ const wrapDist = (v, period) => {
   return Math.min(r, period - r);
 };
 
+/** Walkable street / plaza spots around a player so Jevs do not stack. */
+export function urbanRivalSpots(px, pz, count, opts = {}) {
+  const { pitch, halfBlocks, playRadius, plazaLawn, plazaRoad } = CITY;
+  const minPlayer = opts.minPlayer ?? 14;
+  const maxPlayer = opts.maxPlayer ?? 40;
+  const minSep = opts.minSep ?? 10;
+  const taken = [...(opts.taken || []), { x: px, z: pz }];
+  const candidates = [];
+  const consider = (x, z) => {
+    const d = Math.hypot(x - px, z - pz);
+    if (d < minPlayer || d > maxPlayer) return;
+    if (Math.hypot(x, z) > playRadius - 12) return;
+    const r = Math.hypot(x, z);
+    if (r < 6) return;
+    const cell = cityCell(x, z);
+    const plazaRing = r >= plazaLawn && r <= plazaRoad + 2;
+    if (!cell.onRoad && !plazaRing) return;
+    candidates.push({ x, z, d });
+  };
+  const lim = halfBlocks * pitch;
+  for (let n = -halfBlocks; n < halfBlocks; n++) {
+    const c = pitch * 0.5 + n * pitch;
+    for (let t = -lim; t <= lim; t += 7) {
+      consider(c, t);
+      consider(t, c);
+    }
+  }
+  for (let i = 0; i < 16; i++) {
+    const a = (i / 16) * Math.PI * 2;
+    consider(Math.sin(a) * 19, Math.cos(a) * 19);
+  }
+  candidates.sort((a, b) => a.d - b.d);
+  const spots = [];
+  for (const c of candidates) {
+    if (spots.length >= count) break;
+    if (taken.some((t) => Math.hypot(t.x - c.x, t.z - c.z) < minSep)) continue;
+    spots.push({
+      x: c.x,
+      z: c.z,
+      yaw: Math.atan2(px - c.x, pz - c.z),
+    });
+    taken.push(c);
+  }
+  for (let i = spots.length; i < count; i++) {
+    const a = (i + 1) * ((Math.PI * 2) / (count + 1));
+    spots.push({
+      x: px + Math.sin(a) * (16 + i * 2),
+      z: pz + Math.cos(a) * (16 + i * 2),
+      yaw: a + Math.PI,
+    });
+  }
+  return spots;
+}
+
 export function cityCell(x, z) {
   const { pitch, halfBlocks, blockW, streetW, sidewalkW } = CITY;
   const bx = Math.floor(x / pitch + (halfBlocks + 0.5));
@@ -89,8 +143,24 @@ function generateCover() {
   return [];
 }
 
-export function generateCityLayout(seed) {
-  const rand = mulberry32(seed ^ 0xc17a70);
+function manhattanKind(bx, bz) {
+  const { halfBlocks } = CITY;
+  if (bx === halfBlocks && bz === halfBlocks) return KIND.plaza;
+  return KIND.intact;
+}
+
+function manhattanFloors(bx, bz, rand) {
+  const { halfBlocks } = CITY;
+  const dist = Math.hypot(bx - halfBlocks, bz - halfBlocks);
+  if (dist < 0.2) return 0;
+  if (dist < 1.2) return 52 + Math.floor(rand() * 22);
+  if (dist < 2.3) return 38 + Math.floor(rand() * 18);
+  return 26 + Math.floor(rand() * 16);
+}
+
+export function generateCityLayout(seed, opts = {}) {
+  const theme = opts.theme || 'ruins';
+  const rand = mulberry32(seed ^ (theme === 'manhattan' ? 0xa11a77 : 0xc17a70));
   const { halfBlocks, pitch, blockW, baseY } = CITY;
   const blocks = [];
   const buildingBoxes = [];
@@ -98,9 +168,9 @@ export function generateCityLayout(seed) {
     for (let bx = 0; bx <= halfBlocks * 2; bx++) {
       const cx = (bx - halfBlocks) * pitch;
       const cz = (bz - halfBlocks) * pitch;
-      const kind = kindAt(bx, bz, rand);
+      const kind = theme === 'manhattan' ? manhattanKind(bx, bz) : kindAt(bx, bz, rand);
       const rot = Math.floor(rand() * 4);
-      const floors = towerFloors(kind, bx, bz, rand);
+      const floors = theme === 'manhattan' ? manhattanFloors(bx, bz, rand) : towerFloors(kind, bx, bz, rand);
       blocks.push({ bx, bz, cx, cz, kind, rot, floors });
       if (floors > 0) {
         const inset = kind === KIND.ruined ? 5 : kind === KIND.damaged ? 3 : 2;
@@ -117,9 +187,9 @@ export function generateCityLayout(seed) {
     }
   }
   const coverBoxes = generateCover(blocks, rand);
-  const spawn = { x: 0, z: 13.2 };
+  const spawn = theme === 'manhattan' ? { x: 6.2, z: 40 } : { x: 0, z: 13.2 };
   const peak = { x: 0, z: -10, h: baseY + 3 };
-  return { blocks, buildingBoxes, coverBoxes, spawn, peak, seed };
+  return { blocks, buildingBoxes, coverBoxes, spawn, peak, seed, theme };
 }
 
 export function cityHeightAt(x, z, layout, noise) {
@@ -140,6 +210,12 @@ export function cityHeightAt(x, z, layout, noise) {
   else if (cell.onSidewalk) h += curb;
 
   const blk = layout.blocks.find((b) => b.bx === cell.bx && b.bz === cell.bz);
+  if (layout.theme === 'manhattan') {
+    if (cell.onRoad) return baseY - 0.1;
+    if (cell.onSidewalk) return baseY + curb;
+    if (r < CITY.plazaLawn) return baseY + curb + 0.04;
+    return baseY;
+  }
   if (blk?.kind === KIND.crater && !cell.onRoad) {
     const dx = x - blk.cx, dz = z - blk.cz;
     const d = Math.hypot(dx, dz);
@@ -172,9 +248,9 @@ export function cityBiomeAt(x, z, layout) {
   return { sand: sand / sum, grass: grass / sum, rock: rock / sum, forest: forest / sum };
 }
 
-export function buildCityHeightmap(seed) {
+export function buildCityHeightmap(seed, opts = {}) {
   const N = GRID_N;
-  const layout = generateCityLayout(seed);
+  const layout = generateCityLayout(seed, opts);
   const noise = makeNoise(seed + 901);
   const heights = new Float32Array(N * N);
   for (let j = 0; j < N; j++) {

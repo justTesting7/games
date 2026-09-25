@@ -22,6 +22,7 @@ class Remote {
     this.aiming = false;
     this.weapon = snap.w || 'pistols';
     this.target = this.pos.clone();
+    this.body = this.pos.clone();
     this.targetYaw = this.yaw;
     this.persona = { name: snap.name, color: snap.color };
     this.roster = snap.roster || 'adventurer';
@@ -50,6 +51,7 @@ class Remote {
     if (Number.isFinite(s.hp)) this.fighter.health = s.hp;
     if (s.roster) this.roster = s.roster;
     if (s.away !== undefined) this.away = !!s.away;
+    if ('car' in s) this.carId = Number.isFinite(s.car) ? s.car : undefined;
     if (s.alive === false && this.fighter.alive) {
       this.fighter.alive = false;
       this.character.die(new THREE.Vector3(Math.sin(this.yaw), 0, Math.cos(this.yaw)));
@@ -61,10 +63,35 @@ class Remote {
   }
 
   tick(dt) {
-    this.pos.lerp(this.target, 1 - Math.exp(-dt * 14));
+    this.body.lerp(this.target, 1 - Math.exp(-dt * 14));
     this.yaw += wrap(this.targetYaw - this.yaw) * Math.min(1, dt * 10);
     this.lookYaw = this.yaw;
     this.lookPitch = this.pitch;
+    const fleet = this.cars || null;
+    if (Number.isFinite(this.carId) && fleet) {
+      const car = fleet.byId(this.carId);
+      if (car) {
+        this.vehicle = car;
+        car.driver = this.fighter;
+        car.remote = true;
+        car.x = this.body.x;
+        car.y = this.body.y;
+        car.z = this.body.z;
+        car.yaw = this.yaw;
+        car.speed = this.speed;
+        fleet.refreshSeat(car);
+        fleet.placeMesh(car);
+        this.pos.copy(car.seat);
+      } else {
+        this.pos.copy(this.body);
+      }
+    } else {
+      if (this.vehicle) {
+        if (this.vehicle.driver === this.fighter) this.vehicle.driver = null;
+        this.vehicle = null;
+      }
+      this.pos.copy(this.body);
+    }
     const ch = this.character;
     ch.root.position.copy(this.pos);
     const swimming = this.pos.y < 0.15;
@@ -129,6 +156,7 @@ export class Session {
     this.pending = new Map();
     this.drones = new Map();
     world.netDrones = this.drones;
+    world.session = this;
     this.poseAcc = 0;
     this.lastPoseKey = '';
     this.lastPoseAt = 0;
@@ -173,19 +201,21 @@ export class Session {
     this.poseAcc = 0;
     const p = this.player;
     const L = p.fighter.loadout;
+    const body = p.vehicle || p.pos;
     const msg = {
       t: 'pose',
-      p: [+p.pos.x.toFixed(2), +p.pos.y.toFixed(2), +p.pos.z.toFixed(2)],
+      p: [+body.x.toFixed(2), +body.y.toFixed(2), +body.z.toFixed(2)],
       yaw: +p.yaw.toFixed(3),
       pitch: +p.camPitch.toFixed(3),
-      spd: +Math.hypot(p.vel.x, p.vel.z).toFixed(2),
+      spd: +(p.vehicle ? p.vehicle.speed : Math.hypot(p.vel.x, p.vel.z)).toFixed(2),
       g: p.onGround,
       cr: +p.crouchT.toFixed(2),
       aim: p.aimHold > 0 || p.scoped,
       w: L.current,
       alive: p.fighter.alive,
+      car: Number.isFinite(p.vehicle?.id) ? p.vehicle.id : null,
     };
-    const key = `${msg.p}|${msg.yaw}|${msg.pitch}|${msg.spd}|${msg.g}|${msg.cr}|${msg.aim}|${msg.w}|${msg.alive}`;
+    const key = `${msg.p}|${msg.yaw}|${msg.pitch}|${msg.spd}|${msg.g}|${msg.cr}|${msg.aim}|${msg.w}|${msg.alive}|${msg.car}`;
     const now = performance.now();
     // Standing still: at most a 2s heartbeat so idle sockets stay alive.
     if (!force && key === this.lastPoseKey && now - this.lastPoseAt < 2000) return;
@@ -222,6 +252,22 @@ export class Session {
     this.net.send({ t: 'blast', w, hits });
   }
 
+  reportCar(action, extra = {}) {
+    if (!this.multi) return;
+    this.net.send({ t: 'car', a: action, ...extra });
+  }
+
+  reportRunover(victim, dir) {
+    if (!this.multi || !victim) return;
+    const id = victim.isPlayer ? this.net.id : victim.id;
+    if (!id) return;
+    this.net.send({
+      t: 'runover',
+      hid: id,
+      dir: dir ? [dir.x, dir.y, dir.z] : undefined,
+    });
+  }
+
   reportDrone(action, extra = {}) {
     if (!this.multi) return;
     if (action === 'pose' && extra.p) {
@@ -251,6 +297,8 @@ export class Session {
       r.character.setWeapon('pistols');
     }
     this.clearDrones();
+    this.world.cars?.reset();
+    if (msg.cars) this.world.cars?.applyFleet(msg.cars);
     (msg.peers || []).forEach((p) => this.upsert(p));
   }
 
@@ -279,6 +327,7 @@ export class Session {
         this.player.fighter.id = msg.id;
         this.hostId = msg.hostId || (msg.host ? msg.id : this.hostId);
         if (msg.settings) this.onSettings?.(msg.settings);
+        if (msg.cars) this.world.cars?.applyFleet(msg.cars);
         if (msg.map && msg.map !== this.mapId) {
           localStorage.setItem('relic-map', msg.map);
           location.reload();
@@ -338,6 +387,9 @@ export class Session {
       case 'drone':
         this.seeDrone(msg);
         break;
+      case 'car':
+        this.seeCar(msg);
+        break;
       default:
         break;
     }
@@ -347,6 +399,7 @@ export class Session {
     if (!snap?.id || snap.id === this.net.id) return;
     const cur = this.remotes.get(snap.id);
     if (cur) {
+      cur.cars = this.world.cars;
       if (snap.roster && snap.roster !== cur.roster) this.restyle(cur, snap);
       else cur.applySnap(snap);
       if (snap.drone?.p) this.upsertDrone(snap.id, snap.drone);
@@ -395,6 +448,7 @@ export class Session {
     fighter.loadout.current = latest.w || 'pistols';
     ch.setWeapon(fighter.loadout.current);
     const remote = new Remote(latest, fighter, ch);
+    remote.cars = this.world.cars;
     this.remotes.set(latest.id, remote);
     this.pending.delete(snap.id);
     if (latest.drone?.p) this.upsertDrone(latest.id, latest.drone);
@@ -427,6 +481,24 @@ export class Session {
     if (!d) return;
     d.dispose();
     this.drones.delete(id);
+  }
+
+  seeCar(msg) {
+    const cars = this.world.cars;
+    if (!cars || !Number.isFinite(msg.i)) return;
+    const driver = msg.id ? this.fighter(msg.id) : null;
+    cars.applySnap(msg.i, msg, driver);
+    const remote = this.remotes.get(msg.id);
+    if (remote) {
+      if (msg.a === 'in') remote.carId = msg.i;
+      if (msg.a === 'out') {
+        remote.carId = undefined;
+        if (remote.vehicle) {
+          if (remote.vehicle.driver === remote.fighter) remote.vehicle.driver = null;
+          remote.vehicle = null;
+        }
+      }
+    }
   }
 
   seeDrone(msg) {
@@ -491,6 +563,7 @@ export class Session {
     const flash = rifle && ch.rifleMuzzle ? ch.rifleMuzzle() : ch.muzzleWorld?.(0) || from;
     this.world.fx.muzzle(flash, dir, rifle ? 2.4 : 1);
     if (!rifle) ch.fired?.(0);
+    this.world.cars?.breakAlong(from, dir, 900, r.fighter, { silent: true });
     const hit = this.world.raycast(from, dir, 900, r.fighter);
     const end = hit ? from.clone().addScaledVector(dir, hit.t) : from.clone().addScaledVector(dir, 80);
     this.world.fx.tracer(flash, end);

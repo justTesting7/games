@@ -194,6 +194,10 @@ export class Audio {
     setTimeout(() => {
       if (surface === 'water') {
         this.noiseBurst({ freq: 1400, q: 0.6, gain: 0.25 * att, attack: 0.005, release: 0.25, send: 0.3 });
+      } else if (surface === 'glass') {
+        this.noiseBurst({ freq: 5200, q: 2.4, gain: 0.42 * att, attack: 0.001, release: 0.12, send: 0.45 });
+        this.noiseBurst({ freq: 1800, q: 0.7, type: 'highpass', gain: 0.22 * att, attack: 0.001, release: 0.18, send: 0.25 });
+        this.tone(1400 + Math.random() * 500, 0.05, 0.08 * att, 'triangle');
       } else if (surface === 'rock' || surface === 'metal' || surface === 'concrete' || surface === 'cover') {
         this.noiseBurst({ freq: 3500, q: 2, gain: 0.3 * att, attack: 0.001, release: 0.06, send: 0.4 });
         this.ricochet(att);

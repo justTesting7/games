@@ -6,6 +6,7 @@ import { generateHeightmap, loadTerrainTextures, Terrain } from './world/terrain
 import { Grass } from './world/grass.js';
 import { Vegetation } from './world/vegetation.js';
 import { getMap } from './world/maps.js';
+import { urbanRivalSpots } from './world/cityLayout.js';
 import { City } from './world/city.js';
 import { Arena } from './world/arena.js';
 import { arenaHeightAt, standSpawn } from './world/arenaLayout.js';
@@ -27,6 +28,7 @@ import { Session } from './game/session.js';
 import { modeUrl, persistMode, persistRoom, resolveMode, resolveRoom } from './game/mode.js';
 import { isTouchDevice, setupTouch } from './game/touch.js';
 import { DRONE } from './game/drone.js';
+import { Cars } from './game/cars.js';
 import { createGameRenderer } from './engine/webgl.js';
 import { RADAR_RANGE, radarBlips, radarSubjects, drawRadar } from './game/radar.js';
 
@@ -100,6 +102,8 @@ world.raycast = (o, d, maxDist, ignore) => {
   };
   checkDrone(world.drone);
   if (world.netDrones) for (const drone of world.netDrones.values()) checkDrone(drone);
+  const carHit = world.cars?.raycast(o, d, best ? best.t : maxDist, ignore);
+  if (carHit && (!best || carHit.t < best.t)) best = carHit;
   const fh = world.combat.raycast(o, d, best ? best.t : maxDist, ignore);
   if (fh) best = fh;
   return best;
@@ -114,8 +118,8 @@ const net = new Net({ wanted: mode === 'multi', room: roomCode });
 net.watchFocus();
 let session = null;
 
-const NO_INPUT = { forward: false, back: false, left: false, right: false, sprint: false, jump: false, aim: false, fire: false, toggleWalk: false, crouch: false, moveX: 0, moveY: 0 };
-const input = { forward: false, back: false, left: false, right: false, sprint: false, jump: false, climb: false, aim: false, fire: false, toggleWalk: false, crouch: false, fastTime: false, moveX: 0, moveY: 0 };
+const NO_INPUT = { forward: false, back: false, left: false, right: false, sprint: false, jump: false, aim: false, fire: false, toggleWalk: false, crouch: false, moveX: 0, moveY: 0, interact: false };
+const input = { forward: false, back: false, left: false, right: false, sprint: false, jump: false, climb: false, aim: false, fire: false, toggleWalk: false, crouch: false, fastTime: false, moveX: 0, moveY: 0, interact: false };
 let inPlay = false;
 const keymap = { KeyW: 'forward', ArrowUp: 'forward', KeyS: 'back', ArrowDown: 'back', KeyA: 'left', ArrowLeft: 'left', KeyD: 'right', ArrowRight: 'right', ShiftLeft: 'sprint', ShiftRight: 'sprint', ControlLeft: 'crouch', ControlRight: 'crouch', KeyT: 'fastTime' };
 addEventListener('keydown', (e) => {
@@ -130,6 +134,7 @@ addEventListener('keydown', (e) => {
   if (e.code === 'KeyF') { input.climb = true; if (!e.repeat) input.jump = true; }
   if (e.code === 'KeyC' && !e.repeat) input.toggleCrouch = true;
   if (e.code === 'KeyV' && !e.repeat) input.toggleWalk = true;
+  if (e.code === 'KeyE' && !e.repeat) input.interact = true;
   if (e.code === 'KeyR' && !e.repeat) input.reload = true;
   if (e.code === 'Enter' && !e.repeat) input.restart = true;
   if (/^Digit[1-4]$/.test(e.code)) input.slot = Number(e.code.slice(5));
@@ -286,9 +291,10 @@ async function init() {
     progress.task('Loading terrain materials', 3, () => loadTerrainTextures(mapDef)),
   ]);
   const indoor = mapDef.id === 'garden';
+  const urban = mapDef.id === 'city' || mapDef.id === 'manhattan' || indoor;
   pipeline.indoor = indoor;
   const terrain = new Terrain(data, textures, {
-    urban: mapDef.id === 'city' || indoor, arena: indoor, heightFn: indoor ? arenaHeightAt : null,
+    urban, arena: indoor, heightFn: indoor ? arenaHeightAt : null,
   });
   world.terrain = terrain;
   pipeline.scene.add(terrain.group);
@@ -311,7 +317,7 @@ async function init() {
   let city = null;
   let arena = null;
   let fish = null;
-  if (mapDef.id === 'city') city = new City(terrain, veg.colliders, pipeline);
+  if (mapDef.id === 'city' || mapDef.id === 'manhattan') city = new City(terrain, veg.colliders, pipeline);
   if (indoor) arena = new Arena(terrain, veg.colliders, pipeline);
   const fighters = mode === 'solo'
     ? [selection.player, ...selection.rivals].map(byId)
@@ -340,9 +346,12 @@ async function init() {
     props.place(spawn, facing);
     pipeline.scene.add(props.group);
   }
+  const cars = new Cars(world, pipeline.scene);
+  world.cars = cars;
   if (city && data.layout) {
     city.build(data.layout);
     pipeline.scene.add(city.group);
+    cars.spawnMap(mapDef.id);
   }
   if (arena && data.layout) {
     arena.build(data.layout);
@@ -362,7 +371,7 @@ async function init() {
   weapons.setGrenadeModel(charAssets.grenadeGltf);
   player.fighter.loadout = new Loadout(3);
   player.onScope = () => audio.mech('scope');
-  Object.assign(world, { grass, character, player, fx, weapons, data, city, arena, mapDef });
+  Object.assign(world, { grass, character, player, fx, weapons, data, city, arena, mapDef, cars, audio });
 
   const rivals = fighters.slice(1).map((entry, i) => {
     const ch = new Character();
@@ -457,6 +466,12 @@ async function init() {
       });
       return;
     }
+    if (mapDef.id === 'city' || mapDef.id === 'manhattan') {
+      const taken = (world.cars?.list || []).map((c) => ({ x: c.x, z: c.z }));
+      const spots = urbanRivalSpots(player.pos.x, player.pos.z, rivals.length, { taken });
+      rivals.forEach((r, i) => r.spawn(spots[i].x, spots[i].z, spots[i].yaw));
+      return;
+    }
     const p = player.pos;
     const tmp = [];
     rivals.forEach((r, i) => {
@@ -467,13 +482,14 @@ async function init() {
         const dist = 18 + Math.random() * 10;
         const x = p.x + Math.sin(ang) * dist, z = p.z + Math.cos(ang) * dist;
         const h = terrain.heightAt(x, z);
-        if (!terrain.inBounds(x, z) || h < (mapDef.id === 'city' ? 1.2 : 0.6)) continue;
-        if (terrain.normalAt(x, z).y < (mapDef.id === 'city' ? 0.75 : 0.8)) continue;
+        if (!terrain.inBounds(x, z) || h < 0.6) continue;
+        if (terrain.normalAt(x, z).y < 0.8) continue;
         if (veg.colliders.query(x, z, 1.2, tmp).length) continue;
         if (rivals.some((o, j) => j < i && Math.hypot(o.pos.x - x, o.pos.z - z) < 8)) continue;
         at = { x, z };
       }
-      at ||= { x: p.x + (i ? -5 : 5), z: p.z + 10 };
+      const ang = (i + 1) * 2.1;
+      at ||= { x: p.x + Math.sin(ang) * (12 + i * 3), z: p.z + Math.cos(ang) * (12 + i * 3) };
       r.spawn(at.x, at.z, Math.atan2(p.x - at.x, p.z - at.z));
     });
   };
@@ -524,6 +540,7 @@ async function init() {
     player.sniperPending = false;
     weapons.drone.clear();
     fx.decals.clear();
+    cars.reset();
   };
 
   const startRound = () => {
@@ -625,6 +642,7 @@ async function init() {
     const by = attacker === victim ? '' : attacker ? tagName(attacker) : '';
     feed(`${by} <span class="gun">▸ ${how} ▸</span> ${tagName(victim)}`);
     if (victim === player.fighter) {
+      if (player.vehicle) cars.leave(player);
       weapons.drone.clear();
       hurt = 1;
       audio.hurt(true);
@@ -807,6 +825,16 @@ async function init() {
     const dying = weapons.drone.dying;
     const spec = refreshSpectate();
     touchPad.setDrone(flying);
+    if (alive && !flying && (input.interact || input.jump) && cars.canToggle(player)) {
+      cars.toggle(player);
+      input.jump = false;
+    }
+    input.interact = false;
+    const driving = !!player.vehicle;
+    cars.update(dt, alive && !flying ? input : NO_INPUT, player, {
+      active: alive && !flying && !spec,
+      squash: round.state === 'fight' ? combat : null,
+    });
     const state = player.update(dt, alive && !flying ? input : NO_INPUT, spec);
     const canShoot = alive && round.state !== 'countdown' && !(mode === 'multi' && round.state === 'waiting');
     if (canShoot) weapons.update(dt, input);
@@ -857,7 +885,7 @@ async function init() {
 
     $('crosshair').classList.toggle('idle', !state.aiming && !flying);
     $('crosshair').classList.toggle('enemy', !!player.aimHit?.fighter);
-    $('crosshair').classList.toggle('hidden', !alive || player.scopeT > 0.35 || dying);
+    $('crosshair').classList.toggle('hidden', !alive || player.scopeT > 0.35 || dying || driving);
     $('crosshair').classList.toggle('drone', flying && !dying);
     const scoped = alive && player.scopeT > 0.45;
     $('scope').classList.toggle('show', scoped);
@@ -873,6 +901,7 @@ async function init() {
       : L.current === 'drone' ? `${L.drones}` : `${L.mag[L.current]} / ${L.reserve[L.current]}`;
     $('weaponname').textContent = spec
       ? `Spectating ${spec.persona?.name || spec.fighter.name}`
+      : driving ? 'driving · E to leave'
       : dying ? 'drone shot down — returning'
       : flying ? 'space to explode · you are exposed'
       : weapons.chargingGrenade ? 'pull back… release to throw'
@@ -909,8 +938,16 @@ async function init() {
     $('grenadewarn').classList.toggle('show', alive && near);
     const swimEl = $('swimhint');
     if (swimEl) {
-      swimEl.classList.toggle('show', alive && player.swimming);
+      swimEl.classList.toggle('show', alive && player.swimming && !driving);
       swimEl.textContent = player.diving ? 'F swim up · surface to breathe' : 'F swim up / exit · Ctrl dive';
+    }
+    const carEl = $('carhint');
+    if (carEl) {
+      const prompt = cars.prompt;
+      carEl.classList.toggle('show', alive && !!prompt && !player.swimming);
+      carEl.textContent = prompt?.mode === 'drive'
+        ? `E leave · WASD drive · ${Math.abs(prompt.speed).toFixed(0)} m/s`
+        : 'E enter car';
     }
     const hp = spec ? spec.fighter.health : player.fighter.health;
     $('hpbar').style.width = `${(hp / MAX_HEALTH) * 100}%`;

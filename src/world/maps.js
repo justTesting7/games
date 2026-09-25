@@ -22,7 +22,7 @@ export const MAPS = {
   city: {
     id: 'city',
     label: 'Dead District',
-    subtitle: 'Urban ruins · plaza shootout and Jev rivals',
+    subtitle: 'Urban ruins · eight cars on the streets, plaza shootout',
     loadLabel: 'Raising the dead district',
     plantLabel: 'Scattering wreckage',
     textures: {
@@ -37,6 +37,26 @@ export const MAPS = {
     timeOfDay: 0.22,
     fogDensity: 0.0028,
     radarRange: 100,
+  },
+  manhattan: {
+    id: 'manhattan',
+    label: 'Midtown',
+    subtitle: 'Manhattan grid · clear avenues, cars to take',
+    loadLabel: 'Raising midtown',
+    plantLabel: 'Lining the avenues',
+    textures: {
+      sand: 'asphalt_01',
+      grass: 'brushed_concrete_2',
+      forest: 'burned_ground_01',
+      rock: 'broken_brick_wall',
+    },
+    grass: false,
+    vegetation: false,
+    waterCamp: false,
+    timeOfDay: 0.18,
+    fogDensity: 0.0018,
+    radarRange: 120,
+    cars: 'street',
   },
   garden: {
     id: 'garden',
