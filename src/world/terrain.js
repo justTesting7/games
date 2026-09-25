@@ -3,6 +3,7 @@ import { GRID_N, GRID_SPACING, WORLD_SIZE, HALF_WORLD, CHUNK_SIZE, CHUNKS, WORLD
 import { heightSampleGLSL } from '../engine/shaders.js';
 import { loadTextureArray, VENDOR } from '../engine/assets.js';
 import { CITY } from './cityLayout.js';
+import { ARENA } from './arenaLayout.js';
 
 export const LAYERS = ['sand', 'grass', 'forest', 'rock'];
 
@@ -16,7 +17,7 @@ export function generateHeightmap(mapId = 'island') {
 }
 
 export async function loadTerrainTextures(map) {
-  const pre = map?.id === 'city' ? 'city_' : '';
+  const pre = map?.id === 'city' || map?.id === 'garden' ? 'city_' : '';
   const url = (k, t) => `${VENDOR}/textures/${pre}${k}_${t}.jpg`;
   const [albedo, normal, arm] = await Promise.all([
     loadTextureArray(LAYERS.map((k) => url(k, 'diff')), 1024, { srgb: true }),
@@ -101,6 +102,9 @@ uniform highp sampler2DArray tArm;
 uniform float uWorldSize;
 uniform float uTime;
 uniform float uUrban;
+uniform float uArena;
+uniform float uArenaSX;
+uniform float uArenaSZ;
 uniform float uStreetPitch;
 uniform float uBlockW;
 uniform float uStreetW;
@@ -185,7 +189,24 @@ float tRough = mix(tArmS.g, 0.22, wet);
 float tAO = mix(tArmS.r, 1.0, 0.3);
 tNrmW = normalize(mix(tNrmW, nW, wet * 0.6 + smoothstep(60.0, 300.0, dist) * 0.5));
 
-if (uUrban > 0.5) {
+if (uArena > 0.5) {
+  float au = length(vec2(vWPos.x / uArenaSX, vWPos.z / uArenaSZ));
+  float plank = tHash(vec2(floor(vWPos.z * 8.0), 2.2));
+  if (au < 1.08) {
+    tAlb = mix(vec3(0.4, 0.24, 0.11), vec3(0.68, 0.46, 0.24), plank);
+    tAlb *= mix(0.88, 1.1, macro);
+    tRough = 0.4;
+  } else if (au < 3.2) {
+    tAlb = mix(vec3(0.28, 0.26, 0.24), vec3(0.42, 0.4, 0.36), tNoise(vWPos.xz * 0.55));
+    tRough = 0.72;
+  } else if (au < 4.55) {
+    tAlb = mix(vec3(0.32, 0.3, 0.28), vec3(0.5, 0.46, 0.4), tNoise(vWPos.xz * 1.4));
+    tRough = 0.55;
+  } else {
+    tAlb *= 0.72;
+    tRough = mix(tRough, 0.62, 0.5);
+  }
+} else if (uUrban > 0.5) {
   float pr = length(vWPos.xz);
   if (pr < uPlazaLawn) {
     float gN = tNoise(vWPos.xz * 1.1) * 0.55 + tNoise(vWPos.xz * 3.4 + 4.0) * 0.45;
@@ -240,8 +261,9 @@ diffuseColor.rgb *= tAlb;
 `;
 
 export class Terrain {
-  constructor(data, textures, { urban = false } = {}) {
+  constructor(data, textures, { urban = false, arena = false } = {}) {
     this.urban = urban;
+    this.arena = arena;
     this.heights = data.heights;
     this.normalsData = data.normals;
     this.biomeData = data.biome;
@@ -274,6 +296,9 @@ export class Terrain {
       uWorldSize: { value: WORLD_SIZE },
       uTime: { value: 0 },
       uUrban: { value: urban ? 1 : 0 },
+      uArena: { value: arena ? 1 : 0 },
+      uArenaSX: { value: ARENA.sx },
+      uArenaSZ: { value: ARENA.sz },
       uStreetPitch: { value: CITY.pitch },
       uBlockW: { value: CITY.blockW },
       uStreetW: { value: CITY.streetW },
@@ -295,7 +320,7 @@ export class Terrain {
         .replace('#include <normal_fragment_maps>', 'normal = normalize((viewMatrix * vec4(tNrmW, 0.0)).xyz);')
         .replace('#include <aomap_fragment>', 'reflectedLight.indirectDiffuse *= tAO; reflectedLight.indirectSpecular *= tAO;');
     };
-    this.material.customProgramCacheKey = () => (urban ? 'terrain-splat-urban' : 'terrain-splat');
+    this.material.customProgramCacheKey = () => (arena ? 'terrain-splat-arena' : urban ? 'terrain-splat-urban' : 'terrain-splat');
 
     this.depthMaterial = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
     this.depthMaterial.onBeforeCompile = (shader) => {

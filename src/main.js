@@ -7,6 +7,7 @@ import { Grass } from './world/grass.js';
 import { Vegetation } from './world/vegetation.js';
 import { getMap } from './world/maps.js';
 import { City } from './world/city.js';
+import { Arena } from './world/arena.js';
 import { Character } from './game/character.js';
 import { Player } from './game/player.js';
 import { Props } from './game/props.js';
@@ -278,7 +279,8 @@ async function init() {
     progress.task(mapDef.loadLabel, 3, () => generateHeightmap(mapDef.id)),
     progress.task('Loading terrain materials', 3, () => loadTerrainTextures(mapDef)),
   ]);
-  const terrain = new Terrain(data, textures, { urban: mapDef.id === 'city' });
+  const indoor = mapDef.id === 'garden';
+  const terrain = new Terrain(data, textures, { urban: mapDef.id === 'city' || indoor, arena: indoor });
   world.terrain = terrain;
   pipeline.scene.add(terrain.group);
 
@@ -298,7 +300,9 @@ async function init() {
   world.veg = veg;
   world.props = props;
   let city = null;
+  let arena = null;
   if (mapDef.id === 'city') city = new City(terrain, veg.colliders, pipeline);
+  if (indoor) arena = new Arena(terrain, veg.colliders, pipeline);
   const fighters = mode === 'solo'
     ? [selection.player, ...selection.rivals].map(byId)
     : [byId(selection.player)];
@@ -309,6 +313,7 @@ async function init() {
     resolveLooks(fighters),
     mapDef.waterCamp ? props.load(progress) : Promise.resolve(),
     city ? city.load(progress) : Promise.resolve(),
+    arena ? arena.load(progress) : Promise.resolve(),
   ]);
   character.load(charAssets, looks[0]);
   character.lookId = fighters[0].id;
@@ -328,6 +333,10 @@ async function init() {
     city.build(data.layout);
     pipeline.scene.add(city.group);
   }
+  if (arena && data.layout) {
+    arena.build(data.layout);
+    pipeline.scene.add(arena.group);
+  }
   character.addTo(pipeline.scene);
 
   const player = new Player(world, character, camera);
@@ -338,7 +347,7 @@ async function init() {
   weapons.setGrenadeModel(charAssets.grenadeGltf);
   player.fighter.loadout = new Loadout(3);
   player.onScope = () => audio.mech('scope');
-  Object.assign(world, { grass, character, player, fx, weapons, data, city, mapDef });
+  Object.assign(world, { grass, character, player, fx, weapons, data, city, arena, mapDef });
 
   const rivals = fighters.slice(1).map((entry, i) => {
     const ch = new Character();
@@ -435,8 +444,8 @@ async function init() {
         const dist = 18 + Math.random() * 10;
         const x = p.x + Math.sin(ang) * dist, z = p.z + Math.cos(ang) * dist;
         const h = terrain.heightAt(x, z);
-        if (!terrain.inBounds(x, z) || h < (mapDef.id === 'city' ? 1.2 : 0.6)) continue;
-        if (terrain.normalAt(x, z).y < (mapDef.id === 'city' ? 0.75 : 0.8)) continue;
+        if (!terrain.inBounds(x, z) || h < (mapDef.id === 'city' || indoor ? 1.2 : 0.6)) continue;
+        if (terrain.normalAt(x, z).y < (mapDef.id === 'city' || indoor ? 0.75 : 0.8)) continue;
         if (veg.colliders.query(x, z, 1.2, tmp).length) continue;
         if (rivals.some((o, j) => j < i && Math.hypot(o.pos.x - x, o.pos.z - z) < 8)) continue;
         at = { x, z };
@@ -811,6 +820,7 @@ async function init() {
       if (grass) grass.update(elapsed, camera.position, viewPos);
       if (mapDef.vegetation) veg.update(elapsed, camera.position);
       if (city) city.update(dt, fx, camera);
+      if (arena) arena.update(dt, fx, camera);
       const coast = THREE.MathUtils.clamp(1 - (terrain.heightAt(viewPos.x, viewPos.z) - 1) / 25, 0, 1);
       audio.updateAmbience(dt, { altitude: player.pos.y, coast, underwater: player.underwater });
     }

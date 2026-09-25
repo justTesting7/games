@@ -35,6 +35,24 @@ export const MAPS = {
     timeOfDay: 0.22,
     fogDensity: 0.0028,
   },
+  garden: {
+    id: 'garden',
+    label: 'Madison Square Garden',
+    subtitle: 'The Garden · court, stands and outer halls',
+    loadLabel: 'Raising the Garden',
+    plantLabel: 'Dressing the concourse',
+    textures: {
+      sand: 'asphalt_01',
+      grass: 'brushed_concrete_2',
+      forest: 'burned_ground_01',
+      rock: 'broken_brick_wall',
+    },
+    grass: false,
+    vegetation: false,
+    waterCamp: false,
+    timeOfDay: 0.78,
+    fogDensity: 0.0036,
+  },
 };
 
 export function getMap(id) {
