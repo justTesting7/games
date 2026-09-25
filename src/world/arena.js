@@ -145,7 +145,7 @@ export class Arena {
       }
     });
     const fog = this.pipeline.fogMaterial.uniforms;
-    if (fog.uFogDensity) fog.uFogDensity.value = 0.0048;
+    if (fog.uFogDensity) fog.uFogDensity.value = 0.0016;
   }
 
   spawnFor(slot = 0) {
@@ -249,11 +249,10 @@ export class Arena {
     for (const bank of banks) {
       for (const row of bank.rows) {
         for (let sec = 0; sec < BOWL.sections; sec++) {
-          const a0 = (sec / BOWL.sections) * Math.PI * 2 + BOWL.aisleRad;
-          const a1 = ((sec + 1) / BOWL.sections) * Math.PI * 2 - BOWL.aisleRad;
+          const a0 = (sec / BOWL.sections) * Math.PI * 2;
+          const a1 = ((sec + 1) / BOWL.sections) * Math.PI * 2;
           const ang = (a0 + a1) * 0.5;
           const mid = ovalPoint((row.u0 + row.u1) * 0.5, ang);
-          if (tunnelInfo(mid.x, mid.z).inBand) continue;
           const depth = (row.u1 - row.u0) * (ARENA.sx + ARENA.sz) * 0.5;
           const width = arcLength((row.u0 + row.u1) * 0.5, a0, a1);
           treads.push({
@@ -289,9 +288,16 @@ export class Arena {
     for (let sec = 0; sec < BOWL.sections; sec++) {
       const ang = sectionAngle(sec, 0.5);
       const rail = ovalPoint(spawnRow.u0 + 0.012, ang);
-      if (tunnelInfo(rail.x, rail.z).inBand) continue;
       this.group.add(mesh(new THREE.BoxGeometry(2.4, 0.06, 0.06), mats.chrome, rail.x, spawnRow.y + 0.92, rail.z, 0, -ang, 0));
       this.group.add(mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.9, 6), mats.chrome, rail.x, spawnRow.y + 0.46, rail.z));
+    }
+
+    const lastUp = UPPER_ROWS[UPPER_ROWS.length - 1];
+    for (let i = 0; i < 48; i++) {
+      const ang = (i / 48) * Math.PI * 2;
+      const p = ovalPoint(lastUp.u1, ang);
+      this.group.add(mesh(new THREE.BoxGeometry(4.6, 1.55, 0.22), mats.pad, p.x, lastUp.y + 0.78, p.z, 0, -ang, 0));
+      addBox(this.colliders, p.x, p.z, lastUp.y, 2.1, 1.1, 1.6, 'cover');
     }
 
     for (let slot = 0; slot < 8; slot++) {
@@ -308,7 +314,6 @@ export class Arena {
       for (let i = 0; i < 48; i++) {
         const ang = (i / 48) * Math.PI * 2;
         const p = ovalPoint(u, ang);
-        if (tunnelInfo(p.x, p.z).inBand && u < ARENA.concIn) continue;
         const y = u < ARENA.concIn ? LOWER_ROWS[0].y + 0.55 : ARENA.concY + 0.7;
         const board = mesh(new THREE.BoxGeometry(3.1, 0.55, 0.08), mats.jumbo, p.x, y, p.z, 0, -ang, 0);
         board.userData.noShadow = true;
@@ -348,14 +353,15 @@ export class Arena {
   }
 
   buildRoof(mats) {
-    const roofY = 28.8;
-    const roof = new THREE.Mesh(
-      new THREE.CircleGeometry((ARENA.sx + ARENA.sz) * 0.5 * ARENA.hallOut, 48),
-      mats.darkConc,
-    );
-    roof.rotation.x = -Math.PI / 2;
+    const roofY = 29.2;
+    const roofMat = new THREE.MeshStandardMaterial({
+      color: 0x121418, roughness: 0.94, metalness: 0.03, envMapIntensity: 0.06,
+    });
+    const roof = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 2.6, 48, 1, false), roofMat);
+    roof.name = 'msg-roof';
     roof.position.y = roofY;
-    roof.scale.set(ARENA.sx / ((ARENA.sx + ARENA.sz) * 0.5), 1, ARENA.sz / ((ARENA.sx + ARENA.sz) * 0.5));
+    roof.scale.set(ARENA.sx * ARENA.hallOut * 1.08, 1, ARENA.sz * ARENA.hallOut * 1.08);
+    roof.receiveShadow = true;
     this.group.add(roof);
 
     for (let i = 0; i < 20; i++) {
@@ -581,24 +587,25 @@ export class Arena {
   }
 
   lightArena(y0) {
-    const hemi = new THREE.HemisphereLight(0x6e7c90, 0x08090c, 0.2);
+    const hemi = new THREE.HemisphereLight(0xe8edf4, 0x14161c, 0.7);
     this.group.add(hemi);
-    const spots = [
-      [0, 0, 5.2],
-      [-7.5, 0, 3.8],
-      [7.5, 0, 3.8],
-      [0, -5.2, 3.4],
-      [0, 5.2, 3.4],
-    ];
-    for (const [x, z, inten] of spots) {
-      const spot = new THREE.SpotLight(0xfff2d8, inten, 48, 0.62, 0.48, 1.15);
-      spot.position.set(x * 0.15, y0 + 16.8, z * 0.15);
-      spot.target.position.set(x, y0, z);
+    const wash = new THREE.DirectionalLight(0xfff3dc, 4.2);
+    wash.position.set(0, y0 + 26, 0.4);
+    wash.target.position.set(0, y0, 0);
+    wash.castShadow = false;
+    this.group.add(wash, wash.target);
+    for (let i = 0; i < 12; i++) {
+      const ang = (i / 12) * Math.PI * 2;
+      const p = ovalPoint(1.35, ang);
+      const aim = ovalPoint(0.35, ang);
+      const spot = new THREE.SpotLight(0xfff4e2, 120, 78, 0.58, 0.32, 1.25);
+      spot.position.set(p.x * 0.42, y0 + 24.5, p.z * 0.42);
+      spot.target.position.set(aim.x, y0, aim.z);
       spot.castShadow = false;
       this.group.add(spot, spot.target);
     }
-    const court = new THREE.PointLight(0xffeed4, 1.55, 36, 1.35);
-    court.position.set(0, y0 + 10.5, 0);
+    const court = new THREE.PointLight(0xfff0d8, 14, 62, 1.15);
+    court.position.set(0, y0 + 16.2, 0);
     court.castShadow = false;
     this.group.add(court);
   }

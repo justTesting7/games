@@ -179,6 +179,7 @@ const paintMode = () => {
   if (mode === 'multi') {
     if (!hosted) $('modehint').textContent = 'Multiplayer needs the hosted game or npm run cf:dev.';
     else if (session && !session.isHost) $('modehint').textContent = `Host chose ${mapDef.label}. Pick a fighter and join.`;
+    else if (mapDef.fixedTime) $('modehint').textContent = 'You are the host. Map and min players apply to everyone who joins.';
     else $('modehint').textContent = 'You are the host. Map, time, and min players apply to everyone who joins.';
   } else {
     $('modehint').textContent = 'You against Jev-driven rivals. Last one standing wins.';
@@ -211,6 +212,7 @@ $('roomcode').oninput = () => {
 
 let timeOfDay = mapDef.timeOfDay;
 $('timeofday').value = Math.round(timeOfDay * 1000);
+$('todrow').classList.toggle('hidden', !!mapDef.fixedTime);
 let timeSend = 0;
 $('timeofday').oninput = (e) => {
   timeOfDay = e.target.value / 1000;
@@ -235,10 +237,11 @@ $('minplayers').onchange = () => {
 const applyHostUi = (host) => {
   const lock = mode === 'multi' && host === false;
   $('map').disabled = lock;
-  $('timeofday').disabled = lock;
+  $('timeofday').disabled = lock || !!mapDef.fixedTime;
   $('minplayers').disabled = lock;
   $('map').parentElement?.classList.toggle('locked', lock);
   $('timeofday').parentElement?.classList.toggle('locked', lock);
+  $('todrow').classList.toggle('hidden', !!mapDef.fixedTime);
   $('minrow').classList.toggle('locked', lock);
   paintMode();
 };
@@ -268,7 +271,7 @@ async function init() {
         location.reload();
         return;
       }
-      if (Number.isFinite(info.settings?.time)) {
+      if (Number.isFinite(info.settings?.time) && !mapDef.fixedTime) {
         timeOfDay = info.settings.time;
         $('timeofday').value = Math.round(timeOfDay * 1000);
       }
@@ -372,7 +375,7 @@ async function init() {
     onRoster: () => rebuildTags(),
     onRound: (msg) => applyNetRound(msg),
     onSettings: (s) => {
-      if (Number.isFinite(s?.time)) {
+      if (Number.isFinite(s?.time) && !mapDef.fixedTime) {
         timeOfDay = s.time;
         $('timeofday').value = Math.round(timeOfDay * 1000);
       }
@@ -773,7 +776,7 @@ async function init() {
   let fpsT = 0, frames = 0, fps = 0;
   const clock = startClock((dt, draw) => {
     elapsed += dt;
-    if (input.fastTime && (mode !== 'multi' || session?.isHost)) {
+    if (input.fastTime && !mapDef.fixedTime && (mode !== 'multi' || session?.isHost)) {
       timeOfDay = (timeOfDay + dt * 0.03) % 1;
       $('timeofday').value = Math.round(timeOfDay * 1000);
     }

@@ -1,6 +1,6 @@
 import {
   ARENA, BOWL, LOWER_ROWS, arenaHeightAt, arenaZone, buildArenaHeightmap,
-  enumerateSeats, generateArenaLayout, hoopX, ovalU, standSpawn, tunnelInfo,
+  enumerateSeats, generateArenaLayout, hoopX, ovalPoint, ovalU, standSpawn,
 } from '../src/world/arenaLayout.js';
 import { getMap, MAPS } from '../src/world/maps.js';
 
@@ -9,6 +9,7 @@ const fail = (msg) => { console.error(msg); process.exit(1); };
 
 if (!MAPS.garden || getMap('garden').id !== 'garden') fail('garden map is not registered');
 if (getMap('garden').label !== 'Madison Square Garden') fail('garden label');
+if (!MAPS.garden.fixedTime) fail('garden should disable day/night');
 
 const seats = enumerateSeats();
 if (seats.length < 19000 || seats.length > 22000) fail(`expected ~20k seats, got ${seats.length}`);
@@ -33,10 +34,19 @@ for (let i = 0; i < 8; i++) {
 if (arenaZone(0, 0) !== 'court') fail(`center is ${arenaZone(0, 0)}, expected court`);
 if (Math.abs(hoopX() - (ARENA.courtHX - ARENA.hoopInset)) > 1e-6) fail('hoop');
 
-const east = tunnelInfo(28, 0);
-if (!east.inBand || east.isRamp) fail('east vomitorium should be a level tunnel');
-const diag = tunnelInfo(Math.cos(Math.PI / 4) * ARENA.sx * 1.8, Math.sin(Math.PI / 4) * ARENA.sz * 1.8);
-if (!diag.inBand || !diag.isRamp) fail('diagonal should ramp to the concourse');
+const row18 = LOWER_ROWS[BOWL.spawnRow - 1];
+for (let i = 0; i < 32; i++) {
+  const ang = (i / 32) * Math.PI * 2;
+  const p = ovalPoint(row18.walkU, ang);
+  const h = arenaHeightAt(p.x, p.z, layout, noise);
+  if (h < row18.y - 0.3) fail(`stand gap at ang=${ang.toFixed(2)} h=${h} expected ~${row18.y}`);
+}
+const midRow = LOWER_ROWS[9];
+for (const ang of [0, Math.PI / 4, Math.PI / 2, Math.PI]) {
+  const p = ovalPoint((midRow.u0 + midRow.u1) * 0.5, ang);
+  const h = arenaHeightAt(p.x, p.z, layout, noise);
+  if (h < midRow.y - 0.3) fail(`mid-bowl hole at ${ang} h=${h}`);
+}
 
 const courtH = arenaHeightAt(0, 0, layout, noise);
 if (Math.abs(courtH - ARENA.baseY) > 0.08) fail(`court height ${courtH}`);
@@ -62,6 +72,6 @@ const N = 1025;
 const mid = (512 * N + 512);
 if (Math.abs(data.heights[mid] - ARENA.baseY) > 0.2) fail(`mid height ${data.heights[mid]}`);
 
-console.log('ok: Garden 20k seats, 18th-step stands, ramps and halls', {
+console.log('ok: Garden 20k seats, 18th-step stands, closed bowl', {
   seats: seats.length, sections: BOWL.sections, spawnRow: BOWL.spawnRow,
 });

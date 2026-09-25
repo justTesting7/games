@@ -45,6 +45,10 @@ if (!arena.group.getObjectByName('msg-court')) {
   console.error('missing painted Garden court');
   process.exit(1);
 }
+if (!arena.group.getObjectByName('msg-roof')) {
+  console.error('missing solid Garden roof');
+  process.exit(1);
+}
 if (!pipeline.indoor) {
   console.error('arena build should mark the pipeline indoor');
   process.exit(1);

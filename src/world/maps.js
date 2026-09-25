@@ -53,9 +53,10 @@ export const MAPS = {
     grass: false,
     vegetation: false,
     waterCamp: false,
-    timeOfDay: 0.78,
-    fogDensity: 0.0048,
+    timeOfDay: 0.22,
+    fogDensity: 0.0016,
     radarRange: 80,
+    fixedTime: true,
   },
 };
 

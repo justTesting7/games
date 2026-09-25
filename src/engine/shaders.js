@@ -13,6 +13,10 @@ vec3 skyIrradiance(vec3 n) { return textureLod(uSkyTex, dirToUV(n), 5.0).rgb; }
 float ign(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715)))); }
 `;
 
+export const indoorSkyFrag = /* glsl */ `
+void main() { gl_FragColor = vec4(0.012, 0.013, 0.015, 1.0); }
+`;
+
 // Float textures are not guaranteed to be filterable, so heights are
 // interpolated by hand.
 export const heightSampleGLSL = /* glsl */ `

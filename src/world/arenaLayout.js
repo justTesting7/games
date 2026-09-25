@@ -134,11 +134,6 @@ export function arenaZone(x, z) {
   return 'outside';
 }
 
-const smoothstep = (a, b, x) => {
-  const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
-  return t * t * (3 - 2 * t);
-};
-
 /** Consecutive slots land 7 sections apart so neighbours start on opposite sides. */
 export function standSpawn(slot = 0) {
   const sec = ((slot * 7) % BOWL.sections + BOWL.sections) % BOWL.sections;
@@ -188,42 +183,30 @@ export function generateArenaLayout(seed) {
 }
 
 function steppedHeight(u) {
+  if (u < ARENA.bowlIn) return ARENA.baseY;
   const low = rowAtU(u, LOWER_ROWS);
   if (low) return low.y;
-  if (u >= ARENA.concIn && u < ARENA.concOut) return ARENA.concY;
+  const lastLow = LOWER_ROWS[LOWER_ROWS.length - 1];
+  if (u < ARENA.concIn) return lastLow.y;
+  if (u < ARENA.concOut) return ARENA.concY;
   const up = rowAtU(u, UPPER_ROWS);
   if (up) return up.y;
+  const lastUp = UPPER_ROWS[UPPER_ROWS.length - 1];
+  if (u < lastUp.u1 + 0.1) return lastUp.y;
   return ARENA.baseY;
 }
 
 export function arenaHeightAt(x, z, _layout, noise) {
-  const { baseY, bowlIn, concIn, concOut, playRadius, concY } = ARENA;
+  const { baseY, playRadius } = ARENA;
   const r = Math.hypot(x, z);
   if (r > playRadius + 18) {
     const t = Math.min(1, (r - playRadius) / 32);
     return baseY + t * t * 26;
   }
   const u = ovalU(x, z);
-  const tun = tunnelInfo(x, z);
-  let h = baseY;
-
-  if (tun.inBand && tun.isRamp) {
-    if (u > bowlIn + 0.2 && u < concIn) {
-      h = baseY + smoothstep(bowlIn + 0.2, concIn, u) * (concY - baseY);
-    } else if (u >= concIn && u < concOut) {
-      h = concY;
-    } else {
-      h = baseY;
-    }
-  } else if (tun.inBand) {
-    h = baseY;
-  } else if (u >= bowlIn) {
-    h = steppedHeight(u);
-  }
-
+  let h = steppedHeight(u);
   const n = noise.fbm2(x * 0.11 + 2.1, z * 0.11, 2) * 0.02;
-  if (u < bowlIn) h += n * 0.2;
-  else if (tun.inBand) h += n * 0.2;
+  if (u < ARENA.bowlIn) h += n * 0.2;
   else if (u >= ARENA.facadeOut) h += n * 0.55;
   return h;
 }
