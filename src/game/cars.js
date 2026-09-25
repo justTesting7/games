@@ -211,6 +211,11 @@ export function resolveCarBox(pos, radius, car) {
   return true;
 }
 
+/** A = left, D = right. Sign is opposite walk-strafe because +yaw turns the nose left on screen. */
+export function driveSteer(input = {}) {
+  return (input.left ? 1 : 0) - (input.right ? 1 : 0) - (input.moveX || 0);
+}
+
 export function stepDrive({ speed, yaw, throttle, steer, dt, sprint = false }) {
   const max = sprint && throttle > 0 ? CAR.boostSpeed : CAR.maxSpeed;
   let next = speed;
@@ -852,8 +857,7 @@ export class Cars {
     const local = this.localCar();
     if (active && player?.fighter?.alive && local) {
       const f = (input.forward ? 1 : 0) - (input.back ? 1 : 0) + (input.moveY || 0);
-      const s = (input.right ? 1 : 0) - (input.left ? 1 : 0) + (input.moveX || 0);
-      local.steer = THREE.MathUtils.clamp(s, -1, 1);
+      local.steer = THREE.MathUtils.clamp(driveSteer(input), -1, 1);
       const stepped = stepDrive({
         speed: local.speed,
         yaw: local.yaw,

@@ -1,6 +1,6 @@
 import {
   CAR, cityCarSpots, manhattanCarSpots, carSpotsForMap, spotOnRoad, canEnter, nearestEnter, carOverlap, resolveCarBox,
-  runOverHits, stepDrive, seatOf, exitOf, localOffset, cockpitEye, hitCar,
+  runOverHits, stepDrive, driveSteer, seatOf, exitOf, localOffset, cockpitEye, hitCar,
   paneBit, glassIntact, glassMaskAfterHit,
 } from '../src/game/cars.js';
 
@@ -25,7 +25,11 @@ for (let i = 0; i < 8; i++) braking = stepDrive({ ...braking, throttle: -1, stee
 if (braking.speed > 8) throw new Error(`brake should cut speed, got ${braking.speed}`);
 
 const turned = stepDrive({ speed: 10, yaw: 0, throttle: 1, steer: 1, dt: 0.2 });
-if (turned.yaw <= 0) throw new Error('right steer should increase yaw');
+if (turned.yaw <= 0) throw new Error('positive steer should increase yaw');
+if (driveSteer({ right: true }) >= 0) throw new Error('D must steer opposite walk-strafe');
+if (driveSteer({ left: true }) <= 0) throw new Error('A must steer opposite walk-strafe');
+const keyed = stepDrive({ speed: 10, yaw: 0, throttle: 1, steer: driveSteer({ right: true }), dt: 0.2 });
+if (keyed.yaw >= 0) throw new Error('D should turn the nose right on screen');
 
 const parked = { x: 0, z: 0, y: 2, yaw: 0, driver: null, speed: 0, squash: {} };
 if (!canEnter(1.2, 0.4, parked)) throw new Error('a player beside an empty car can enter');
