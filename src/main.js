@@ -494,8 +494,6 @@ async function init() {
     if (!sub) { spectate = null; return null; }
     if (spectate !== sub) {
       spectate = sub;
-      player.camYaw = sub.yaw ?? 0;
-      player.camPitch = -0.1;
       player.smoothPivot = undefined;
       player.smoothDist = undefined;
     }
@@ -724,7 +722,7 @@ async function init() {
     const base = touch ? 0.0026 : 0.00022;
     const sens = Number($('sens').value) * base * (flying ? 0.85 : player.scoped ? 0.16 : player.camDist < 2 ? 0.7 : 1);
     if (flying) weapons.drone.look(dx * sens, dy * sens);
-    else player.look(dx * sens, dy * sens);
+    else if (player.fighter.alive) player.look(dx * sens, dy * sens);
   };
   const setPlay = (on) => {
     inPlay = !!on;
@@ -924,7 +922,7 @@ async function init() {
     const leftLabel = document.querySelector('#round small');
     if (leftLabel) leftLabel.textContent = mode === 'multi' ? 'players left' : 'rivals left';
     const radarSelf = spec || player;
-    const radarYaw = spec ? (spec.yaw ?? player.camYaw) : player.camYaw;
+    const radarYaw = player.camYaw;
     const radarOthers = radarSubjects(mode === 'multi' ? [...session.remotes.values()] : rivals)
       .filter((o) => o.id !== radarSelf.fighter?.id);
     drawRadar($('radarcanvas'), {

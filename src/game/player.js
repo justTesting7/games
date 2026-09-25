@@ -8,6 +8,35 @@ const SPEED = { walk: 1.7, jog: 3.9, sprint: 6.3, aim: 3.0, aimWalk: 1.6, crouch
 
 const wrapAngle = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 
+/** Look a living subject is using — same yaw/pitch their own camera would have. */
+export function spectateLook(sub) {
+  if (!sub) return { yaw: 0, pitch: -0.08, aiming: false };
+  if (Number.isFinite(sub.lookYaw)) {
+    return {
+      yaw: sub.lookYaw,
+      pitch: Number.isFinite(sub.lookPitch) ? sub.lookPitch : 0,
+      aiming: !!sub.aiming,
+    };
+  }
+  if (sub.lookPoint && sub.pos) {
+    const eyeY = sub.pos.y + 1.5;
+    const dx = sub.lookPoint.x - sub.pos.x;
+    const dy = sub.lookPoint.y - eyeY;
+    const dz = sub.lookPoint.z - sub.pos.z;
+    const flat = Math.hypot(dx, dz) || 1e-6;
+    return {
+      yaw: Math.atan2(dx, dz),
+      pitch: Math.atan2(dy, flat),
+      aiming: !!sub.aiming,
+    };
+  }
+  return {
+    yaw: sub.yaw ?? 0,
+    pitch: Number.isFinite(sub.pitch) ? sub.pitch : -0.08,
+    aiming: !!sub.aiming,
+  };
+}
+
 export class Player {
   constructor(world, character, camera) {
     this.world = world;
@@ -254,10 +283,14 @@ export class Player {
     ch.root.rotation.z = 0;
 
     if (follow) {
+      const look = spectateLook(follow);
+      this.camYaw = look.yaw;
+      this.camPitch = THREE.MathUtils.clamp(look.pitch, -1.25, 0.95);
       this.scoped = false;
       this.scopeT = 0;
       this.holdingBreath = false;
-      this.updateCamera(dt, false, false, 0, follow);
+      const spd = follow.speed ?? 0;
+      this.updateCamera(dt, look.aiming, spd > 4.5 && !look.aiming, spd, follow);
     } else {
       this.updateCamera(dt, aiming, input.sprint && speed > 4.5 && !this.scoped && !this.crouching, speed);
       this.updateAim();

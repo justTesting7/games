@@ -63,6 +63,8 @@ class Remote {
   tick(dt) {
     this.pos.lerp(this.target, 1 - Math.exp(-dt * 14));
     this.yaw += wrap(this.targetYaw - this.yaw) * Math.min(1, dt * 10);
+    this.lookYaw = this.yaw;
+    this.lookPitch = this.pitch;
     const ch = this.character;
     ch.root.position.copy(this.pos);
     const swimming = this.pos.y < 0.15;

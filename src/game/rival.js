@@ -54,6 +54,9 @@ export class Rival {
     this.pos = new THREE.Vector3();
     this.vel = new THREE.Vector3();
     this.yaw = 0;
+    this.lookYaw = 0;
+    this.lookPitch = 0;
+    this.aiming = false;
     this.onGround = true;
     this.airTime = 0;
     this.localDir = new THREE.Vector3(0, 0, 1);
@@ -115,6 +118,9 @@ export class Rival {
     this.pos.set(x, this.world.terrain.heightAt(x, z), z);
     this.vel.set(0, 0, 0);
     this.yaw = yaw;
+    this.lookYaw = yaw;
+    this.lookPitch = 0;
+    this.aiming = false;
     this.onGround = true;
     this.airTime = 0;
     this.character.root.position.copy(this.pos);
@@ -1189,6 +1195,13 @@ export class Rival {
 
     if (wish.aim) this.lookPoint.copy(this.aimPoint);
     else this.lookPoint.copy(this.pos).addScaledVector(fwd, 10).setY(this.pos.y + 1.5);
+    this.aiming = !!wish.aim;
+    const eyeY = this.pos.y + 1.5;
+    const ldx = this.lookPoint.x - this.pos.x;
+    const ldy = this.lookPoint.y - eyeY;
+    const ldz = this.lookPoint.z - this.pos.z;
+    this.lookYaw = Math.atan2(ldx, ldz);
+    this.lookPitch = Math.atan2(ldy, Math.hypot(ldx, ldz) || 1e-6);
     ch.root.position.copy(this.pos);
     ch.root.rotation.y = this.yaw;
     ch.update(dt, {
