@@ -126,8 +126,10 @@ function drawSmear(ctx, ox, oy, rand) {
 }
 
 /**
- * Turns a "thickness" canvas (alpha = amount of blood) into a colour map and a
- * normal map, so thin films read bright red and thick pools dark and glossy.
+ * Turns a "thickness" canvas (alpha = amount of blood) into a multiply tint
+ * and a normal map. RGB is a linear stain factor, not a lit albedo: high red,
+ * tiny green/blue. Alpha-over of a dark red on HDR sunlit ground punches a
+ * black hole; multiplying the floor keeps the existing light and just tints it.
  */
 function finishTextures(src, strength = 3) {
   const w = src.width, h = src.height;
@@ -149,10 +151,10 @@ function finishTextures(src, strength = 3) {
       const i = y * w + x;
       const t = H[i];
       const a = data[i * 4 + 3] / 255;
-      cImg.data[i * 4] = 118 - 80 * t;
-      cImg.data[i * 4 + 1] = 7 - 5 * t;
-      cImg.data[i * 4 + 2] = 6 - 4 * t;
-      cImg.data[i * 4 + 3] = Math.min(255, a * 2.4 * 255);
+      cImg.data[i * 4] = 168 - 48 * t;
+      cImg.data[i * 4 + 1] = 22 - 8 * t;
+      cImg.data[i * 4 + 2] = 18 - 6 * t;
+      cImg.data[i * 4 + 3] = Math.min(255, a * 1.9 * 255);
       const dx = (at(x + 1, y) - at(x - 1, y)) * strength;
       const dy = (at(x, y + 1) - at(x, y - 1)) * strength;
       const l = Math.hypot(dx, dy, 1);
@@ -165,7 +167,8 @@ function finishTextures(src, strength = 3) {
   col.getContext('2d').putImageData(cImg, 0, 0);
   nrm.getContext('2d').putImageData(nImg, 0, 0);
   const map = new THREE.CanvasTexture(col);
-  map.colorSpace = THREE.SRGBColorSpace;
+  // Linear multipliers — do not sRGB-decode or the stain goes near-black.
+  map.colorSpace = THREE.NoColorSpace;
   map.anisotropy = 8;
   const normalMap = new THREE.CanvasTexture(nrm);
   normalMap.anisotropy = 8;
@@ -173,21 +176,21 @@ function finishTextures(src, strength = 3) {
 }
 
 function bloodMaterial(tex) {
-  return new THREE.MeshStandardMaterial({
+  return new THREE.MeshBasicMaterial({
     map: tex.map,
-    normalMap: tex.normalMap,
-    normalScale: new THREE.Vector2(1.2, 1.2),
-    roughness: 0.16,
-    metalness: 0,
+    color: 0xffffff,
     transparent: true,
     depthWrite: false,
+    fog: false,
+    toneMapped: false,
+    premultipliedAlpha: true,
     polygonOffset: true,
     polygonOffsetFactor: -4,
     polygonOffsetUnits: -4,
-    // Scene alpha stores depth for fog / SSR, so decals must leave it untouched.
+    // dest * (1 - a + a * tint): stain the lit ground, leave scene depth alone.
     blending: THREE.CustomBlending,
     blendEquation: THREE.AddEquation,
-    blendSrc: THREE.SrcAlphaFactor,
+    blendSrc: THREE.DstColorFactor,
     blendDst: THREE.OneMinusSrcAlphaFactor,
     blendSrcAlpha: THREE.ZeroFactor,
     blendDstAlpha: THREE.OneFactor,
@@ -195,12 +198,13 @@ function bloodMaterial(tex) {
 }
 
 export class BloodDecals {
-  constructor(scene, terrain, { maxSplats = 56, maxDrops = 700 } = {}) {
+  constructor(scene, terrain, { maxSplats = 80, maxDrops = 2000 } = {}) {
     this.scene = scene;
     this.terrain = terrain;
     this.maxSplats = maxSplats;
     this.splats = [];
     this.pools = [];
+    this.wounds = [];
 
     const atlas = document.createElement('canvas');
     atlas.width = TILE * COLS; atlas.height = TILE * ROWS;
@@ -235,7 +239,7 @@ export class BloodDecals {
     this.drops = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2), this.dropMaterial, maxDrops);
     this.drops.count = 0;
     this.drops.frustumCulled = false;
-    this.drops.receiveShadow = true;
+    this.drops.receiveShadow = false;
     this.drops.renderOrder = 2;
     this.dropNext = 0;
     scene.add(this.drops);
@@ -302,24 +306,70 @@ export class BloodDecals {
     const tt = vertical ? t : t.clone().applyAxisAngle(nn, (Math.random() - 0.5) * 0.25);
     const mesh = new THREE.Mesh(this.geometry(point, nn, tt, size, tile, onGround), this.material);
     mesh.position.copy(point);
-    mesh.receiveShadow = true;
+    mesh.receiveShadow = false;
     mesh.renderOrder = 2;
     this.scene.add(mesh);
     this.splats.push(mesh);
+    this.evict();
+    return mesh;
+  }
+
+  evict() {
     while (this.splats.length > this.maxSplats) {
-      const old = this.splats.shift();
+      const i = this.splats.findIndex((m) => !m.userData.wound);
+      if (i < 0) break;
+      const old = this.splats.splice(i, 1)[0];
       old.removeFromParent();
       old.geometry.dispose();
       this.pools = this.pools.filter((p) => p.mesh !== old);
     }
+  }
+
+  keep(mesh) {
+    mesh.userData.wound = true;
     return mesh;
+  }
+
+  /**
+   * Blood at a wound stays for the whole match: a stain plus a puddle that
+   * keeps dripping. Nearby hits feed the same site instead of stacking.
+   */
+  bleed(point, dir, amount = 10) {
+    const x = point.x, z = point.z;
+    const y = this.terrain.heightAt(x, z);
+    if (y < 0.05) return null;
+    for (const w of this.wounds) {
+      if (Math.hypot(w.x - x, w.z - z) < 0.85) {
+        w.strength = Math.min(2.4, w.strength + Math.min(0.45, amount / 40));
+        w.dripEvery = Math.max(0.55, w.dripEvery * 0.9);
+        return w;
+      }
+    }
+    const travel = new THREE.Vector3(dir?.x || 0, 0, dir?.z || 0);
+    if (travel.lengthSq() < 1e-4) travel.set(Math.random() - 0.5, 0, Math.random() - 0.5);
+    travel.normalize();
+    const ground = new THREE.Vector3(x, y, z);
+    const n = this.terrain.normalAt(x, z);
+    const size = 0.55 + Math.min(0.7, amount / 50);
+    const stain = this.keep(this.splat(ground, n, travel, size, 'spatter'));
+    const puddle = this.keep(this.splat(ground, n, travel, 1.15 + size * 0.35, 'pool'));
+    puddle.scale.set(0.12, 1, 0.12);
+    const w = {
+      x, z, y, stain, pool: puddle,
+      strength: Math.min(1.5, 0.55 + amount / 50),
+      drip: 0.15,
+      dripEvery: 1.35,
+      poolT: 0,
+    };
+    this.wounds.push(w);
+    return w;
   }
 
   /** A pool that seeps out from under a body over several seconds. */
   pool(point, size = 1.6, delay = 0.8) {
     const p = point.clone();
     p.y = this.terrain.heightAt(p.x, p.z);
-    const mesh = this.splat(p, this.terrain.normalAt(p.x, p.z), new THREE.Vector3(Math.random() - 0.5, 0, Math.random() - 0.5), size, 'pool');
+    const mesh = this.keep(this.splat(p, this.terrain.normalAt(p.x, p.z), new THREE.Vector3(Math.random() - 0.5, 0, Math.random() - 0.5), size, 'pool'));
     mesh.scale.set(0.001, 1, 0.001);
     this.pools.push({ mesh, t: -delay, dur: 7 + Math.random() * 4 });
   }
@@ -338,6 +388,7 @@ export class BloodDecals {
     for (const m of this.splats) { m.removeFromParent(); m.geometry.dispose(); }
     this.splats = [];
     this.pools = [];
+    this.wounds = [];
     this.drops.count = 0;
     this.dropNext = 0;
   }
@@ -351,5 +402,19 @@ export class BloodDecals {
       p.mesh.scale.set(s, 1, s);
     }
     this.pools = this.pools.filter((p) => p.t < p.dur);
+    for (const w of this.wounds) {
+      w.drip -= dt;
+      if (w.drip <= 0) {
+        w.drip = w.dripEvery * (0.65 + Math.random() * 0.7);
+        const a = Math.random() * Math.PI * 2;
+        const r = Math.random() * 0.3 * w.strength;
+        this.drop(w.x + Math.cos(a) * r, w.y, w.z + Math.sin(a) * r, 0.035 + Math.random() * 0.08 * w.strength);
+      }
+      if (w.pool) {
+        w.poolT += dt;
+        const s = Math.min(w.strength, 0.18 + w.poolT * 0.012);
+        w.pool.scale.set(s, 1, s);
+      }
+    }
   }
 }

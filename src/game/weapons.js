@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { Character } from './character.js';
+import { SuicideDrone } from './drone.js';
 
 export const WEAPONS = {
   pistols: {
@@ -15,8 +16,12 @@ export const WEAPONS = {
     count: 3, fuse: 3.4, radius: 8, damage: 120,
     speed: 16, speedMin: 7, speedMax: 24, chargeMax: 1.35,
   },
+  drone: {
+    key: 'drone', name: 'Suicide drone', short: 'drone', slot: 4,
+    count: 10, radius: 9.5, damage: 150,
+  },
 };
-export const SLOTS = ['pistols', 'rifle', 'grenade'];
+export const SLOTS = ['pistols', 'rifle', 'grenade', 'drone'];
 const THROW_DUR = 0.8;
 const THROW_RELEASE = 0.42;
 const GRAVITY = 9.8;
@@ -32,6 +37,7 @@ export class Loadout {
     this.mag = { pistols: WEAPONS.pistols.mag, rifle: WEAPONS.rifle.mag };
     this.reserve = { pistols: WEAPONS.pistols.reserve, rifle: WEAPONS.rifle.reserve };
     this.grenades = this.maxGrenades;
+    this.drones = WEAPONS.drone.count;
     this.reloadT = 0;
     this.cooldown = 0;
     this.autoReload = 0;
@@ -41,7 +47,9 @@ export class Loadout {
   }
 
   has(key) {
-    return key === 'grenade' ? this.grenades > 0 : this.mag[key] + this.reserve[key] > 0;
+    if (key === 'grenade') return this.grenades > 0;
+    if (key === 'drone') return this.drones > 0;
+    return this.mag[key] + this.reserve[key] > 0;
   }
 
   get reloading() { return this.reloadT > 0; }
@@ -68,8 +76,11 @@ export class Weapons {
     this.grenadeCharge = 0;
     this.chargingGrenade = false;
     this.pendingThrow = 0;
+    this.session = null;
     this.pendingCharge = 0;
     this.previewVel = new THREE.Vector3();
+    this.drone = new SuicideDrone(world, fx, audio, combat, fx.pipeline.scene);
+    world.drone = this.drone;
 
     const n = 64;
     const geo = new THREE.BufferGeometry();
@@ -95,6 +106,7 @@ export class Weapons {
       this.chargingGrenade = false; this.grenadeCharge = 0; this.pendingThrow = 0;
       this.sniperHeld = false; this.sniperWasScoped = false;
       if (this.player) this.player.sniperPending = false;
+      if (key !== 'drone' && this.drone.flying && !this.drone.dying) this.drone.explode('abort');
     }
     L.current = key;
     L.reloadT = 0;
@@ -108,7 +120,7 @@ export class Weapons {
   reload(f) {
     const L = f.loadout;
     const def = WEAPONS[L.current];
-    if (L.current === 'grenade' || L.reloading || L.mag[def.key] >= def.mag || L.reserve[def.key] <= 0) return false;
+    if (L.current === 'grenade' || L.current === 'drone' || L.reloading || L.mag[def.key] >= def.mag || L.reserve[def.key] <= 0) return false;
     if (f.character.weapon !== def.key) return false;
     L.reloadT = def.reload;
     f.character.startAction(def.key === 'rifle' ? 'reload' : 'pistolReload', def.reload);
@@ -128,6 +140,7 @@ export class Weapons {
     const key = L.current;
     const def = WEAPONS[key];
     if (ch.weapon !== key || ch.equipT < 1 || L.reloading || L.cooldown > 0) return false;
+    if (key === 'drone') return false;
     if (key === 'grenade') {
       if (L.grenades <= 0 || ch.action) return false;
       L.grenades--;
@@ -216,7 +229,8 @@ export class Weapons {
     }
     // Out of grenades: go back to a gun once the throw is done.
     if (L.current === 'grenade' && L.grenades <= 0 && !ch.action) this.equip(f, L.has('rifle') && f.preferRifle ? 'rifle' : 'pistols');
-    if (L.current !== 'grenade' && !L.has(L.current)) this.equip(f, L.current === 'rifle' ? 'pistols' : 'rifle');
+    if (L.current === 'drone' && L.drones <= 0 && !this.drone.flying) this.equip(f, L.has('pistols') ? 'pistols' : 'rifle');
+    if (L.current !== 'grenade' && L.current !== 'drone' && !L.has(L.current)) this.equip(f, L.current === 'rifle' ? 'pistols' : 'rifle');
   }
 
   // Fires one gun of `shooter` towards `aimPoint`; spread is in radians.
@@ -225,40 +239,44 @@ export class Weapons {
     const ch = shooter.character;
     const rifle = side < 0;
     const throughScope = rifle && shooter.isPlayer && (this.sniperWasScoped || this.player.scopeT > 0.35);
-    let muzzle, axis, dir;
-    if (throughScope) {
-      // The reticle is the camera. A muzzle-to-crosshair ray misses when the
-      // hidden rifle sits behind cover the scope is peeking over.
-      axis = new THREE.Vector3();
-      this.player.camera.getWorldDirection(axis);
-      muzzle = this.player.camera.position.clone().addScaledVector(axis, 0.15);
-      dir = axis.clone();
+    const flashAt = rifle ? ch.rifleMuzzle() : ch.muzzleWorld(side);
+    const flashAxis = rifle ? ch.rifleAxis() : ch.pistolAxis(side);
+    let from, dir;
+    if (shooter.isPlayer) {
+      // Hitscan from the body along the look, not from the shoulder camera or
+      // an offset muzzle that can sneak around a tree the player is behind.
+      from = this.player.losOrigin();
+      if (throughScope) {
+        dir = this.player.lookDir();
+      } else {
+        const target = aimPoint.clone();
+        const r = spread * target.distanceTo(from);
+        target.add(new THREE.Vector3().randomDirection().multiplyScalar(r * Math.random()));
+        dir = target.sub(from).normalize();
+      }
+      from.addScaledVector(dir, 0.2);
     } else {
-      muzzle = rifle ? ch.rifleMuzzle() : ch.muzzleWorld(side);
-      axis = rifle ? ch.rifleAxis() : ch.pistolAxis(side);
+      from = rifle ? ch.rifleMuzzle() : ch.muzzleWorld(side);
       const target = aimPoint.clone();
-      const r = spread * target.distanceTo(muzzle);
+      const r = spread * target.distanceTo(from);
       target.add(new THREE.Vector3().randomDirection().multiplyScalar(r * Math.random()));
-      dir = target.clone().sub(muzzle).normalize();
+      dir = target.sub(from).normalize();
     }
-    const hit = this.world.raycast(muzzle, dir, 900, shooter);
-
-    const flashAt = throughScope ? ch.rifleMuzzle() : muzzle;
-    const flashAxis = throughScope ? ch.rifleAxis() : axis;
+    const hit = this.world.raycast(from, dir, 900, shooter);
     this.fx.muzzle(flashAt, flashAxis, rifle ? 2.4 : 1);
     if (!rifle) {
       const up = new THREE.Vector3().setFromMatrixColumn(ch.pistols[side].matrixWorld, 1);
-      const right = new THREE.Vector3().crossVectors(axis, up).multiplyScalar(side === 0 ? 1 : -1);
-      this.fx.ejectCasing(muzzle.clone().addScaledVector(axis, -0.08).addScaledVector(up, 0.02), right, up);
+      const right = new THREE.Vector3().crossVectors(flashAxis, up).multiplyScalar(side === 0 ? 1 : -1);
+      this.fx.ejectCasing(flashAt.clone().addScaledVector(flashAxis, -0.08).addScaledVector(up, 0.02), right, up);
       ch.fired(side);
     }
     shooter.lastShotT = this.combat.time;
-    const { dist, pan } = this.listen(muzzle);
+    const { dist, pan } = this.listen(flashAt);
     this.audio.gunshot(side < 0 ? 0 : side, shooter.isPlayer ? 0 : dist, shooter.isPlayer ? null : pan, rifle);
 
-    const end = hit ? muzzle.clone().addScaledVector(dir, hit.t) : muzzle.clone().addScaledVector(dir, 500);
-    this.fx.tracer(muzzle, end);
-    if (!shooter.isPlayer) this.checkNearMiss(muzzle, end, hit);
+    const end = hit ? from.clone().addScaledVector(dir, hit.t) : from.clone().addScaledVector(dir, 500);
+    this.fx.tracer(flashAt, end);
+    if (!shooter.isPlayer) this.checkNearMiss(from, end, hit);
     if (!hit) return null;
     const hitDist = end.distanceTo(this.player.camera.position);
     if (hit.fighter) {
@@ -273,10 +291,52 @@ export class Weapons {
     } else {
       this.fx.impact(end, hit.normal, hit.surface, dir);
       this.audio.impact(hit.surface, hitDist);
+      if (hit.surface !== 'water') this.bounceOff(shooter, end, dir, hit);
     }
-    if (hit.fighter) this.combat.damage(hit.fighter, shooter, hit.head ? def.head : def.body, dir, { head: hit.head, weapon: def.key });
+    if (hit.drone) {
+      hit.drone.kill(shooter);
+      if (shooter.isPlayer && this.session?.multi) {
+        const ownerId = hit.drone.ownerId || hit.drone.live?.owner?.id || this.session.net.id;
+        const from = hit.drone.pos || hit.drone.live?.pos;
+        this.session.reportDrone('down', {
+          id: ownerId,
+          p: from ? [from.x, from.y, from.z] : undefined,
+          dir: [dir.x, dir.y, dir.z],
+        });
+        this.session.reportShot(from || flashAt, dir, def.key);
+      }
+      return hit;
+    }
+    if (hit.fighter?.net) {
+      if (shooter.isPlayer) this.session?.reportShot(from, dir, def.key, hit.fighter.id, hit.head);
+      this.combat.damage(hit.fighter, shooter, hit.head ? def.head : def.body, dir, { head: hit.head, weapon: def.key, at: end });
+      return hit;
+    }
+    if (shooter.isPlayer && this.session?.multi) this.session.reportShot(from, dir, def.key);
+    if (hit.fighter) this.combat.damage(hit.fighter, shooter, hit.head ? def.head : def.body, dir, { head: hit.head, weapon: def.key, at: end });
     else if (hit.body || hit.target) hit.scored = this.world.props.hit(hit, end, dir, def.force);
     return hit;
+  }
+
+  // The round stops at the first solid thing and glances off. It does not
+  // keep going through cover to whoever is standing behind it.
+  bounceOff(shooter, pos, dir, hit) {
+    const n = hit.normal.clone();
+    if (n.dot(dir) > 0) n.negate();
+    const bounce = dir.clone().reflect(n);
+    bounce.add(new THREE.Vector3().randomDirection().multiplyScalar(0.06)).normalize();
+    if (bounce.dot(n) < 0.04) bounce.addScaledVector(n, 0.14).normalize();
+    const start = pos.clone().addScaledVector(n, 0.04);
+    const reach = 18;
+    const next = this.world.raycast(start, bounce, reach, shooter);
+    const to = start.clone().addScaledVector(bounce, next ? Math.max(next.t, 0.35) : reach);
+    this.fx.tracer(start, to);
+    const { dist } = this.listen(pos);
+    this.audio.ricochet(Math.min(1, 8 / Math.max(dist, 1)));
+    if (next && !next.fighter && next.surface !== 'water') {
+      const p = start.clone().addScaledVector(bounce, next.t);
+      this.fx.impact(p, next.normal, next.surface, bounce);
+    }
   }
 
   // Exit spray lands on whatever is behind the victim, plus a spatter on the
@@ -329,7 +389,7 @@ export class Weapons {
 
   // --- Grenades --------------------------------------------------------------
 
-  throwGrenade(owner, pos, vel) {
+  throwGrenade(owner, pos, vel, opts = {}) {
     const mesh = this.template.clone(true);
     mesh.matrixAutoUpdate = false;
     this.fx.pipeline.scene.add(mesh);
@@ -340,6 +400,7 @@ export class Weapons {
       fuse: WEAPONS.grenade.fuse, water: false, bounces: 0,
     };
     this.live.push(g);
+    if (!opts.silent && owner.isPlayer) this.session?.reportNade(pos, vel);
   }
 
   // Launch velocity that lands a grenade on `to`: the low arc, or the high
@@ -450,6 +511,11 @@ export class Weapons {
       }
     }
     if (input.reload) this.reload(f);
+    if (L.current === 'drone' || this.drone.flying) {
+      this.updateDrone(dt, input, f, L, ch);
+      this.tick(f, dt);
+      return;
+    }
     const def = WEAPONS[L.current];
     if (L.current !== 'rifle' && input.firePressed) this.queued = 0.5;
     this.queued = Math.max(0, this.queued - dt);
@@ -532,6 +598,33 @@ export class Weapons {
       }
     }
     this.tick(f, dt);
+  }
+
+  updateDrone(dt, input, f, L, ch) {
+    this.chargingGrenade = false;
+    this.grenadeCharge = 0;
+    this.updateArc(false);
+    if (this.drone.flying) {
+      this.drone.update(dt, input);
+      if (this.drone.flying && !this.drone.dying) {
+        this.dronePoseAcc = (this.dronePoseAcc || 0) + dt;
+        if (this.dronePoseAcc >= 1 / 8) {
+          this.dronePoseAcc = 0;
+          const pack = this.drone.pack();
+          if (pack) this.session?.reportDrone('pose', pack);
+        }
+        if (input.firePressed) this.drone.explode('detonate');
+      }
+      return;
+    }
+    const ready = ch.weapon === 'drone' && ch.equipT >= 1 && L.drones > 0 && !ch.action;
+    if (ready && input.firePressed) {
+      if (this.drone.launch(f)) {
+        L.drones--;
+        const pack = this.drone.pack();
+        if (pack) this.session?.reportDrone('go', pack);
+      }
+    }
   }
 
   playerThrowVelocity(speed = WEAPONS.grenade.speed) {

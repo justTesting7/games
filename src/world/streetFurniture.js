@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { CITY, cityCell } from './cityLayout.js';
+import { activeBatcher } from './propBatcher.js';
 
 const mat = (color, extras = {}) => new THREE.MeshStandardMaterial({
   color, roughness: 0.55, metalness: 0.15, ...extras,
@@ -157,9 +158,19 @@ function inPlay(x, z) {
   return Math.hypot(x, z) < CITY.playRadius - 10;
 }
 
+export function bindFurniture(batcher) {
+  for (const [kind, def] of Object.entries(FACTORIES)) {
+    batcher.registerObject(kind, def.make());
+  }
+}
+
 export function placeFurniture(kind, group, colliders, terrain, x, z, yaw) {
   const def = FACTORIES[kind];
   if (!def) return;
+  if (activeBatcher) {
+    activeBatcher.place(kind, x, z, yaw, 1, def.h, def.type, terrain, colliders);
+    return;
+  }
   const y = terrain.heightAt(x, z);
   placeGroup(group, def.make(), x, y, z, yaw);
   addCollider(colliders, x, z, y, def.hx, def.hz, def.h, def.type);
@@ -169,19 +180,19 @@ export function dressCityFurniture(models, group, colliders, terrain, rand, plac
   const { pitch, halfBlocks, blockW, sidewalkW } = CITY;
   const half = blockW * 0.5;
   const walk = half + sidewalkW * 0.42;
-  const step = 10;
+  const step = 6;
   const lim = halfBlocks * pitch + half;
 
   const sidewalk = (x, z, yaw, dir) => {
     if (!inPlay(x, z) || cityCell(x, z).intersection) return;
-    if (rand() > 0.38) return;
+    if (rand() > 0.78) return;
     const r = rand();
-    if (r < 0.1) placeFurniture('dumpster', group, colliders, terrain, x, z, yaw);
-    else if (r < 0.18) placeFurniture('cooler', group, colliders, terrain, x, z, yaw);
-    else if (r < 0.26) placeFurniture('hub', group, colliders, terrain, x, z, yaw + Math.PI * 0.5);
-    else if (r < 0.34) placeFurniture('mailbox', group, colliders, terrain, x, z, yaw);
-    else if (r < 0.44) placeFurniture('meter', group, colliders, terrain, x, z, yaw);
-    else if (r < 0.52) placeFurniture('news', group, colliders, terrain, x, z, yaw);
+    if (r < 0.18) placeFurniture('dumpster', group, colliders, terrain, x, z, yaw);
+    else if (r < 0.24) placeFurniture('cooler', group, colliders, terrain, x, z, yaw);
+    else if (r < 0.36) placeFurniture('hub', group, colliders, terrain, x, z, yaw + Math.PI * 0.5);
+    else if (r < 0.42) placeFurniture('mailbox', group, colliders, terrain, x, z, yaw);
+    else if (r < 0.5) placeFurniture('meter', group, colliders, terrain, x, z, yaw);
+    else if (r < 0.56) placeFurniture('news', group, colliders, terrain, x, z, yaw);
     else if (r < 0.62 && models.utility_box_01) placeProp('utility_box_01', x, z, yaw, 1, 1.3, 'metal');
     else if (r < 0.7 && models.utility_box_02) placeProp('utility_box_02', x, z, yaw, 1, 1.3, 'metal');
     else if (r < 0.78 && models.power_box_01) placeProp('power_box_01', x, z, yaw, 1, 1.4, 'metal');

@@ -35,9 +35,32 @@ export const smoothstep = (a, b, x) => {
   return t * t * (3 - 2 * t);
 };
 
-function hdrTarget(w, h, opts = {}) {
+function canColorBuffer(renderer, type) {
+  const gl = renderer.getContext();
+  const rt = new THREE.WebGLRenderTarget(4, 4, {
+    type, format: THREE.RGBAFormat, depthBuffer: false, generateMipmaps: false,
+  });
+  try {
+    renderer.setRenderTarget(rt);
+    const ok = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
+    renderer.setRenderTarget(null);
+    rt.dispose();
+    return ok;
+  } catch {
+    rt.dispose();
+    return false;
+  }
+}
+
+function pickHdrType(renderer) {
+  if (canColorBuffer(renderer, THREE.HalfFloatType)) return THREE.HalfFloatType;
+  if (canColorBuffer(renderer, THREE.FloatType)) return THREE.FloatType;
+  return THREE.UnsignedByteType;
+}
+
+function hdrTarget(w, h, type, opts = {}) {
   return new THREE.WebGLRenderTarget(w, h, {
-    type: THREE.HalfFloatType,
+    type,
     format: THREE.RGBAFormat,
     minFilter: THREE.LinearFilter,
     magFilter: THREE.LinearFilter,
@@ -72,10 +95,10 @@ function fsMaterial(frag, uniforms, extra = {}) {
 }
 
 export const QUALITY = {
-  low: { label: 'Low', shadow: 2048, shadowDist: 40, ssr: 0, msaa: 0, pixelRatio: 0.75, grass: 0.45, trees: 0.6 },
-  medium: { label: 'Medium', shadow: 2048, shadowDist: 50, ssr: 16, msaa: 0, pixelRatio: 1, grass: 0.7, trees: 0.8 },
-  high: { label: 'High', shadow: 4096, shadowDist: 60, ssr: 32, msaa: 4, pixelRatio: 1.25, grass: 1, trees: 1 },
-  ultra: { label: 'Ultra', shadow: 4096, shadowDist: 70, ssr: 48, msaa: 4, pixelRatio: 2, grass: 1.3, trees: 1.25 },
+  low: { label: 'Low', shadow: 512, shadowDist: 28, ssr: 0, msaa: 0, pixelRatio: 0.7, grass: 0.3, trees: 0.45 },
+  medium: { label: 'Medium', shadow: 1024, shadowDist: 40, ssr: 8, msaa: 0, pixelRatio: 1, grass: 0.55, trees: 0.7 },
+  high: { label: 'High', shadow: 2048, shadowDist: 48, ssr: 16, msaa: 0, pixelRatio: 1, grass: 0.85, trees: 0.9 },
+  ultra: { label: 'Ultra', shadow: 2048, shadowDist: 58, ssr: 24, msaa: 2, pixelRatio: 1.25, grass: 1.1, trees: 1.05 },
 };
 
 export class Pipeline {
@@ -84,8 +107,14 @@ export class Pipeline {
     this.renderer = renderer;
     renderer.toneMapping = THREE.NoToneMapping;
     renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
+    renderer.setClearColor(0x05080b, 1);
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFShadowMap;
+    this.mobile = (typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches)
+      || /iPhone|iPad|iPod|Android/i.test(globalThis.navigator?.userAgent || '');
+    // Phones often report half-float as complete, then sample Inf/NaN and
+    // the tonemap goes solid white. 8-bit targets stay visible.
+    this.hdrType = this.mobile ? THREE.UnsignedByteType : pickHdrType(renderer);
 
     this.quad = new FullscreenQuad();
     this.scene = new THREE.Scene();
@@ -102,7 +131,7 @@ export class Pipeline {
     this.firstFrame = true;
     this.envAge = Infinity;
 
-    this.skyRT = hdrTarget(256, 128, {
+    this.skyRT = hdrTarget(256, 128, this.hdrType, {
       minFilter: THREE.LinearMipmapLinearFilter,
       generateMipmaps: true,
       wrapS: THREE.RepeatWrapping,
@@ -112,6 +141,10 @@ export class Pipeline {
     this.envRT = null;
 
     this.sun = new THREE.DirectionalLight(0xffffff, 1);
+    if (this.mobile) {
+      this.hemi = new THREE.HemisphereLight(0xb8c8dc, 0x3d4034, 0.45);
+      this.scene.add(this.hemi);
+    }
     this.sun.castShadow = true;
     this.sun.shadow.bias = -0.0004;
     this.sun.shadow.normalBias = 0.035;
@@ -205,11 +238,18 @@ export class Pipeline {
       uUnderwater: { value: 0 },
       uTime: this.u.uTime,
       uExposureBias: { value: 1.0 },
+      uAutoExposure: { value: 1 },
       uVignette: { value: 0.55 },
       uFlash: { value: 0 },
     });
+    if (this.mobile) {
+      this.compositeMaterial.uniforms.uAutoExposure.value = 0;
+      this.compositeMaterial.uniforms.uExposureBias.value = 0.72;
+      this.compositeMaterial.uniforms.uBloom.value = 0;
+      this.compositeMaterial.uniforms.uVignette.value = 0.4;
+    }
 
-    this.lumRT = [0, 1].map(() => hdrTarget(1, 1, { type: THREE.FloatType, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter }));
+    this.lumRT = [0, 1].map(() => hdrTarget(1, 1, this.hdrType, { minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter }));
     this.lumIndex = 0;
 
     this.size = new THREE.Vector2(1, 1);
@@ -226,7 +266,13 @@ export class Pipeline {
   }
 
   setQuality(name) {
-    const q = QUALITY[name];
+    const q = { ...QUALITY[name] };
+    if (this.mobile) {
+      q.shadow = Math.min(q.shadow, 512);
+      q.ssr = 0;
+      q.msaa = 0;
+      q.pixelRatio = Math.min(q.pixelRatio, 0.7);
+    }
     this.qualityName = name;
     const changedMsaa = !this.quality || this.quality.msaa !== q.msaa;
     this.quality = q;
@@ -240,31 +286,40 @@ export class Pipeline {
     Object.assign(sh.camera, { left: -d, right: d, top: d, bottom: -d, near: 1, far: 800 });
     sh.camera.updateProjectionMatrix();
     this.waterMaterial.uniforms.uSSRSteps.value = q.ssr;
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, q.pixelRatio));
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, this.mobile ? Math.min(q.pixelRatio, 1) : q.pixelRatio));
     if (changedMsaa && this.sceneRT) { this.sceneRT.dispose(); this.sceneRT = null; }
-    this.resize(window.innerWidth, window.innerHeight);
+    this.resize(Math.max(2, window.innerWidth || 360), Math.max(2, window.innerHeight || 640));
   }
 
   resize(w, h) {
-    this.renderer.setSize(w, h);
+    w = Math.max(2, Math.round(w) || 2);
+    h = Math.max(2, Math.round(h) || 2);
+    const cap = this.mobile ? 960 : 3840;
+    if (w > cap) { h = Math.max(2, Math.round(h * cap / w)); w = cap; }
+    if (h > cap) { w = Math.max(2, Math.round(w * cap / h)); h = cap; }
+    this.renderer.setSize(w, h, false);
     const pr = this.renderer.getPixelRatio();
-    const W = Math.max(1, Math.floor(w * pr)), H = Math.max(1, Math.floor(h * pr));
+    const W = Math.max(2, Math.floor(w * pr)), H = Math.max(2, Math.floor(h * pr));
     this.size.set(W, H);
     if (!this.sceneRT) {
-      this.sceneRT = hdrTarget(W, H, { depthBuffer: true, samples: this.quality.msaa });
+      this.sceneRT = hdrTarget(W, H, this.hdrType, { depthBuffer: true, samples: this.quality.msaa });
     } else this.sceneRT.setSize(W, H);
-    if (!this.copyRT) this.copyRT = hdrTarget(W, H); else this.copyRT.setSize(W, H);
-    if (!this.fogRT) this.fogRT = hdrTarget(W, H); else this.fogRT.setSize(W, H);
+    if (!this.copyRT) this.copyRT = hdrTarget(W, H, this.hdrType); else this.copyRT.setSize(W, H);
+    if (!this.fogRT) this.fogRT = hdrTarget(W, H, this.hdrType); else this.fogRT.setSize(W, H);
 
     this.bloomRTs?.forEach((r) => r.dispose());
     this.bloomRTs = [];
-    let bw = W, bh = H;
-    for (let i = 0; i < 6; i++) {
-      bw = Math.max(1, bw >> 1); bh = Math.max(1, bh >> 1);
-      this.bloomRTs.push(hdrTarget(bw, bh));
+    if (!this.mobile) {
+      let bw = W, bh = H;
+      for (let i = 0; i < 4; i++) {
+        bw = Math.max(1, bw >> 1); bh = Math.max(1, bh >> 1);
+        this.bloomRTs.push(hdrTarget(bw, bh, this.hdrType));
+      }
+      const rw = Math.max(1, W >> 1), rh = Math.max(1, H >> 1);
+      if (!this.raysRT) this.raysRT = hdrTarget(rw, rh, this.hdrType); else this.raysRT.setSize(rw, rh);
+    } else if (!this.blackRT) {
+      this.blackRT = hdrTarget(2, 2, this.hdrType);
     }
-    const rw = Math.max(1, W >> 1), rh = Math.max(1, H >> 1);
-    if (!this.raysRT) this.raysRT = hdrTarget(rw, rh); else this.raysRT.setSize(rw, rh);
     this.waterMaterial.uniforms.uResolution.value.set(W, H);
   }
 
@@ -285,9 +340,10 @@ export class Pipeline {
       transmittance(this.moonDir, tmp);
       this.lightColor.copy(tmp).multiply(new THREE.Vector3(0.55, 0.7, 1.0)).multiplyScalar(0.12 * Math.PI * moonF);
     }
+    if (this.mobile) this.lightColor.multiplyScalar(0.085);
     const lc = this.lightColor;
     const li = Math.max(lc.x, lc.y, lc.z);
-    this.sun.intensity = li;
+    this.sun.intensity = this.mobile ? Math.min(li, 1.6) : li;
     if (li > 0) this.sun.color.setRGB(lc.x / li, lc.y / li, lc.z / li, THREE.LinearSRGBColorSpace);
     this.sun.castShadow = li > 1e-3;
     this.night = smoothstep(0.08, -0.18, this.sunDir.y);
@@ -312,18 +368,24 @@ export class Pipeline {
     this.sun.updateMatrixWorld();
   }
 
-  render(camera, dt, opts) {
+  render(camera, dt, opts = {}) {
     const r = this.renderer;
     const W = this.size.x, H = this.size.y;
     this.frame++;
     r.autoClear = false;
 
-    this.quad.render(r, this.skyGenMaterial, this.skyRT);
+    if (this.firstFrame || this.frame % 6 === 1) this.quad.render(r, this.skyGenMaterial, this.skyRT);
     this.envAge += dt;
-    if (this.envAge > 1.5 || !this.envRT) {
+    if (this.mobile) {
+      this.scene.environment = null;
+    } else if (this.envAge > 1.5 || !this.envRT) {
       this.envAge = 0;
-      this.envRT = this.pmrem.fromEquirectangular(this.skyRT.texture, this.envRT);
-      this.scene.environment = this.envRT.texture;
+      try {
+        this.envRT = this.pmrem.fromEquirectangular(this.skyRT.texture, this.envRT);
+        this.scene.environment = this.envRT.texture;
+      } catch {
+        this.scene.environment = null;
+      }
     }
 
     this.updateShadowCamera(opts.shadowCenter || camera.position);
@@ -356,61 +418,90 @@ export class Pipeline {
     this.quad.render(r, this.fogMaterial, this.fogRT);
     const sceneTex = this.fogRT.texture;
 
-    let src = sceneTex;
-    let sw = W, sh = H;
-    for (let i = 0; i < this.bloomRTs.length; i++) {
-      const u = this.bloomDown.uniforms;
-      u.tSrc.value = src;
-      u.uTexel.value.set(1 / sw, 1 / sh);
-      u.uFirst.value = i === 0;
-      this.quad.render(r, this.bloomDown, this.bloomRTs[i]);
-      src = this.bloomRTs[i].texture;
-      sw = this.bloomRTs[i].width; sh = this.bloomRTs[i].height;
-    }
-
-    const prev = this.lumRT[this.lumIndex];
-    const next = this.lumRT[1 - this.lumIndex];
-    const lu = this.lumMaterial.uniforms;
-    lu.tScene.value = this.bloomRTs[2].texture;
-    lu.tPrev.value = prev.texture;
-    lu.uDt.value = Math.min(dt, 0.1);
-    lu.uReset.value = this.firstFrame;
-    this.quad.render(r, this.lumMaterial, next);
-    this.lumIndex = 1 - this.lumIndex;
-    this.firstFrame = false;
-
-    for (let i = this.bloomRTs.length - 2; i >= 0; i--) {
-      const u = this.bloomUp.uniforms;
-      const s = this.bloomRTs[i + 1];
-      u.tSrc.value = s.texture;
-      u.uTexel.value.set(1 / s.width, 1 / s.height);
-      this.quad.render(r, this.bloomUp, this.bloomRTs[i]);
-    }
-
-    const lightPos = camera.position.clone().addScaledVector(this.lightDir, 1000).project(camera);
-    const facing = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).dot(this.lightDir);
+    let bloomTex = this.blackRT?.texture || sceneTex;
+    let lumTex = this.lumRT[0].texture;
+    let raysTex = this.blackRT?.texture || sceneTex;
     let rays = 0;
-    if (facing > 0 && lightPos.z < 1) {
-      const onScreen = 1 - smoothstep(0.9, 1.6, Math.max(Math.abs(lightPos.x), Math.abs(lightPos.y)));
-      rays = onScreen * smoothstep(0.0, 0.35, facing) * (opts.underwater ? 0.3 : 1);
-      const ru = this.raysMaterial.uniforms;
-      ru.tScene.value = sceneTex;
-      ru.uSunUV.value.set(lightPos.x * 0.5 + 0.5, lightPos.y * 0.5 + 0.5);
-      ru.uAspect.value = W / H;
-      ru.uFrame.value = this.frame % 64;
-      this.quad.render(r, this.raysMaterial, this.raysRT);
+
+    if (this.bloomRTs.length) {
+      let src = sceneTex;
+      let sw = W, sh = H;
+      for (let i = 0; i < this.bloomRTs.length; i++) {
+        const u = this.bloomDown.uniforms;
+        u.tSrc.value = src;
+        u.uTexel.value.set(1 / sw, 1 / sh);
+        u.uFirst.value = i === 0;
+        this.quad.render(r, this.bloomDown, this.bloomRTs[i]);
+        src = this.bloomRTs[i].texture;
+        sw = this.bloomRTs[i].width; sh = this.bloomRTs[i].height;
+      }
+
+      const prev = this.lumRT[this.lumIndex];
+      const next = this.lumRT[1 - this.lumIndex];
+      const lu = this.lumMaterial.uniforms;
+      lu.tScene.value = this.bloomRTs[2].texture;
+      lu.tPrev.value = prev.texture;
+      lu.uDt.value = Math.min(dt, 0.1);
+      lu.uReset.value = this.firstFrame;
+      this.quad.render(r, this.lumMaterial, next);
+      this.lumIndex = 1 - this.lumIndex;
+      lumTex = next.texture;
+
+      for (let i = this.bloomRTs.length - 2; i >= 0; i--) {
+        const u = this.bloomUp.uniforms;
+        const s = this.bloomRTs[i + 1];
+        u.tSrc.value = s.texture;
+        u.uTexel.value.set(1 / s.width, 1 / s.height);
+        this.quad.render(r, this.bloomUp, this.bloomRTs[i]);
+      }
+      bloomTex = this.bloomRTs[0].texture;
+
+      const lightPos = camera.position.clone().addScaledVector(this.lightDir, 1000).project(camera);
+      const facing = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).dot(this.lightDir);
+      if (facing > 0 && lightPos.z < 1 && this.raysRT) {
+        const onScreen = 1 - smoothstep(0.9, 1.6, Math.max(Math.abs(lightPos.x), Math.abs(lightPos.y)));
+        rays = onScreen * smoothstep(0.0, 0.35, facing) * (opts.underwater ? 0.3 : 1);
+        const ru = this.raysMaterial.uniforms;
+        ru.tScene.value = sceneTex;
+        ru.uSunUV.value.set(lightPos.x * 0.5 + 0.5, lightPos.y * 0.5 + 0.5);
+        ru.uAspect.value = W / H;
+        ru.uFrame.value = this.frame % 64;
+        this.quad.render(r, this.raysMaterial, this.raysRT);
+        raysTex = this.raysRT.texture;
+      }
     }
+    this.firstFrame = false;
 
     const cu = this.compositeMaterial.uniforms;
     cu.tScene.value = sceneTex;
-    cu.tBloom.value = this.bloomRTs[0].texture;
-    cu.tLum.value = next.texture;
-    cu.tRays.value = this.raysRT.texture;
+    cu.tBloom.value = bloomTex;
+    cu.tLum.value = lumTex;
+    cu.tRays.value = raysTex;
     cu.uRays.value = rays * 1.2;
     cu.uUnderwater.value = opts.underwater ? 1 : 0;
     cu.uFlash.value = opts.flash || 0;
     const amb = new THREE.Vector3(0.02, 0.1, 0.13).multiplyScalar(0.4 + this.lightColor.y * 0.08 + (1 - this.night) * 0.4);
     cu.uWaterAmbient.value.copy(amb);
+    const splitVp = opts.outViewport;
+    if (splitVp) {
+      r.setViewport(splitVp[0], splitVp[1], splitVp[2], splitVp[3]);
+      r.setScissor(splitVp[0], splitVp[1], splitVp[2], splitVp[3]);
+      r.setScissorTest(true);
+    }
     this.quad.render(r, this.compositeMaterial, null);
+    if (splitVp) {
+      r.setViewport(0, 0, r.domElement.clientWidth, r.domElement.clientHeight);
+      r.setScissorTest(false);
+    }
+  }
+
+  renderSplit(leftCam, rightCam, dt, opts = {}) {
+    const w = this.renderer.domElement.clientWidth;
+    const h = this.renderer.domElement.clientHeight;
+    const hw = Math.max(1, Math.floor(w / 2));
+    this.render(leftCam, dt, { ...opts, outViewport: [0, 0, hw, h] });
+    this.render(rightCam, 0, { ...opts, outViewport: [hw, 0, w - hw, h] });
+    this.renderer.setViewport(0, 0, w, h);
+    this.renderer.setScissorTest(false);
   }
 }

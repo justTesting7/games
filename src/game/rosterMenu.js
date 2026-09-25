@@ -1,9 +1,10 @@
 import { ROSTER, STYLES, byId, saveSelection } from './roster.js';
 
-// "Play as" and "Opponents" pickers. Changes apply on the next load, so the
-// caller swaps the Fight button for a reload when `changed()` is true.
-export function setupRosterMenu(initial, root, onChange) {
+// "Play as" and "Opponents" pickers. Solo opponent changes still need a
+// reload; a multiplayer fighter pick applies live so Join just enters.
+export function setupRosterMenu(initial, root, onChange, opts = {}) {
   const sel = { player: initial.player, rivals: [...initial.rivals] };
+  const showOpponents = opts.opponents !== false;
   const key = (s) => `${s.player}|${[...s.rivals].sort().join(',')}`;
   const start = key(initial);
   const chipCanvases = [];
@@ -49,15 +50,20 @@ export function setupRosterMenu(initial, root, onChange) {
   };
 
   root.innerHTML = '<div class="row"><span>Play as</span><div class="chips" data-g="player"></div></div>'
-    + '<div class="row"><span>Opponents</span><div class="chips" data-g="rivals"></div></div>';
+    + (showOpponents ? '<div class="row"><span>Opponents</span><div class="chips" data-g="rivals"></div></div>' : '');
   const rows = { player: root.querySelector('[data-g=player]'), rivals: root.querySelector('[data-g=rivals]') };
-  for (const g of ['player', 'rivals']) ROSTER.forEach((e) => rows[g].append(chip(e, g)));
+  for (const g of ['player', 'rivals']) {
+    if (!rows[g]) continue;
+    ROSTER.forEach((e) => rows[g].append(chip(e, g)));
+  }
 
   function render() {
     for (const b of rows.player.children) b.classList.toggle('on', b.dataset.id === sel.player);
-    for (const b of rows.rivals.children) {
-      b.classList.toggle('on', sel.rivals.includes(b.dataset.id));
-      b.classList.toggle('off', b.dataset.id === sel.player);
+    if (rows.rivals) {
+      for (const b of rows.rivals.children) {
+        b.classList.toggle('on', sel.rivals.includes(b.dataset.id));
+        b.classList.toggle('off', b.dataset.id === sel.player);
+      }
     }
   }
   render();
@@ -80,6 +86,8 @@ export function setupRosterMenu(initial, root, onChange) {
 
   return {
     changed: () => key(sel) !== start,
+    player: () => sel.player,
+    selection: () => ({ player: sel.player, rivals: [...sel.rivals] }),
     save: () => saveSelection(sel),
     bindAvatars,
   };

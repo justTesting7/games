@@ -9,8 +9,10 @@ import {
 import {
   buildSewers, buildStreetTrees, dressSidewalks, placeRoadblocks, placeStreetProp,
 } from './streets.js';
-import { dressCityFurniture } from './streetFurniture.js';
+import { bindFurniture, dressCityFurniture } from './streetFurniture.js';
 import { buildPlaza, updateFountain } from './plaza.js';
+import { scatterLotWreckage, scatterPlazaRing, scatterStreetClutter } from './urbanClutter.js';
+import { PropBatcher, withBatcher } from './propBatcher.js';
 
 /** Horizontal distance (to the tower footprint) inside which real facade modules are shown. */
 const DETAIL_DIST = 60;
@@ -26,6 +28,8 @@ export class City {
     this.towers = [];
     this.treeWind = null;
     this.fountain = null;
+    this.batcher = null;
+    this._rubble = [];
   }
 
   buildSkyline(layout, rand, darkMat) {
@@ -63,20 +67,19 @@ export class City {
 
       if (b.kind === 4 || b.kind === 3) {
         const w = b.x1 - b.x0, d = b.z1 - b.z0;
+        const rubble = [];
         for (let k = 0; k < 14; k++) {
-          const rub = new THREE.Mesh(new THREE.BoxGeometry(0.6 + rand(), 0.4 + rand() * 0.8, 0.5 + rand()), darkMat);
-          rub.position.set(b.x0 + rand() * w, b.y0 + rub.geometry.parameters.height * 0.5, b.z0 + rand() * d);
-          rub.rotation.y = rand() * 6;
-          rub.castShadow = true;
-          skyline.add(rub);
+          const sx = 0.6 + rand(), sy = 0.4 + rand() * 0.8, sz = 0.5 + rand();
+          const px = b.x0 + rand() * w, pz = b.z0 + rand() * d;
+          rubble.push({ px, pz, sy, sx, sz, yaw: rand() * 6 });
           if (k < 6) {
             this.colliders.addBox({
-              x0: rub.position.x - 0.5, x1: rub.position.x + 0.5,
-              z0: rub.position.z - 0.45, z1: rub.position.z + 0.45,
+              x0: px - 0.5, x1: px + 0.5, z0: pz - 0.45, z1: pz + 0.45,
               y0: b.y0, y1: b.y0 + 1.2 + rand() * 0.8, type: 'cover',
             });
           }
         }
+        this._rubble.push({ y0: b.y0, rubble });
       }
     }
 
@@ -84,6 +87,23 @@ export class City {
     shell.castShadow = shell.receiveShadow = true;
     shell.frustumCulled = false;
     skyline.add(shell);
+
+    const chunks = this._rubble.flatMap((r) => r.rubble.map((c) => ({ ...c, y0: r.y0 })));
+    if (chunks.length) {
+      const mesh = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), darkMat, chunks.length);
+      mesh.castShadow = false;
+      mesh.receiveShadow = true;
+      mesh.frustumCulled = false;
+      const m = new THREE.Matrix4(), q = new THREE.Quaternion(), p = new THREE.Vector3(), s = new THREE.Vector3();
+      chunks.forEach((c, i) => {
+        q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), c.yaw);
+        p.set(c.px, c.y0 + c.sy * 0.5, c.pz);
+        s.set(c.sx, c.sy, c.sz);
+        mesh.setMatrixAt(i, m.compose(p, q, s));
+      });
+      mesh.instanceMatrix.needsUpdate = true;
+      skyline.add(mesh);
+    }
     this.group.add(skyline);
   }
 
@@ -129,47 +149,43 @@ export class City {
 
     this.buildSkyline(layout, rand, darkMat);
 
+    this.batcher = new PropBatcher(this.models);
+    bindFurniture(this.batcher);
     const place = (id, x, z, yaw = 0, scale = 1, coverY = 1.5, type) => (
       placeStreetProp(this.models, this.group, this.colliders, this.terrain, id, x, z, yaw, scale, coverY, type)
     );
 
-    this.fountain = buildPlaza(this.group, this.colliders, this.terrain, this.models, rand, place, this.pipeline);
-    this.treeWind = buildStreetTrees(this.group, this.colliders, this.terrain, rand);
-    buildSewers(this.group, this.colliders, this.terrain, rand);
-    dressSidewalks(this.models, this.group, this.colliders, this.terrain, rand);
-    dressCityFurniture(this.models, this.group, this.colliders, this.terrain, rand, place);
-    placeRoadblocks(this.models, this.group, this.colliders, this.terrain, rand);
+    withBatcher(this.batcher, () => {
+      this.fountain = buildPlaza(this.group, this.colliders, this.terrain, this.models, rand, place, this.pipeline);
+      this.treeWind = buildStreetTrees(this.group, this.colliders, this.terrain, rand);
+      buildSewers(this.group, this.colliders, this.terrain, rand);
+      dressSidewalks(this.models, this.group, this.colliders, this.terrain, rand);
+      dressCityFurniture(this.models, this.group, this.colliders, this.terrain, rand, place);
+      placeRoadblocks(this.models, this.group, this.colliders, this.terrain, rand);
+      scatterStreetClutter(this.models, this.group, this.colliders, this.terrain, rand);
+      scatterLotWreckage(this.models, this.group, this.colliders, this.terrain, layout, rand);
+      scatterPlazaRing(this.models, this.group, this.colliders, this.terrain, rand);
 
-    for (const b of layout.blocks) {
-      if (b.kind !== 4 && b.kind !== 5 && b.kind !== 6) continue;
-      if (Math.hypot(b.cx, b.cz) < 30 || Math.hypot(b.cx, b.cz) > CITY.playRadius - 20) continue;
-      if (rand() > 0.55) {
-        place('modular_chainlink_fence', b.cx + (rand() - 0.5) * 10, b.cz + (rand() - 0.5) * 10, rand() * Math.PI, 1, 2.2);
+      for (let n = 0; n < 22; n++) {
+        const x = (rand() - 0.5) * 90, z = (rand() - 0.5) * 90;
+        const cell = cityCell(x, z);
+        if (cell.onRoad || Math.hypot(x, z) < CITY.plazaRoad) continue;
+        const stove = place('barrel_stove', x, z, rand() * 6, 1, 1.1);
+        if (stove) this.fires.push({ x: stove.position.x, z: stove.position.z, y: stove.position.y + 0.5, phase: rand() * 10 });
       }
-      if (rand() > 0.4) place('covered_car', b.cx + (rand() - 0.5) * 12, b.cz + (rand() - 0.5) * 12, rand() * 6, 0.95, 1.6);
-      if (rand() > 0.35) {
-        const x = b.cx + (rand() - 0.5) * 14, z = b.cz + (rand() - 0.5) * 14;
-        place('wooden_crate_01', x, z, rand() * 6, 1, 1.35);
-        if (rand() > 0.4) place('wooden_crate_01', x + 0.9, z + 0.15, rand() * 6, 1, 2.1);
-      }
-      if (rand() > 0.5) place('barrel_03', b.cx + (rand() - 0.5) * 12, b.cz + (rand() - 0.5) * 12, rand() * 6, 1, 1.25);
-      if (rand() > 0.6) place('old_tyre', b.cx + (rand() - 0.5) * 12, b.cz + (rand() - 0.5) * 12, rand() * 6, 1, 0.85);
-    }
-
-    for (let n = 0; n < 8; n++) {
-      const x = (rand() - 0.5) * 90, z = (rand() - 0.5) * 90;
-      const cell = cityCell(x, z);
-      if (cell.onRoad || Math.hypot(x, z) < CITY.plazaRoad) continue;
-      const stove = place('barrel_stove', x, z, rand() * 6, 1, 1.1);
-      if (stove) this.fires.push({ x: stove.position.x, z: stove.position.z, y: stove.position.y + 0.5, phase: rand() * 10 });
-    }
+    });
+    this.batcher.bake(this.group);
+    this.batcher.update({ x: 0, y: 2, z: 13 });
 
     const fog = this.pipeline.fogMaterial.uniforms;
     if (fog.uFogDensity) fog.uFogDensity.value = 0.0028;
   }
 
   update(dt, fx, camera) {
-    if (camera) this.updateLod(camera.position);
+    if (camera) {
+      this.updateLod(camera.position);
+      this.batcher?.update(camera.position);
+    }
     if (this.treeWind) this.treeWind((this._treeT = (this._treeT || 0) + dt));
     if (this.fountain) updateFountain(fx, this.fountain, this._treeT || 0);
     this.smokeT += dt;

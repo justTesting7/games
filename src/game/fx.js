@@ -178,7 +178,8 @@ const SURFACE = {
   metal: { dust: [0.4, 0.4, 0.4], chunks: [0.3, 0.3, 0.3], sparks: true },
   water: { dust: [0.85, 0.9, 0.95], chunks: [0.85, 0.9, 0.95] },
   flesh: { dust: [0.32, 0.03, 0.03], chunks: [0.25, 0.01, 0.01] },
-  concrete: { dust: [0.45, 0.42, 0.38], chunks: [0.38, 0.35, 0.32] },
+  concrete: { dust: [0.45, 0.42, 0.38], chunks: [0.38, 0.35, 0.32], sparks: true },
+  cover: { dust: [0.45, 0.42, 0.38], chunks: [0.38, 0.35, 0.32], sparks: true },
 };
 
 const UP = new THREE.Vector3(0, 1, 0);
@@ -290,15 +291,82 @@ export class Effects {
     }
   }
 
+  droneKill(pos, incoming) {
+    const dir = incoming.clone().normalize();
+    const fl = this.pipeline.flashLight;
+    fl.position.copy(pos);
+    fl.intensity = 2800;
+    this.flash = 0.1;
+    this.add.spawn({ pos, size: 0.7, life: 0.07, color: [90, 48, 16], fade: 1 });
+    this.add.spawn({ pos: pos.clone().addScaledVector(dir, 0.08), size: 0.28, life: 0.09, color: [70, 28, 6], fade: 1 });
+    for (let i = 0; i < 52; i++) {
+      const v = dir.clone().multiplyScalar(5 + Math.random() * 12)
+        .add(new THREE.Vector3().randomDirection().multiplyScalar(7));
+      this.add.spawn({
+        pos, vel: v, size: 0.007, stretch: 0.16,
+        life: 0.22 + Math.random() * 0.4, color: [72, 30, 6], gravity: 12,
+      });
+    }
+    for (let i = 0; i < 10; i++) {
+      this.add.spawn({
+        pos: pos.clone().add(new THREE.Vector3().randomDirection().multiplyScalar(0.07)),
+        vel: new THREE.Vector3().randomDirection().multiplyScalar(1.4).setY(1.6 + Math.random()),
+        size: 0.1 + Math.random() * 0.08, grow: 0.85, life: 0.32 + Math.random() * 0.22,
+        color: [42, 12, 2], drag: 3.2,
+      });
+    }
+    for (let i = 0; i < 12; i++) {
+      this.alpha.spawn({
+        pos, vel: new THREE.Vector3().randomDirection().multiplyScalar(0.7).setY(0.9 + Math.random() * 0.6),
+        size: 0.18 + Math.random() * 0.16, grow: 1.05, life: 1.5 + Math.random(),
+        color: [0.13, 0.12, 0.11], alpha: 0.72, drag: 1.15,
+      });
+    }
+    for (let i = 0; i < 18; i++) {
+      const v = dir.clone().multiplyScalar(2 + Math.random() * 6)
+        .add(new THREE.Vector3().randomDirection().multiplyScalar(3.2));
+      v.y = Math.abs(v.y) + 1.8;
+      this.alpha.spawn({
+        pos, vel: v, size: 0.01 + Math.random() * 0.022, life: 0.85 + Math.random() * 0.6,
+        color: [0.38, 0.32, 0.26], alpha: 1, gravity: 9.8, fade: 0,
+      });
+    }
+  }
+
+  droneTrail(pos, vel) {
+    this.alpha.spawn({
+      pos: pos.clone(),
+      vel: vel.clone().multiplyScalar(-0.1).add(new THREE.Vector3((Math.random() - 0.5) * 0.45, 0.55, (Math.random() - 0.5) * 0.45)),
+      size: 0.14 + Math.random() * 0.14, grow: 0.75, life: 0.65 + Math.random() * 0.5,
+      color: [0.15, 0.13, 0.12], alpha: 0.58, drag: 1.5,
+    });
+    if (Math.random() < 0.6) {
+      this.add.spawn({
+        pos: pos.clone(),
+        vel: new THREE.Vector3().randomDirection().multiplyScalar(2.2 + Math.random() * 4.5),
+        size: 0.006, stretch: 0.055, life: 0.12 + Math.random() * 0.2,
+        color: [55, 20, 4], gravity: 8,
+      });
+    }
+    if (Math.random() < 0.4) {
+      this.add.spawn({
+        pos: pos.clone(),
+        vel: new THREE.Vector3((Math.random() - 0.5) * 0.35, 0.45, (Math.random() - 0.5) * 0.35),
+        size: 0.07, grow: 0.45, life: 0.2, color: [38, 11, 2], drag: 3.8,
+      });
+    }
+  }
+
   tracer(from, to) {
     const d = new THREE.Vector3().subVectors(to, from);
     const len = d.length();
-    if (len < 2) return;
+    if (len < 0.3) return;
     d.divideScalar(len);
     const speed = 380;
+    const skip = Math.min(0.35, len * 0.12);
     this.add.spawn({
-      pos: from.clone().addScaledVector(d, 1.25), vel: d.clone().multiplyScalar(speed), size: 0.012, stretch: 1.2,
-      life: Math.max(0.02, (len - 2) / speed), color: [30, 20, 9], fade: 0,
+      pos: from.clone().addScaledVector(d, skip), vel: d.clone().multiplyScalar(speed), size: 0.012, stretch: 1.2,
+      life: Math.max(0.02, (len - skip) / speed), color: [30, 20, 9], fade: 0,
     });
   }
 
@@ -421,7 +489,6 @@ export class Effects {
         if (c.p.y < h) {
           c.p.y = h;
           if (c.p.y < 0) { c.rest = true; c.age = 11.5; }
-          if (c.v.y < -0.6 && c.bounces < 4) this.audio.casing();
           c.bounces++;
           c.v.y = Math.abs(c.v.y) * 0.35;
           c.v.x *= 0.5; c.v.z *= 0.5;

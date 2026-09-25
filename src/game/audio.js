@@ -23,11 +23,11 @@ export class Audio {
     this.reverbSend.connect(this.reverb).connect(this.master);
 
     this.noise = this.noiseBuffer(2);
-    this.shots = [0, 1, 2, 3].map(() => this.renderGunshot(true));
-    this.farShots = [0, 1].map(() => this.renderGunshot(false));
+    this.shots = [0, 1, 2, 3].map(() => this.renderGunshot());
+    this.farShots = [0, 1].map(() => this.renderGunshot());
     const rifle = { blastT: 0.11, thumpF: 82, thumpT: 0.2, rumbleT: 0.9, len: 1.85, mix: { crack: 1.2, thump: 1.55, rumble: 0.58 } };
-    this.rifleShots = [0, 1, 2].map(() => this.renderGunshot(false, rifle));
-    this.boom = [0, 1].map(() => this.renderGunshot(false, { blastT: 0.16, thumpF: 70, thumpT: 0.35, rumbleT: 1.3, len: 3.2, mix: { crack: 0.6, blast: 1, thump: 1.6, rumble: 0.7 } }));
+    this.rifleShots = [0, 1, 2].map(() => this.renderGunshot(rifle));
+    this.boom = [0, 1].map(() => this.renderGunshot({ blastT: 0.16, thumpF: 70, thumpT: 0.35, rumbleT: 1.3, len: 3.2, mix: { crack: 0.6, blast: 1, thump: 1.6, rumble: 0.7 } }));
     this.startAmbience();
   }
 
@@ -110,7 +110,7 @@ export class Audio {
   // blast that dies within ~80 ms, a low thump, and a bit of rumble, all
   // saturated together. Any pitched sweep makes it sound like a laser.
   // `o` scales the layers: a rifle has a longer, deeper blast and rumble.
-  renderGunshot(click, o = {}) {
+  renderGunshot(o = {}) {
     const { blastT = 0.045, thumpF = 160, thumpT = 0.07, rumbleT = 0.22, len = 0.7, mix: mixO = {} } = o;
     const ctx = this.ctx;
     const sr = ctx.sampleRate;
@@ -141,18 +141,6 @@ export class Audio {
       const g = mix[key] / norm(parts[key]);
       const a = parts[key];
       for (let i = 0; i < n; i++) out[i] += a[i] * g;
-    }
-    if (click) {
-      // The slide going back and slamming forward after the shot.
-      for (const [at, gain] of [[0.038, 0.2], [0.07, 0.14]]) {
-        let lp = 0;
-        const i0 = Math.floor(sr * at);
-        for (let i = i0; i < Math.min(n, i0 + sr * 0.02); i++) {
-          const x = Math.random() * 2 - 1;
-          lp += k(3000) * (x - lp);
-          out[i] += (x - lp) * gain * Math.exp(-(i - i0) / sr / 0.003);
-        }
-      }
     }
     let peak = 0;
     for (let i = 0; i < n; i++) { out[i] = Math.tanh(out[i] * 1.8); peak = Math.max(peak, Math.abs(out[i])); }
@@ -206,9 +194,9 @@ export class Audio {
     setTimeout(() => {
       if (surface === 'water') {
         this.noiseBurst({ freq: 1400, q: 0.6, gain: 0.25 * att, attack: 0.005, release: 0.25, send: 0.3 });
-      } else if (surface === 'rock' || surface === 'metal') {
+      } else if (surface === 'rock' || surface === 'metal' || surface === 'concrete' || surface === 'cover') {
         this.noiseBurst({ freq: 3500, q: 2, gain: 0.3 * att, attack: 0.001, release: 0.06, send: 0.4 });
-        if (Math.random() < 0.35) this.ricochet(att);
+        this.ricochet(att);
       } else if (surface === 'flesh') {
         this.noiseBurst({ freq: 380, q: 0.9, type: 'lowpass', gain: 0.6 * att, attack: 0.001, release: 0.09, send: 0.15 });
         this.tone(95 + Math.random() * 20, 0.08, 0.25 * att, 'sine');
@@ -222,6 +210,7 @@ export class Audio {
   }
 
   ricochet(att) {
+    if (!this.ctx) return;
     const ctx = this.ctx;
     const t = ctx.currentTime;
     const o = ctx.createOscillator();
@@ -337,13 +326,6 @@ export class Audio {
     o.stop(t + dur + 0.05);
   }
 
-  casing() {
-    if (!this.ctx) return;
-    const f = 3800 + Math.random() * 1800;
-    this.tone(f, 0.08, 0.03);
-    this.tone(f * 1.52, 0.05, 0.015);
-  }
-
   footstep(surface, speed) {
     if (!this.ctx) return;
     const g = 0.12 + Math.min(speed, 6) * 0.03;
@@ -362,6 +344,82 @@ export class Audio {
   land(speed) {
     if (!this.ctx) return;
     this.noiseBurst({ freq: 300, q: 0.7, type: 'lowpass', gain: 0.25 + speed * 0.03, attack: 0.003, release: 0.14 });
+  }
+
+  droneStart() {
+    if (!this.ctx) return;
+    this.noiseBurst({ freq: 900, q: 0.8, type: 'bandpass', gain: 0.22, attack: 0.02, release: 0.18 });
+    this.tone(180, 0.12, 0.08, 'square');
+  }
+
+  droneShotDown() {
+    if (!this.ctx) return;
+    this.noiseBurst({ freq: 3200, q: 1.6, gain: 0.42, attack: 0.001, release: 0.07, send: 0.4 });
+    this.noiseBurst({ freq: 170, q: 0.55, type: 'lowpass', gain: 0.58, attack: 0.002, release: 0.38, send: 0.22 });
+    this.noiseBurst({ freq: 900, q: 2.2, gain: 0.22, attack: 0.001, release: 0.12, send: 0.25 });
+    const ctx = this.ctx;
+    const t = ctx.currentTime;
+    if (this.droneBuzz) {
+      this.droneBuzz.o.frequency.setTargetAtTime(26, t, 0.32);
+      this.droneBuzz.f.frequency.setTargetAtTime(130, t, 0.38);
+      this.droneBuzz.g.gain.setTargetAtTime(0.24, t, 0.04);
+      this.droneBuzz.g.gain.setTargetAtTime(0.0001, t + 0.12, 0.65);
+      this.droneBuzz.og.gain.setTargetAtTime(0.14, t, 0.03);
+      this.droneBuzz.og.gain.setTargetAtTime(0.0001, t + 0.16, 0.5);
+    }
+    const o = ctx.createOscillator();
+    o.type = 'sawtooth';
+    o.frequency.setValueAtTime(360, t);
+    o.frequency.exponentialRampToValueAtTime(38, t + 1.35);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.09, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 1.45);
+    const f = ctx.createBiquadFilter();
+    f.type = 'lowpass';
+    f.frequency.setValueAtTime(2400, t);
+    f.frequency.exponentialRampToValueAtTime(280, t + 1.3);
+    o.connect(f).connect(g).connect(this.master);
+    o.start(t);
+    o.stop(t + 1.5);
+    for (const at of [0.07, 0.2, 0.38, 0.62, 0.94, 1.22]) {
+      setTimeout(() => {
+        if (!this.ctx) return;
+        this.noiseBurst({
+          freq: 1400 + Math.random() * 2200, q: 1.8,
+          gain: 0.1 + Math.random() * 0.08, attack: 0.001, release: 0.055, send: 0.18,
+        });
+      }, at * 1000);
+    }
+  }
+
+  droneHum(gain) {
+    if (!this.ctx) return;
+    if (!this.droneBuzz) {
+      const ctx = this.ctx;
+      const src = ctx.createBufferSource();
+      src.buffer = this.noise;
+      src.loop = true;
+      const f = ctx.createBiquadFilter();
+      f.type = 'bandpass';
+      f.frequency.value = 420;
+      f.Q.value = 1.4;
+      const g = ctx.createGain();
+      g.gain.value = 0;
+      const o = ctx.createOscillator();
+      o.type = 'sawtooth';
+      o.frequency.value = 92;
+      const og = ctx.createGain();
+      og.gain.value = 0;
+      src.connect(f).connect(g).connect(this.master);
+      o.connect(og).connect(this.master);
+      src.start();
+      o.start();
+      this.droneBuzz = { g, f, og, o };
+    }
+    const t = this.ctx.currentTime;
+    this.droneBuzz.g.gain.setTargetAtTime(gain * 0.16, t, 0.08);
+    this.droneBuzz.og.gain.setTargetAtTime(gain * 0.04, t, 0.08);
+    this.droneBuzz.f.frequency.setTargetAtTime(360 + gain * 220, t, 0.12);
   }
 
   startAmbience() {
@@ -383,6 +441,25 @@ export class Audio {
     this.wind = loop(400, 'lowpass', 0.8);
     this.surf = loop(700, 'lowpass', 0.5);
     this.ambT = 0;
+  }
+
+  // Chrome throttles timers in a hidden tab unless it thinks audio is
+  // playing. A sub-audible tone keeps the sim clock running for two-tab tests.
+  holdFocus() {
+    this.start();
+    if (!this.ctx || this._hold) {
+      this.ctx?.resume?.();
+      return;
+    }
+    const ctx = this.ctx;
+    const o = ctx.createOscillator();
+    o.type = 'sine';
+    o.frequency.value = 18;
+    const g = ctx.createGain();
+    g.gain.value = 0.0008;
+    o.connect(g).connect(ctx.destination);
+    o.start();
+    this._hold = { o, g };
   }
 
   updateAmbience(dt, { altitude, coast, underwater }) {

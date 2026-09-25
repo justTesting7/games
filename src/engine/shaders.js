@@ -536,6 +536,7 @@ uniform float uRays;
 uniform float uUnderwater;
 uniform float uTime;
 uniform float uExposureBias;
+uniform float uAutoExposure;
 uniform float uVignette;
 uniform float uFlash;
 
@@ -570,7 +571,10 @@ void main() {
   col = mix(col, vec3(0.55, 0.7, 1.0) * pl * 1.1, scot * 0.6);
 
   float avgLum = texture(tLum, vec2(0.5)).r;
-  col *= uExposureBias * 0.16 / clamp(avgLum, 0.04, 3.0);
+  if (!(avgLum > 0.0) || avgLum != avgLum) avgLum = 0.18;
+  // HDR auto-exposure on an 8-bit phone target blows the ground to white.
+  if (uAutoExposure > 0.5) col *= uExposureBias * 0.16 / clamp(avgLum, 0.04, 3.0);
+  else col *= uExposureBias;
   col = aces(col);
 
   float l = dot(col, vec3(0.2126, 0.7152, 0.0722));

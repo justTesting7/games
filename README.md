@@ -1,7 +1,7 @@
 # Relic Isle
 
 A third-person adventure on a photoreal island, running in the browser with Three.js and WebGL 2.
-You play a dual-pistol adventurer, with animated running, jumping and aiming, in a free-for-all deathmatch against two rivals whose tactics are chosen by [Jev](https://docs.typesafe.ai/introduction) (TypeSafe System One).
+Single player is a free-for-all against rivals whose tactics are chosen by [Jev](https://docs.typesafe.ai/introduction) (TypeSafe System One). Multiplayer is a separate last-player-standing match against other humans.
 
 ## Running
 
@@ -20,6 +20,27 @@ Pick **Relic Isle** or **Dead District** (urban ruins) from the menu before you 
 
 The first `npm run dev` (or `npm run build`) downloads about 100 MB of third-party assets into
 `public/assets/vendor`, which is gitignored. Open the URL Vite prints and click **Fight**.
+
+## Hosting (Cloudflare)
+
+The client (`dist/`) and a Durable Object room share one hostname, so assets have no CORS and `/ws` is same-origin.
+
+```bash
+npx wrangler login --device    # or: wrangler login
+npm run cf:deploy              # builds, then uploads Worker + assets + GameRoom
+npx wrangler secret put JEV_API_KEY   # optional; rivals work without it
+```
+
+`npm run cf:dev` serves the same Worker locally on port 8787. Vite (`npm run dev`) stays single-player; it has no `/ws`.
+
+Live: https://relic-isle.noam-berman7.workers.dev
+
+The menu splits the two games:
+
+- **Single player** — you versus Jev-driven rivals. No socket. This is also what `npm run dev` runs.
+- **Multiplayer** — humans only, last player standing. The first player in a room is the host and picks the map, time of day, and how many players must join before the fight starts; everyone else just joins. Share `?mode=multi` or `?room=yourcode`. Switching tabs keeps you in the match for a minute so you can come back.
+
+Poses, shots, grenades, drones, and the round clock stay on the Durable Object.
 
 ## Controls
 
@@ -54,6 +75,7 @@ The first `npm run dev` (or `npm run build`) downloads about 100 MB of third-par
   - **Dual pistols:** 16 rounds with 96 spare. Body shots do 9 damage and headshots 30.
   - **7.62 Sniper** (Poly Haven bolt-action plus a built-on scope): 5 rounds with 15 spare. Body shots do 80 damage and headshots 200. Hold Space to go into a first-person mil-dot scope, release to fire. Shift holds breath to steady sway. Hip fire is wide. The right hand works the bolt after every shot and the spent case flies out. Reloading loads the rounds one by one.
   - **Stick grenades:** 3 for the player and 2 per rival. They bounce off terrain and trees on a 3.4 s fuse and do up to 120 damage within 8 m. Cover blocks most of the blast, and props are thrown clear.
+  - **Suicide drone** (4): 10 per life. Space launches it, then you fly with WASD, F to climb, and Space to detonate. One bullet shoots it down. Other players in a room see the drone and can shoot it.
   - The rifle is carried at low ready and raised to the shoulder with two-bone arm IK, and it slings across the back when another weapon is out.
   - Grenades are thrown with an over-the-shoulder arm swing. Right mouse shows the predicted throw arc.
   - Jev also picks each rival's weapon. The rivals aim grenades with a ballistic solution, lob them over cover, and run from live grenades.

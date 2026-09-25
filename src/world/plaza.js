@@ -404,7 +404,7 @@ export function buildPlaza(group, colliders, terrain, models, rand, placeProp, p
     g.position.set(x, sy, z);
     g.rotation.y = a + Math.PI;
     group.add(shade(g));
-    addBox(colliders, x, z, sy, 0.72, 0.72, 2.7, 'rock');
+    addBox(colliders, x, z, sy, 0.95, 0.95, 2.85, 'rock');
   }
 
   for (let i = 0; i < 6; i++) {

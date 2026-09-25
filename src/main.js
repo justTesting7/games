@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { Pipeline } from './engine/pipeline.js';
+import { startClock } from './engine/clock.js';
 import { Progress, loadImage } from './engine/assets.js';
 import { generateHeightmap, loadTerrainTextures, Terrain } from './world/terrain.js';
 import { Grass } from './world/grass.js';
@@ -18,30 +19,41 @@ import { byId, loadSelection, persona, resolveLooks } from './game/roster.js';
 import { setupRosterMenu } from './game/rosterMenu.js';
 import { createRosterAvatarStudio } from './game/rosterAvatarStudio.js';
 import { Jev } from './game/jev.js';
+import { Net } from './game/net.js';
+import { Session } from './game/session.js';
+import { modeUrl, persistMode, persistRoom, resolveMode, resolveRoom } from './game/mode.js';
+import { isTouchDevice, setupTouch } from './game/touch.js';
+import { DRONE } from './game/drone.js';
+import { createGameRenderer } from './engine/webgl.js';
 
 const $ = (id) => document.getElementById(id);
-const canvas = $('game');
 const menu = $('menu');
 menu.classList.add('loading');
 
 function fail(e) {
   console.error(e);
   const el = $('error');
-  el.textContent = `Failed to start: ${e?.message || e}\n\nMake sure the assets were downloaded (npm run dev does this automatically).`;
+  const msg = e?.message || String(e);
+  const hint = /WebGL/i.test(msg)
+    ? 'Close other 3D tabs, then reload. Some phones only allow one WebGL game at a time.'
+    : 'Make sure the assets were downloaded (npm run dev does this automatically).';
+  el.textContent = `Failed to start: ${msg}\n\n${hint}`;
   el.classList.remove('hidden');
 }
 
 let renderer;
+let canvas;
 try {
-  renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
-  if (!renderer.capabilities.isWebGL2) throw new Error('WebGL 2 is required.');
-  renderer.info.autoReset = false;
+  ({ renderer, canvas } = createGameRenderer($('game')));
+  canvas.addEventListener('webglcontextrestored', () => {
+    try { pipeline.setQuality(pipeline.qualityName || 'low'); } catch { /* retry on next frame */ }
+  });
 } catch (e) {
   fail(e);
   throw e;
 }
 
-const savedQuality = localStorage.getItem('relic-quality') || 'high';
+const savedQuality = localStorage.getItem('relic-quality') || (isTouchDevice() ? 'low' : 'medium');
 $('quality').value = savedQuality;
 const pipeline = new Pipeline(renderer);
 pipeline.setQuality(savedQuality);
@@ -75,41 +87,55 @@ world.raycast = (o, d, maxDist, ignore) => {
     if (tw < (best ? best.t : maxDist)) best = { t: tw, normal: new THREE.Vector3(0, 1, 0), surface: 'water' };
   }
   const c = world.veg.colliders.raycast(o, d, best ? best.t : maxDist);
-  if (c && (!best || c.t < best.t)) best = { t: c.t, normal: c.normal, surface: c.surface || c.collider.type };
+  if (c && (!best || c.t < best.t)) best = { t: c.t, normal: c.normal, surface: c.surface || c.collider.type, collider: c.collider };
   const pr = world.props.raycast(o, d, best ? best.t : maxDist);
   if (pr && (!best || pr.t < best.t)) best = pr;
+  const checkDrone = (drone) => {
+    const hit = drone?.raycast(o, d, best ? best.t : maxDist);
+    if (hit && (!best || hit.t < best.t)) best = hit;
+  };
+  checkDrone(world.drone);
+  if (world.netDrones) for (const drone of world.netDrones.values()) checkDrone(drone);
   const fh = world.combat.raycast(o, d, best ? best.t : maxDist, ignore);
   if (fh) best = fh;
   return best;
 };
 const combat = new Combat();
 world.combat = combat;
+const mode = resolveMode();
+const roomCode = resolveRoom();
+persistMode(mode);
 const jev = new Jev();
+const net = new Net({ wanted: mode === 'multi', room: roomCode });
+net.watchFocus();
+let session = null;
 
-const NO_INPUT = { forward: false, back: false, left: false, right: false, sprint: false, jump: false, aim: false, fire: false, toggleWalk: false, crouch: false };
-const input = { forward: false, back: false, left: false, right: false, sprint: false, jump: false, aim: false, fire: false, toggleWalk: false, crouch: false, fastTime: false };
+const NO_INPUT = { forward: false, back: false, left: false, right: false, sprint: false, jump: false, aim: false, fire: false, toggleWalk: false, crouch: false, moveX: 0, moveY: 0 };
+const input = { forward: false, back: false, left: false, right: false, sprint: false, jump: false, climb: false, aim: false, fire: false, toggleWalk: false, crouch: false, fastTime: false, moveX: 0, moveY: 0 };
+let inPlay = false;
 const keymap = { KeyW: 'forward', ArrowUp: 'forward', KeyS: 'back', ArrowDown: 'back', KeyA: 'left', ArrowLeft: 'left', KeyD: 'right', ArrowRight: 'right', ShiftLeft: 'sprint', ShiftRight: 'sprint', ControlLeft: 'crouch', ControlRight: 'crouch', KeyT: 'fastTime' };
 addEventListener('keydown', (e) => {
   if (keymap[e.code]) input[keymap[e.code]] = true;
   if (e.code === 'Space') {
     e.preventDefault();
-    if (document.pointerLockElement === canvas) {
+    if (inPlay || document.pointerLockElement === canvas) {
       input.fire = true;
       if (!e.repeat) input.firePressed = true;
     }
   }
-  if (e.code === 'KeyF' && !e.repeat) input.jump = true;
+  if (e.code === 'KeyF') { input.climb = true; if (!e.repeat) input.jump = true; }
   if (e.code === 'KeyC' && !e.repeat) input.toggleCrouch = true;
   if (e.code === 'KeyV' && !e.repeat) input.toggleWalk = true;
   if (e.code === 'KeyR' && !e.repeat) input.reload = true;
   if (e.code === 'Enter' && !e.repeat) input.restart = true;
-  if (/^Digit[1-3]$/.test(e.code)) input.slot = Number(e.code.slice(5));
+  if (/^Digit[1-4]$/.test(e.code)) input.slot = Number(e.code.slice(5));
   if (e.code === 'KeyQ' && !e.repeat) input.cycle = 1;
   if (e.code === 'F3') { $('debug').classList.toggle('hidden'); e.preventDefault(); }
 });
 addEventListener('keyup', (e) => {
   if (keymap[e.code]) input[keymap[e.code]] = false;
   if (e.code === 'Space') { input.fire = false; input.fireReleased = true; }
+  if (e.code === 'KeyF') { input.jump = false; input.climb = false; }
 });
 canvas.addEventListener('mousedown', (e) => {
   if (document.pointerLockElement !== canvas) return;
@@ -132,12 +158,86 @@ $('maptitle').textContent = mapDef.label;
 $('mapsub').textContent = mapDef.subtitle;
 $('map').onchange = (e) => {
   localStorage.setItem('relic-map', e.target.value);
+  if (mode === 'multi' && net.status === 'online') {
+    net.send({ t: 'settings', map: e.target.value, time: timeOfDay, min: Number($('minplayers').value) });
+  }
   location.reload();
+};
+
+const paintMode = () => {
+  $('mode-solo').classList.toggle('on', mode === 'solo');
+  $('mode-multi').classList.toggle('on', mode === 'multi');
+  $('roomrow').classList.toggle('hidden', mode !== 'multi');
+  $('minrow').classList.toggle('hidden', mode !== 'multi');
+  $('jevstat').classList.toggle('hidden', mode === 'multi');
+  $('netstat').classList.toggle('hidden', mode !== 'multi');
+  const hosted = net.hosted;
+  if (mode === 'multi') {
+    if (!hosted) $('modehint').textContent = 'Multiplayer needs the hosted game or npm run cf:dev.';
+    else if (session && !session.isHost) $('modehint').textContent = `Host chose ${mapDef.label}. Pick a fighter and join.`;
+    else $('modehint').textContent = 'You are the host. Map, time, and min players apply to everyone who joins.';
+  } else {
+    $('modehint').textContent = 'You against Jev-driven rivals. Last one standing wins.';
+  }
+  const play = $('play');
+  if (!rosterMenu) return;
+  if (mode === 'solo' && rosterMenu.changed()) play.textContent = 'Apply & reload';
+  else if (mode === 'multi' && !hosted) play.textContent = 'Needs host';
+  else play.textContent = mode === 'multi' ? 'Join fight' : 'Fight';
+};
+let applyLocalFighter = async () => {};
+const switchMode = (next) => {
+  if (next === mode) return;
+  persistMode(next);
+  location.assign(modeUrl(next, $('roomcode')?.value || roomCode));
+};
+$('mode-solo').onclick = () => switchMode('solo');
+$('mode-multi').onclick = () => switchMode('multi');
+$('roomcode').value = roomCode;
+$('roomcode').onchange = () => {
+  const next = persistRoom($('roomcode').value);
+  if (mode === 'multi') location.assign(modeUrl('multi', next));
+};
+$('roomcode').oninput = () => {
+  const share = $('roomshare');
+  const next = ($('roomcode').value || 'lobby').trim() || 'lobby';
+  const url = modeUrl('multi', next);
+  share.textContent = `Share ${url.origin}${url.search || '?mode=multi'}`;
 };
 
 let timeOfDay = mapDef.timeOfDay;
 $('timeofday').value = Math.round(timeOfDay * 1000);
-$('timeofday').oninput = (e) => { timeOfDay = e.target.value / 1000; };
+let timeSend = 0;
+$('timeofday').oninput = (e) => {
+  timeOfDay = e.target.value / 1000;
+  if (mode !== 'multi' || !session?.isHost || net.status !== 'online') return;
+  clearTimeout(timeSend);
+  timeSend = setTimeout(() => {
+    net.send({ t: 'settings', time: timeOfDay, min: Number($('minplayers').value) });
+  }, 250);
+};
+
+const minPlayers = () => Math.max(2, Math.min(12, Number($('minplayers').value) || 2));
+$('minplayers').value = localStorage.getItem('relic-min-players') || '2';
+$('minplayers').onchange = () => {
+  const n = minPlayers();
+  localStorage.setItem('relic-min-players', String(n));
+  if (session) session.minPlayers = n;
+  if (mode === 'multi' && session?.isHost && net.status === 'online') {
+    net.send({ t: 'settings', map: mapDef.id, time: timeOfDay, min: n });
+  }
+};
+
+const applyHostUi = (host) => {
+  const lock = mode === 'multi' && host === false;
+  $('map').disabled = lock;
+  $('timeofday').disabled = lock;
+  $('minplayers').disabled = lock;
+  $('map').parentElement?.classList.toggle('locked', lock);
+  $('timeofday').parentElement?.classList.toggle('locked', lock);
+  $('minrow').classList.toggle('locked', lock);
+  paintMode();
+};
 $('quality').onchange = (e) => {
   pipeline.setQuality(e.target.value);
   localStorage.setItem('relic-quality', e.target.value);
@@ -145,14 +245,34 @@ $('quality').onchange = (e) => {
 };
 const selection = loadSelection();
 const rosterMenu = setupRosterMenu(selection, $('roster'), () => {
-  $('play').textContent = rosterMenu.changed() ? 'Apply & reload' : 'Fight';
-});
-const rosterStudio = createRosterAvatarStudio();
+  paintMode();
+  if (mode === 'multi') applyLocalFighter();
+}, { opponents: mode === 'solo' });
+paintMode();
+$('roomcode').dispatchEvent(new Event('input'));
+const rosterStudio = createRosterAvatarStudio({ webgl: !isTouchDevice() });
 
 $('volume').oninput = (e) => audio.setVolume(e.target.value / 100);
 audio.setVolume($('volume').value / 100);
 
 async function init() {
+  if (mode === 'multi' && net.hosted) {
+    try {
+      const info = await fetch(`/ws?room=${encodeURIComponent(roomCode)}`).then((r) => r.json());
+      if (info.settings?.map && info.settings.map !== mapDef.id) {
+        localStorage.setItem('relic-map', info.settings.map);
+        location.reload();
+        return;
+      }
+      if (Number.isFinite(info.settings?.time)) {
+        timeOfDay = info.settings.time;
+        $('timeofday').value = Math.round(timeOfDay * 1000);
+      }
+      if (Number.isFinite(+info.settings?.min)) {
+        $('minplayers').value = String(Math.max(2, Math.min(12, Math.round(+info.settings.min))));
+      }
+    } catch { /* empty room or offline */ }
+  }
   pipeline.fogMaterial.uniforms.uFogDensity.value = mapDef.fogDensity;
   const [data, textures] = await Promise.all([
     progress.task(mapDef.loadLabel, 3, () => generateHeightmap(mapDef.id)),
@@ -179,7 +299,9 @@ async function init() {
   world.props = props;
   let city = null;
   if (mapDef.id === 'city') city = new City(terrain, veg.colliders, pipeline);
-  const fighters = [selection.player, ...selection.rivals].map(byId);
+  const fighters = mode === 'solo'
+    ? [selection.player, ...selection.rivals].map(byId)
+    : [byId(selection.player)];
   const bodies = [...new Set(['f', 'm', ...fighters.map((e) => e.look.body)])];
   const [, charAssets, looks] = await Promise.all([
     mapDef.vegetation ? veg.load(progress) : Promise.resolve(),
@@ -189,6 +311,7 @@ async function init() {
     city ? city.load(progress) : Promise.resolve(),
   ]);
   character.load(charAssets, looks[0]);
+  character.lookId = fighters[0].id;
 
   const spawn = data.spawn;
   const facing = Math.atan2(data.peak.x - spawn.x, data.peak.z - spawn.z);
@@ -208,7 +331,7 @@ async function init() {
   character.addTo(pipeline.scene);
 
   const player = new Player(world, character, camera);
-  player.fighter = combat.add({ id: 'player', name: 'You', character, pos: player.pos, isPlayer: true, color: fighters[0].color });
+  player.fighter = combat.add({ id: 'player', name: fighters[0].name, character, pos: player.pos, isPlayer: true, color: fighters[0].color });
   player.spawn(spawn.x, spawn.z, facing);
   const fx = new Effects(pipeline, terrain, audio);
   const weapons = new Weapons(world, player, character, fx, audio, combat);
@@ -223,11 +346,64 @@ async function init() {
     ch.addTo(pipeline.scene);
     return new Rival(world, combat, weapons, jev, persona(entry), ch);
   });
-  window.__game = { world, pipeline, camera, input, rivals, combat, jev };
-
+  const you = byId(selection.player);
+  session = new Session({
+    net, world, combat, weapons, player, rivals, charAssets,
+    scene: pipeline.scene, spawn, facing, mapId: mapDef.id,
+    onRoster: () => rebuildTags(),
+    onRound: (msg) => applyNetRound(msg),
+    onSettings: (s) => {
+      if (Number.isFinite(s?.time)) {
+        timeOfDay = s.time;
+        $('timeofday').value = Math.round(timeOfDay * 1000);
+      }
+      if (Number.isFinite(+s?.min)) {
+        session.minPlayers = Math.max(2, Math.min(12, Math.round(+s.min)));
+        $('minplayers').value = String(session.minPlayers);
+      }
+    },
+    onHost: (host) => applyHostUi(host),
+  });
+  session.minPlayers = minPlayers();
+  const lookCache = new Map(fighters.map((e, i) => [e.id, looks[i]]));
   const rosterChars = new Map([[fighters[0].id, character]]);
   fighters.slice(1).forEach((e, i) => rosterChars.set(e.id, rivals[i].character));
-  const lookCache = new Map(fighters.map((e, i) => [e.id, looks[i]]));
+  const syncIdentity = (entry) => {
+    if (mode !== 'multi') return;
+    const identity = { name: entry.name, color: entry.color, roster: entry.id, time: timeOfDay, min: minPlayers() };
+    if (net.identity) Object.assign(net.identity, identity);
+    if (net.status === 'online') net.send({ t: 'hello', ...identity, map: mapDef.id });
+    else if (session) session.connect(identity);
+  };
+  applyLocalFighter = async (id = rosterMenu.player()) => {
+    const entry = byId(id);
+    if (!entry) return;
+    rosterMenu.save();
+    if (character.lookId !== entry.id) {
+      let look = lookCache.get(entry.id);
+      if (!look) {
+        [look] = await resolveLooks([entry]);
+        lookCache.set(entry.id, look);
+      }
+      character.relight(charAssets, look);
+      character.lookId = entry.id;
+      character.setWeapon(player.fighter.loadout?.current || 'pistols');
+      character.equipT = 1;
+      for (const [rid, ch] of [...rosterChars]) {
+        if (ch === character && rid !== entry.id) rosterChars.delete(rid);
+      }
+      rosterChars.set(entry.id, character);
+    }
+    player.fighter.name = entry.name;
+    player.fighter.color = entry.color;
+    syncIdentity(entry);
+    paintMode();
+  };
+  const youNow = byId(rosterMenu.player()) || you;
+  if (mode === 'multi') session.connect({ name: youNow.name, color: youNow.color, roster: youNow.id, time: timeOfDay, min: minPlayers() });
+  if (mode === 'multi' && youNow.id !== character.lookId) await applyLocalFighter(youNow.id);
+  window.__game = { world, pipeline, camera, input, rivals, combat, jev, net, session };
+
   rosterMenu.bindAvatars(
     rosterStudio,
     (id) => rosterChars.get(id),
@@ -277,11 +453,34 @@ async function init() {
     $('bannertitle').textContent = title;
     $('bannersub').textContent = sub;
   };
-  const startRound = () => {
-    if (!player.fighter.alive) {
-      player.spawn(spawn.x, spawn.z, facing);
-      player.vel.set(0, 0, 0);
+  let spectate = null;
+  const othersLive = () => {
+    const list = mode === 'multi' ? [...session.remotes.values()] : rivals;
+    return list.filter((r) => r.fighter?.alive);
+  };
+  const attachSpectate = (sub) => {
+    if (!sub) { spectate = null; return null; }
+    if (spectate !== sub) {
+      spectate = sub;
+      player.camYaw = sub.yaw ?? 0;
+      player.camPitch = -0.1;
+      player.smoothPivot = undefined;
+      player.smoothDist = undefined;
     }
+    return spectate;
+  };
+  const refreshSpectate = () => {
+    if (player.fighter.alive) { spectate = null; return null; }
+    if (spectate?.fighter?.alive) return spectate;
+    const live = othersLive();
+    if (!live.length) { spectate = null; return null; }
+    const from = spectate?.pos || player.pos;
+    live.sort((a, b) => a.pos.distanceToSquared(from) - b.pos.distanceToSquared(from));
+    return attachSpectate(live[0]);
+  };
+
+  const resetLocalKit = () => {
+    spectate = null;
     combat.reset(player.fighter);
     player.fighter.loadout.reset();
     character.setWeapon('pistols');
@@ -293,11 +492,63 @@ async function init() {
     weapons.sniperHeld = false;
     weapons.sniperWasScoped = false;
     player.sniperPending = false;
+    weapons.drone.clear();
     fx.decals.clear();
-    spawnRivals();
+  };
+
+  const startRound = () => {
+    resetLocalKit();
     $('feed').innerHTML = '';
+    if (mode === 'multi') {
+      session.placeLocal();
+      session.ready();
+      const need = session.minPlayers || minPlayers();
+      const have = session.peerCount + 1;
+      const wait = net.status === 'online'
+        ? (have >= need
+          ? `${have} in the room. Waiting for the fight to start.`
+          : `${have} / ${need} players. Share the room link.`)
+        : net.error === 'host'
+          ? 'Open the hosted game or run npm run cf:dev to play multiplayer.'
+          : 'Connecting to the room…';
+      banner('Waiting', wait, 'show countdown');
+      round.state = 'waiting';
+      return;
+    }
+    if (!player.fighter.alive) {
+      player.spawn(spawn.x, spawn.z, facing);
+      player.vel.set(0, 0, 0);
+    }
+    spawnRivals();
     round.state = 'countdown';
     round.t = 3;
+    round.ends = 0;
+  };
+
+  const applyNetRound = (msg) => {
+    if (msg.state === 'countdown') {
+      resetLocalKit();
+      session.beginRound(msg);
+      const slot = msg.slots?.[net.id] ?? session.slot;
+      session.placeLocal(slot);
+      round.state = 'countdown';
+      round.ends = msg.ends || (Date.now() + 3000);
+      round.t = Math.max(0, (round.ends - Date.now()) / 1000);
+    } else if (msg.state === 'fight') {
+      round.state = 'fight';
+      banner('', '', '');
+    } else if (msg.state === 'over') {
+      round.state = 'over';
+      round.rematchAt = msg.rematchAt || (Date.now() + 4000);
+      const won = msg.winner === net.id;
+      banner(
+        won ? 'Victory' : 'Eliminated',
+        won ? 'You outlasted the other players.' : 'The next round starts in a moment.',
+        won ? 'show won' : 'show lost',
+      );
+    } else if (msg.state === 'waiting') {
+      round.state = 'waiting';
+    }
   };
 
   const feed = (html) => {
@@ -320,7 +571,8 @@ async function init() {
     void dmgDir.offsetWidth;
     dmgDir.classList.add('show');
   };
-  combat.onDamage = (victim, attacker, amount) => {
+  combat.onDamage = (victim, attacker, amount, dir, info = {}) => {
+    fx.decals.bleed(info.at || victim.pos, dir, amount);
     if (victim === player.fighter) {
       hurt = Math.min(1, hurt + amount / 30);
       player.shake = Math.max(player.shake, 0.25);
@@ -329,6 +581,7 @@ async function init() {
     }
   };
   combat.onKill = (victim, attacker, info) => {
+    fx.decals.bleed(info.at || victim.pos, info.dir, info.head ? 50 : 30);
     if (info.dir) {
       const flat = new THREE.Vector3(info.dir.x, 0, info.dir.z);
       if (flat.lengthSq() > 1e-4) flat.normalize();
@@ -338,13 +591,16 @@ async function init() {
     const by = attacker === victim ? '' : attacker ? tagName(attacker) : '';
     feed(`${by} <span class="gun">▸ ${how} ▸</span> ${tagName(victim)}`);
     if (victim === player.fighter) {
+      weapons.drone.clear();
       hurt = 1;
       audio.hurt(true);
       if (attacker) pointDamage(attacker);
-      round.state = 'over';
-      const who = attacker === victim ? 'Your own grenade' : attacker ? attacker.name : 'A rival';
-      banner('Eliminated', `${who} got you. Press R to fight again.`, 'show lost');
-    } else if (rivals.every((r) => !r.fighter.alive) && player.fighter.alive) {
+      if (mode === 'solo') {
+        round.state = 'over';
+        const who = attacker === victim ? 'Your own grenade' : attacker ? attacker.name : 'A rival';
+        banner('Eliminated', `${who} got you. Press R to fight again.`, 'show lost');
+      }
+    } else if (mode === 'solo' && rivals.every((r) => !r.fighter.alive) && player.fighter.alive) {
       round.state = 'over';
       banner('Victory', `You outlasted ${rivals.length > 1 ? `all ${rivals.length} rivals` : 'your rival'}. Press R to fight again.`, 'show won');
     }
@@ -355,14 +611,22 @@ async function init() {
     if (dist < 4 && player.fighter.alive) hurt = Math.max(hurt, 0.4);
   };
 
-  const tags = rivals.map((r) => {
-    const el = document.createElement('div');
-    el.className = 'tag';
-    el.innerHTML = `<b style="color:${r.persona.color}">${r.persona.name}</b><div class="hp"><i></i></div><small></small>`;
-    $('tags').appendChild(el);
-    return { r, el, bar: el.querySelector('i'), info: el.querySelector('small'), seen: 0, losT: 0 };
-  });
+  let tags = [];
   const tagPos = new THREE.Vector3();
+  const rebuildTags = () => {
+    $('tags').innerHTML = '';
+    const sources = mode === 'multi' ? [...session.remotes.values()] : rivals;
+    tags = sources.map((r) => {
+      const el = document.createElement('div');
+      el.className = 'tag';
+      const name = r.persona?.name || r.fighter.name;
+      const color = r.persona?.color || r.fighter.color;
+      el.innerHTML = `<b style="color:${color}">${name}</b><div class="hp"><i></i></div><small></small>`;
+      $('tags').appendChild(el);
+      return { r, el, bar: el.querySelector('i'), info: el.querySelector('small'), seen: 0, losT: 0 };
+    });
+  };
+  rebuildTags();
   const updateTags = (dt) => {
     for (const t of tags) {
       const f = t.r.fighter;
@@ -382,8 +646,11 @@ async function init() {
       t.el.style.opacity = (f.alive ? 1 : 0.55) * t.seen;
       t.el.style.transform = `translate(${((tagPos.x + 1) / 2) * innerWidth}px, ${((1 - tagPos.y) / 2) * innerHeight}px) translate(-50%, -100%)`;
       t.bar.style.width = `${(f.health / MAX_HEALTH) * 100}%`;
-      t.info.textContent = !f.alive ? 'eliminated'
-        : `${WEAPONS[f.loadout.current].short} · ${t.r.label}${t.r.target ? ` → ${t.r.target.isPlayer ? 'you' : t.r.target.name}` : ''} · ${t.r.source === 'jev' ? `Jev ${Math.round(t.r.confidence * 100)}%` : 'local AI'}`;
+      if (!f.alive) t.info.textContent = 'eliminated';
+      else if (mode === 'multi') t.info.textContent = `${WEAPONS[f.loadout.current]?.short || ''} · ${t.r.away ? 'away' : 'human'}`;
+      else {
+        t.info.textContent = `${WEAPONS[f.loadout.current].short} · ${t.r.label}${t.r.target ? ` → ${t.r.target.isPlayer ? 'you' : t.r.target.name}` : ''} · ${t.r.source === 'jev' ? `Jev ${Math.round(t.r.confidence * 100)}%` : 'local AI'}`;
+      }
     }
   };
 
@@ -415,83 +682,147 @@ async function init() {
   $('loading').classList.add('hidden');
   $('play').classList.remove('hidden');
   menu.classList.remove('loading');
-  $('play').onclick = () => {
-    if (rosterMenu.changed()) { rosterMenu.save(); location.reload(); return; }
-    audio.start();
-    canvas.requestPointerLock();
+  paintMode();
+  const applyLook = (dx, dy, touch) => {
+    const flying = weapons.drone.flying;
+    const base = touch ? 0.0026 : 0.00022;
+    const sens = Number($('sens').value) * base * (flying ? 0.85 : player.scoped ? 0.16 : player.camDist < 2 ? 0.7 : 1);
+    if (flying) weapons.drone.look(dx * sens, dy * sens);
+    else player.look(dx * sens, dy * sens);
+  };
+  const setPlay = (on) => {
+    inPlay = !!on;
+    menu.classList.toggle('hidden', inPlay);
+    $('hud').classList.toggle('hidden', !inPlay);
+    if (inPlay) {
+      rosterStudio.hideHover();
+      touchPad.show();
+      if (round.state === 'waiting') startRound();
+    } else {
+      touchPad.hide();
+      for (const k in input) input[k] = false;
+      input.moveX = 0;
+      input.moveY = 0;
+      if (document.pointerLockElement) document.exitPointerLock();
+      if (document.fullscreenElement) document.exitFullscreen?.();
+    }
+  };
+  const touchPad = setupTouch(input, {
+    onLook: (dx, dy) => { if (inPlay) applyLook(dx, dy, true); },
+    onMenu: () => setPlay(false),
+  });
+  $('play').onclick = async () => {
+    if (mode === 'solo' && rosterMenu.changed()) { rosterMenu.save(); location.reload(); return; }
+    if (mode === 'multi') {
+      if (!net.hosted) return;
+      rosterMenu.save();
+      await applyLocalFighter();
+    }
+    audio.holdFocus();
+    if (touchPad.active) {
+      setPlay(true);
+    } else {
+      canvas.requestPointerLock();
+    }
   };
   canvas.addEventListener('click', () => {
+    if (touchPad.active) return;
     if (document.pointerLockElement !== canvas && menu.classList.contains('hidden')) canvas.requestPointerLock();
   });
   document.addEventListener('pointerlockchange', () => {
-    const locked = document.pointerLockElement === canvas;
-    menu.classList.toggle('hidden', locked);
-    $('hud').classList.toggle('hidden', !locked);
-    if (locked) rosterStudio.hideHover();
-    if (!locked) for (const k in input) input[k] = false;
-    if (locked && round.state === 'waiting') startRound();
+    if (touchPad.active) return;
+    setPlay(document.pointerLockElement === canvas);
   });
   addEventListener('mousemove', (e) => {
     if (document.pointerLockElement !== canvas) return;
-    const sens = Number($('sens').value) * 0.00022 * (player.scoped ? 0.16 : player.camDist < 2 ? 0.7 : 1);
-    player.look(e.movementX * sens, e.movementY * sens);
+    applyLook(e.movementX, e.movementY, false);
   });
 
-  let last = performance.now();
   let elapsed = 0;
   let fpsT = 0, frames = 0, fps = 0;
-  const loop = () => {
-    requestAnimationFrame(loop);
-    const now = performance.now();
-    const dt = Math.min(0.05, (now - last) / 1000);
-    last = now;
+  const clock = startClock((dt, draw) => {
     elapsed += dt;
-    if (input.fastTime) {
+    if (input.fastTime && (mode !== 'multi' || session?.isHost)) {
       timeOfDay = (timeOfDay + dt * 0.03) % 1;
       $('timeofday').value = Math.round(timeOfDay * 1000);
     }
     pipeline.setTimeOfDay(timeOfDay, elapsed);
 
-    const locked = document.pointerLockElement === canvas;
-    if ((input.restart || (input.reload && round.state === 'over')) && (round.state === 'over' || round.state === 'fight')) {
+    const locked = inPlay;
+    if (mode === 'solo' && (input.restart || (input.reload && round.state === 'over')) && (round.state === 'over' || round.state === 'fight')) {
       startRound();
       input.reload = false;
     }
     input.restart = false;
+    if (mode === 'multi' && round.state === 'over' && round.rematchAt) {
+      const left = Math.max(0, (round.rematchAt - Date.now()) / 1000);
+      banner($('bannertitle').textContent || 'Round over', left > 0.15 ? `Next round in ${Math.ceil(left)}` : 'Starting…', $('banner').className);
+    }
     if (round.state === 'countdown') {
-      round.t -= dt;
-      banner(round.t > 0 ? `${Math.ceil(round.t)}` : 'Fight', `${rivals.length > 1 ? `${rivals.length} rivals are` : '1 rival is'} closing in. Last one standing wins.`, 'show countdown');
+      if (round.ends) round.t = (round.ends - Date.now()) / 1000;
+      else round.t -= dt;
+      const crowd = mode === 'multi'
+        ? `${session.peerCount + 1} players. Last one standing wins.`
+        : `${rivals.length > 1 ? `${rivals.length} rivals are` : '1 rival is'} closing in. Last one standing wins.`;
+      banner(round.t > 0 ? `${Math.ceil(round.t)}` : 'Fight', crowd, 'show countdown');
       if (round.t <= -0.6) { round.state = 'fight'; banner('', '', ''); }
     }
 
     const alive = player.fighter.alive;
-    const state = player.update(dt, alive ? input : NO_INPUT);
+    const flying = weapons.drone.flying;
+    const dying = weapons.drone.dying;
+    const spec = refreshSpectate();
+    touchPad.setDrone(flying);
+    const state = player.update(dt, alive && !flying ? input : NO_INPUT, spec);
+    const canShoot = alive && round.state !== 'countdown' && !(mode === 'multi' && round.state === 'waiting');
+    if (canShoot) weapons.update(dt, input);
+    else weapons.tick(player.fighter, dt);
     input.jump = false;
     input.toggleWalk = false;
     input.toggleCrouch = false;
-    if (alive && round.state !== 'countdown') weapons.update(dt, input);
-    else weapons.tick(player.fighter, dt);
     input.slot = 0;
     input.cycle = 0;
     input.reload = false;
     weapons.updateGrenades(dt);
     input.firePressed = false;
     input.fireReleased = false;
-    const active = locked && (round.state === 'fight' || round.state === 'over');
-    rivals.forEach((r) => r.update(dt, active));
+    const hidden = document.visibilityState === 'hidden';
+    const active = (locked || hidden) && (round.state === 'fight' || round.state === 'over');
+    session.update(dt);
+    if (mode === 'multi' && round.state === 'waiting') {
+      const need = session.minPlayers || minPlayers();
+      const have = session.peerCount + 1;
+      const wait = net.status === 'online'
+        ? (have >= need
+          ? `${have} in the room. Waiting for the fight to start.`
+          : `${have} / ${need} players. Share the room link.`)
+        : net.error === 'host'
+          ? 'Open the hosted game or run npm run cf:dev to play multiplayer.'
+          : 'Connecting to the room…';
+      banner('Waiting', wait, 'show countdown');
+    }
+    if (mode === 'solo') rivals.forEach((r) => r.update(dt, active));
     combat.update(dt);
     props.update(dt);
     fx.update(dt);
-    terrain.update(elapsed);
-    if (grass) grass.update(elapsed, camera.position, player.pos);
-    if (mapDef.vegetation) veg.update(elapsed, camera.position);
-    if (city) city.update(dt, fx, camera);
-    const coast = THREE.MathUtils.clamp(1 - (terrain.heightAt(player.pos.x, player.pos.z) - 1) / 25, 0, 1);
-    audio.updateAmbience(dt, { altitude: player.pos.y, coast, underwater: player.underwater });
+    if (draw) {
+      terrain.update(elapsed);
+      const viewPos = spec?.pos || player.pos;
+      if (grass) grass.update(elapsed, camera.position, viewPos);
+      if (mapDef.vegetation) veg.update(elapsed, camera.position);
+      if (city) city.update(dt, fx, camera);
+      const coast = THREE.MathUtils.clamp(1 - (terrain.heightAt(viewPos.x, viewPos.z) - 1) / 25, 0, 1);
+      audio.updateAmbience(dt, { altitude: player.pos.y, coast, underwater: player.underwater });
+    }
 
-    $('crosshair').classList.toggle('idle', !state.aiming);
+    if (hitTimer > 0) { hitTimer -= dt; if (hitTimer <= 0) $('hitmarker').classList.remove('show'); }
+    hurt = Math.max(0, hurt - dt * 1.6);
+    if (!draw) return;
+
+    $('crosshair').classList.toggle('idle', !state.aiming && !flying);
     $('crosshair').classList.toggle('enemy', !!player.aimHit?.fighter);
-    $('crosshair').classList.toggle('hidden', !alive || player.scopeT > 0.35);
+    $('crosshair').classList.toggle('hidden', !alive || player.scopeT > 0.35 || dying);
+    $('crosshair').classList.toggle('drone', flying && !dying);
     const scoped = alive && player.scopeT > 0.45;
     $('scope').classList.toggle('show', scoped);
     $('scope').classList.toggle('steady', scoped && player.holdingBreath);
@@ -502,11 +833,16 @@ async function init() {
     }
     const L = player.fighter.loadout;
     const wdef = WEAPONS[L.current];
-    $('ammo').textContent = L.current === 'grenade' ? `${L.grenades}` : `${L.mag[L.current]} / ${L.reserve[L.current]}`;
-    $('weaponname').textContent = weapons.chargingGrenade ? 'pull back… release to throw'
+    $('ammo').textContent = L.current === 'grenade' ? `${L.grenades}`
+      : L.current === 'drone' ? `${L.drones}` : `${L.mag[L.current]} / ${L.reserve[L.current]}`;
+    $('weaponname').textContent = spec
+      ? `Spectating ${spec.persona?.name || spec.fighter.name}`
+      : dying ? 'drone shot down — returning'
+      : flying ? 'space to explode · you are exposed'
+      : weapons.chargingGrenade ? 'pull back… release to throw'
       : L.reloading ? 'reloading…' : wdef.name;
     $('weapon').classList.toggle('reloading', L.reloading);
-    $('weapon').classList.toggle('empty', L.current !== 'grenade' && L.mag[L.current] === 0);
+    $('weapon').classList.toggle('empty', L.current !== 'grenade' && L.current !== 'drone' && L.mag[L.current] === 0);
     const gch = $('grenadecharge');
     const charging = alive && L.current === 'grenade' && weapons.chargingGrenade;
     gch.classList.toggle('show', charging);
@@ -515,57 +851,114 @@ async function init() {
     if (gbar) gbar.style.setProperty('--pct', charging ? `${(weapons.grenadeCharge * 100).toFixed(0)}%` : '0%');
     $('crosshair').classList.toggle('grenade', charging);
     document.querySelectorAll('#slots b').forEach((el, i) => {
-      const key = ['pistols', 'rifle', 'grenade'][i];
+      const key = ['pistols', 'rifle', 'grenade', 'drone'][i];
       el.classList.toggle('on', key === L.current);
-      el.classList.toggle('off', !L.has(key));
+      el.classList.toggle('off', key === 'drone' ? L.drones <= 0 && !flying : !L.has(key));
     });
+    $('dronesplit').classList.toggle('show', flying);
+    $('dronesplit').classList.toggle('shotdown', dying);
+    $('dronesplit').classList.toggle('leaving', weapons.drone.fadeOut);
+    const leftHint = document.querySelector('#dronesplit .pane.left b');
+    const leftTag = document.querySelector('#dronesplit .pane.left small');
+    const range = weapons.drone.range();
+    const far = range > DRONE.maxRange * 0.78;
+    if (leftHint) {
+      leftHint.textContent = dying ? 'shot down'
+        : far ? `range ${range.toFixed(0)} / ${DRONE.maxRange} m · turn back`
+        : `range ${range.toFixed(0)} / ${DRONE.maxRange} m · space explode`;
+    }
+    if (leftTag) leftTag.textContent = dying ? 'signal lost' : far ? 'link fading' : 'drone';
+    $('dronesplit').classList.toggle('far', flying && !dying && far);
     const near = weapons.live.some((g) => g.pos.distanceTo(player.pos) < WEAPONS.grenade.radius && g.owner !== player.fighter);
     $('grenadewarn').classList.toggle('show', alive && near);
-    if (hitTimer > 0) { hitTimer -= dt; if (hitTimer <= 0) $('hitmarker').classList.remove('show'); }
-    const hp = player.fighter.health;
+    const hp = spec ? spec.fighter.health : player.fighter.health;
     $('hpbar').style.width = `${(hp / MAX_HEALTH) * 100}%`;
     $('hpbar').classList.toggle('low', hp <= 35);
     $('hpnum').textContent = Math.ceil(hp);
-    $('rivalsleft').textContent = rivals.filter((r) => r.fighter.alive).length;
-    hurt = Math.max(0, hurt - dt * 1.6);
-    $('damage').style.opacity = Math.max(hurt, alive ? Math.max(0, (45 - hp) / 45) * 0.45 : 0.7);
+    $('rivalsleft').textContent = mode === 'multi'
+      ? Math.max(0, session.humansAlive() - (player.fighter.alive ? 1 : 0))
+      : rivals.filter((r) => r.fighter.alive).length;
+    const leftLabel = document.querySelector('#round small');
+    if (leftLabel) leftLabel.textContent = mode === 'multi' ? 'players left' : 'rivals left';
+    $('damage').style.opacity = spec ? 0 : Math.max(hurt, alive ? Math.max(0, (45 - hp) / 45) * 0.45 : 0.7);
+    if (spec && (round.state === 'fight' || (mode === 'solo' && round.state === 'over'))) {
+      const who = spec.persona?.name || spec.fighter.name;
+      banner('Spectating', mode === 'solo' ? `${who} · Press R to fight again` : who, 'show lost');
+    }
     const js = jev.stats;
-    $('jevstat').textContent = js.online === null ? 'Jev · waiting' : js.online ? `Jev online · ${Math.round(js.latency)} ms` : `Jev offline (${js.error}) · local AI`;
-    $('jevstat').className = js.online === false ? 'off' : '';
+    if (mode === 'solo') {
+      $('jevstat').textContent = js.online === null ? 'Jev · waiting' : js.online ? `Jev online · ${Math.round(js.latency)} ms` : `Jev offline (${js.error}) · local AI`;
+      $('jevstat').className = js.online === false ? 'off' : '';
+    }
+    const ns = $('netstat');
+    if (ns && mode === 'multi') {
+      ns.textContent = !net.hosted ? 'net · needs host'
+        : net.status === 'online' ? `net · ${session.peerCount} other`
+        : net.status === 'connecting' ? 'net · connecting'
+        : net.status === 'error' ? `net · ${net.error || 'error'}`
+        : 'net · offline';
+      ns.className = net.status === 'online' ? 'on' : net.status === 'error' ? 'off' : '';
+    }
     updateTags(dt);
 
-    renderer.info.reset();
-    pipeline.render(camera, dt, { underwater: player.underwater, shadowCenter: player.pos });
+    if (draw) {
+      renderer.info.reset();
+      if (flying) {
+        weapons.drone.setAspect(innerWidth, innerHeight);
+        if (character.root) character.root.visible = true;
+        pipeline.renderSplit(weapons.drone.cam, weapons.drone.opCam, dt, { underwater: false, shadowCenter: player.pos });
+      } else {
+        pipeline.render(camera, dt, { underwater: player.underwater, shadowCenter: spec?.pos || player.pos });
+      }
 
-    frames++;
-    fpsT += dt;
-    if (fpsT > 0.5) {
-      fps = frames / fpsT;
-      frames = 0;
-      fpsT = 0;
-      if (!$('debug').classList.contains('hidden')) {
-        const info = renderer.info.render;
-        $('debug').textContent = [
-          `${fps.toFixed(0)} fps · ${pipeline.qualityName}`,
-          `pos ${player.pos.x.toFixed(1)} ${player.pos.y.toFixed(1)} ${player.pos.z.toFixed(1)}`,
-          `speed ${state.speed.toFixed(2)} m/s · ${player.onGround ? 'ground' : 'air'}`,
-          `draw calls ${info.calls} · tris ${(info.triangles / 1e6).toFixed(2)}M`,
-          mapDef.vegetation ? `trees ${veg.stats.trees} · rocks ${veg.stats.rocks} · ferns ${veg.stats.ferns}` : `map ${mapDef.label}`,
-          `jev ${jev.stats.requests} requests · ${jev.stats.errors} errors`,
-          ...rivals.map((r) => `${r.persona.name} ${Math.ceil(r.fighter.health)} hp · ${r.tactic} (${r.source} ${r.confidence.toFixed(2)}) → ${r.target?.name ?? '-'}`),
-        ].join('\n');
+      frames++;
+      fpsT += dt;
+      if (fpsT > 0.5) {
+        fps = frames / fpsT;
+        frames = 0;
+        fpsT = 0;
+        if (!$('debug').classList.contains('hidden')) {
+          const info = renderer.info.render;
+          $('debug').textContent = [
+            `${fps.toFixed(0)} fps · ${pipeline.qualityName}`,
+            `pos ${player.pos.x.toFixed(1)} ${player.pos.y.toFixed(1)} ${player.pos.z.toFixed(1)}`,
+            `speed ${state.speed.toFixed(2)} m/s · ${player.onGround ? 'ground' : 'air'}`,
+            `draw calls ${info.calls} · tris ${(info.triangles / 1e6).toFixed(2)}M`,
+            mapDef.vegetation ? `trees ${veg.stats.trees} · rocks ${veg.stats.rocks} · ferns ${veg.stats.ferns}` : `map ${mapDef.label}`,
+            `jev ${jev.stats.requests} requests · ${jev.stats.errors} errors`,
+            ...rivals.map((r) => `${r.persona.name} ${Math.ceil(r.fighter.health)} hp · ${r.tactic} (${r.source} ${r.confidence.toFixed(2)}) → ${r.target?.name ?? '-'}`),
+          ].join('\n');
+        }
       }
     }
+  });
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'hidden') return;
+    for (const k in input) input[k] = false;
+    audio.holdFocus();
+  });
+  net.onMessage = () => {
+    if (document.visibilityState === 'hidden') clock.pulse(false);
   };
-  loop();
+  setInterval(() => {
+    if (mode !== 'multi' || !session) return;
+    if (document.visibilityState === 'visible') return;
+    if (net.status === 'online') session.sendPose(1);
+    else if (net.identity && net.status !== 'connecting') net.connect(net.identity);
+  }, 1000);
 }
 
 init().catch(fail);
 
-addEventListener('resize', () => {
-  pipeline.resize(innerWidth, innerHeight);
-  camera.aspect = innerWidth / innerHeight;
+const fitView = () => {
+  const vw = visualViewport?.width || 0;
+  const vh = visualViewport?.height || 0;
+  const w = Math.max(2, Math.round(vw || innerWidth || 360));
+  const h = Math.max(2, Math.round(vh || innerHeight || 640));
+  pipeline.resize(w, h);
+  camera.aspect = w / h;
   camera.updateProjectionMatrix();
-});
-camera.aspect = innerWidth / innerHeight;
-camera.updateProjectionMatrix();
+};
+addEventListener('resize', fitView);
+visualViewport?.addEventListener('resize', fitView);
+fitView();

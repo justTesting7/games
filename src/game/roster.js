@@ -22,6 +22,11 @@ export const STYLES = {
     personality: 'a slippery flanker who circles around enemies to hit them from the side and never stands still for long',
     accuracy: 1.0, fireInterval: 0.26, reaction: 0.45,
   },
+  ruthless: {
+    label: 'Ruthless',
+    personality: 'utterly ruthless. Always attack, never take cover, never retreat, never stop shooting. Close the distance and kill.',
+    accuracy: 0.95, fireInterval: 0.2, reaction: 0.28, ruthless: true,
+  },
 };
 
 // Everyone who can be played or fought. Ben, Nagar, Dror, Idan and Noam wear
@@ -36,7 +41,7 @@ export const ROSTER = [
     look: { body: 'm', face: 'redpolo', hair: 0x1c130c, outfit: { top: [0.5, 0.05, 0.05], trousers: [0.1, 0.1, 0.12], boots: [0.16, 0.11, 0.08] } },
   },
   {
-    id: 'greytee', name: 'Nagar', color: '#8fc8ff', style: 'sharpshooter',
+    id: 'greytee', name: 'Nagar', color: '#8fc8ff', style: 'ruthless',
     look: { body: 'm', face: 'greytee', hair: 0x0f0b08, outfit: { top: [0.3, 0.3, 0.31], trousers: [0.12, 0.14, 0.22], boots: [0.25, 0.18, 0.12] } },
   },
   {
@@ -56,19 +61,33 @@ export const ROSTER = [
 export const byId = (id) => ROSTER.find((r) => r.id === id);
 
 const KEY = 'relic-roster';
+const PLAYER_KEY = 'relic-player';
 const DEFAULT = { player: 'adventurer', rivals: ['redpolo', 'greytee', 'denim'] };
 
 export function loadSelection() {
+  let player = DEFAULT.player;
+  let rivals = [...DEFAULT.rivals];
   try {
     const s = JSON.parse(localStorage.getItem(KEY));
-    const rivals = (s?.rivals || []).filter((id) => byId(id) && id !== s.player);
-    if (byId(s?.player) && rivals.length) return { player: s.player, rivals };
+    const stored = (s?.rivals || []).filter((id) => byId(id) && id !== s.player);
+    if (byId(s?.player) && stored.length) {
+      player = s.player;
+      rivals = stored;
+    }
   } catch { /* fall back to the default line-up */ }
-  return { ...DEFAULT, rivals: [...DEFAULT.rivals] };
+  try {
+    const tab = sessionStorage.getItem(PLAYER_KEY);
+    if (byId(tab)) player = tab;
+    else sessionStorage.setItem(PLAYER_KEY, player);
+  } catch { /* private mode */ }
+  rivals = rivals.filter((id) => id !== player);
+  if (!rivals.length) rivals = DEFAULT.rivals.filter((id) => id !== player);
+  return { player, rivals };
 }
 
 export function saveSelection(sel) {
   localStorage.setItem(KEY, JSON.stringify(sel));
+  try { sessionStorage.setItem(PLAYER_KEY, sel.player); } catch { /* private mode */ }
 }
 
 // A rival persona in the shape Rival expects.

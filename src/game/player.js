@@ -70,7 +70,7 @@ export class Player {
     this.camPitch = THREE.MathUtils.clamp(this.camPitch - dy, -1.25, 0.95);
   }
 
-  update(dt, input) {
+  update(dt, input, follow = null) {
     const { terrain } = this.world;
     const weapon = this.fighter?.loadout.current;
     const sniping = weapon === 'rifle';
@@ -97,13 +97,14 @@ export class Player {
     this.crouching = !!(input.crouch || this.crouchToggle) && this.onGround;
     this.crouchT += ((this.crouching ? 1 : 0) - this.crouchT) * Math.min(1, dt * 8);
 
-    const f = (input.forward ? 1 : 0) - (input.back ? 1 : 0);
-    const s = (input.right ? 1 : 0) - (input.left ? 1 : 0);
+    const f = (input.forward ? 1 : 0) - (input.back ? 1 : 0) + (input.moveY || 0);
+    const s = (input.right ? 1 : 0) - (input.left ? 1 : 0) + (input.moveX || 0);
     const camFwd = new THREE.Vector3(Math.sin(this.camYaw), 0, Math.cos(this.camYaw));
     const camRight = new THREE.Vector3(-camFwd.z, 0, camFwd.x);
     const wish = new THREE.Vector3().addScaledVector(camFwd, f).addScaledVector(camRight, s);
-    const moving = wish.lengthSq() > 0;
-    if (moving) wish.normalize();
+    const stick = Math.min(1, wish.length());
+    const moving = stick > 0.06;
+    if (moving) wish.multiplyScalar(1 / wish.length());
 
     let target = 0;
     if (moving) {
@@ -111,6 +112,7 @@ export class Player {
       else if (this.scoped) target = SPEED.aimWalk;
       else if (aiming) target = input.sprint ? SPEED.aim : (this.walkMode ? SPEED.aimWalk : SPEED.aim * 0.85);
       else target = input.sprint ? SPEED.sprint : this.walkMode ? SPEED.walk : SPEED.jog;
+      if (stick < 0.98) target *= stick;
     }
 
     // Facing: free movement turns the body, aiming locks it to the camera.
@@ -185,32 +187,43 @@ export class Player {
     ch.root.position.copy(this.pos);
     ch.root.rotation.y = this.yaw;
 
-    this.updateCamera(dt, aiming, input.sprint && speed > 4.5 && !this.scoped && !this.crouching, speed);
-    this.updateAim();
+    if (follow) {
+      this.scoped = false;
+      this.scopeT = 0;
+      this.holdingBreath = false;
+      this.updateCamera(dt, false, false, 0, follow);
+    } else {
+      this.updateCamera(dt, aiming, input.sprint && speed > 4.5 && !this.scoped && !this.crouching, speed);
+      this.updateAim();
+    }
 
     ch.update(dt, {
       speed, onGround: this.onGround, airTime: this.airTime, strafe: aiming, localDir: this.localDir,
       jumpStarted, predictedAir: (2 * JUMP_V) / GRAVITY, aiming, aimPoint: this.aimPoint,
-      crouch: this.crouchT,
+      lookDir: this.lookDir(), crouch: this.crouchT,
     });
     return { speed, aiming };
   }
 
-  updateCamera(dt, aiming, sprinting, speed = 0) {
+  updateCamera(dt, aiming, sprinting, speed = 0, follow = null) {
     const cam = this.camera;
     const { terrain, veg } = this.world;
     const k = Math.min(1, dt * 10);
-    const scoped = this.scoped;
-    const reloading = this.character.action?.type === 'reload' || this.character.action?.type === 'pistolReload';
-    const through = this.scopeT > 0.55 && !reloading;
+    const scoped = follow ? false : this.scoped;
+    const body = follow?.pos || this.pos;
+    const crouch = follow
+      ? (follow.crouchT ?? follow.crouch ?? follow.character?.crouchT ?? 0)
+      : this.crouchT;
+    const reloading = !follow && (this.character.action?.type === 'reload' || this.character.action?.type === 'pistolReload');
+    const through = !follow && this.scopeT > 0.55 && !reloading;
     this.reloadLook = (this.reloadLook || 0) + ((reloading ? 1 : 0) - (this.reloadLook || 0)) * Math.min(1, dt * 8);
     this.camDist += ((through ? 0.04 : reloading ? 1.18 : aiming ? 1.55 : 3.1) - this.camDist) * k;
     this.shoulder += ((through ? 0.02 : reloading ? 0.4 : aiming ? 0.6 : 0.5) - this.shoulder) * k;
     const fovGoal = through ? 7.5 : aiming ? 48 : sprinting ? 66 : 60;
     this.fov += (fovGoal - this.fov) * Math.min(1, dt * (through ? 11 : 6));
     if (Math.abs(cam.fov - this.fov) > 0.01) { cam.fov = this.fov; cam.updateProjectionMatrix(); }
-    if (this.character.root) this.character.root.visible = !through;
-    if (this.character.rifle) this.character.rifle.visible = !through;
+    if (this.character.root) this.character.root.visible = follow ? true : !through;
+    if (this.character.rifle) this.character.rifle.visible = follow ? true : !through;
 
     this.recoilPitch *= Math.exp(-dt * (scoped ? 4.5 : 10));
     // Breathing and heartbeat sway the scope, more when moving or hurt.
@@ -228,8 +241,8 @@ export class Player {
     const yaw = this.camYaw + swayYaw;
     const dir = new THREE.Vector3(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch));
     const right = new THREE.Vector3(-Math.cos(this.camYaw), 0, Math.sin(this.camYaw));
-    const eye = (through ? 1.64 : aiming ? 1.58 : 1.55) - this.crouchT * 0.92;
-    const pivot = this.pos.clone().add(new THREE.Vector3(0, eye, 0));
+    const eye = (through ? 1.64 : aiming ? 1.58 : 1.55) - crouch * 0.52;
+    const pivot = body.clone().add(new THREE.Vector3(0, eye, 0));
     const smoothPivot = this.smoothPivot || pivot.clone();
     smoothPivot.x = pivot.x;
     smoothPivot.z = pivot.z;
@@ -254,20 +267,44 @@ export class Player {
     cam.rotateZ(this.shake * this.shakeSide * 0.06);
   }
 
-  // Finds what the crosshair points at, so bullets land where it shows.
-  updateAim() {
-    const cam = this.camera;
-    const o = cam.position.clone();
-    const d = new THREE.Vector3();
-    cam.getWorldDirection(d);
+  // Eye height at the body, not the shoulder camera, so cover the player is
+  // standing behind actually sits on the aim ray.
+  eyeHeight() {
     const through = this.scopeT > 0.4;
-    const skip = through ? 0.12 : o.distanceTo(this.pos) + 0.5;
-    const start = o.clone().addScaledVector(d, skip);
+    return (through ? 1.64 : this.character?.aimWeight > 0.5 ? 1.58 : 1.55) - this.crouchT * 0.52;
+  }
+
+  losOrigin(out = new THREE.Vector3()) {
+    return out.copy(this.pos).setY(this.pos.y + this.eyeHeight());
+  }
+
+  lookDir(out = new THREE.Vector3()) {
+    this.camera.getWorldDirection(out);
+    return out;
+  }
+
+  // The on-screen crosshair is the camera look. Hip-fire aim must use that
+  // ray — a body-center ray sits ~0.5 m left of the shoulder camera, so the
+  // reticle went red while the pistols still missed to the left.
+  updateAim() {
+    const d = this.lookDir();
+    const through = this.scopeT > 0.4;
+    const start = new THREE.Vector3();
+    if (through) this.losOrigin(start).addScaledVector(d, 0.2);
+    else start.copy(this.camera.position).addScaledVector(d, Math.max(0.35, this.smoothDist ?? this.camDist));
     const reach = through ? 900 : 600;
     const hit = this.world.raycast(start, d, reach, this.fighter);
     if (hit) { this.aimPoint.copy(start).addScaledVector(d, hit.t); this.aimHit = hit; }
     else { this.aimPoint.copy(start).addScaledVector(d, reach); this.aimHit = null; }
-    if (!through && this.aimPoint.distanceTo(this.pos) < 3) this.aimPoint.copy(start).addScaledVector(d, 6);
+    if (!this.aimHit?.fighter || through) return;
+    const from = this.losOrigin();
+    const to = this.aimPoint.clone().sub(from);
+    const len = to.length();
+    if (len <= 0.25) return;
+    to.multiplyScalar(1 / len);
+    from.addScaledVector(to, 0.2);
+    const block = this.world.raycast(from, to, len - 0.2, this.fighter);
+    if (block && block.fighter !== this.aimHit.fighter) this.aimHit = null;
   }
 
   get underwater() { return this.camera.position.y < 0.05; }

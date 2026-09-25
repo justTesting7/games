@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { Tree } from '@dgreenheck/ez-tree';
 import { CITY, cityCell } from './cityLayout.js';
+import { activeBatcher } from './propBatcher.js';
 
 const TREE_KINDS = [
   { preset: 'Oak Medium', scale: 0.42 },
@@ -220,6 +221,7 @@ export function buildSewers(group, colliders, terrain, rand) {
 }
 
 export function placeStreetProp(models, group, colliders, terrain, id, x, z, yaw, scale, coverY, type) {
+  if (activeBatcher) return activeBatcher.place(id, x, z, yaw, scale, coverY, type, terrain, colliders);
   const gltf = models[id];
   if (!gltf) return null;
   const obj = cloneModel(gltf);
@@ -231,8 +233,8 @@ export function placeStreetProp(models, group, colliders, terrain, id, x, z, yaw
   const fp = footprint(obj);
   obj.position.y = y - fp.minY;
   const cx = obj.position.x, cz = obj.position.z;
-  const hx = Math.max(0.25, fp.size.x * 0.42);
-  const hz = Math.max(0.25, fp.size.z * 0.42);
+  const hx = Math.max(0.22, fp.size.x * 0.5);
+  const hz = Math.max(0.22, fp.size.z * 0.5);
   colliders.addBox({
     x0: cx - hx, x1: cx + hx, z0: cz - hz, z1: cz + hz,
     y0: y, y1: y + Math.max(fp.size.y * scale, coverY),
@@ -249,22 +251,14 @@ export function dressSidewalks(models, group, colliders, terrain, rand) {
     if (cell.intersection) return;
     i++;
     const jitter = () => (rand() - 0.5) * 0.5;
-    if (i % 4 === 0) {
+    if (i % 3 === 0) {
       placeStreetProp(models, group, colliders, terrain, 'street_lamp_01', x + jitter(), z + jitter(), yaw, 1, 2.8, 'metal');
     }
-    if (i % 6 === 1 && rand() > 0.4) {
+    if (i % 4 === 1 && rand() > 0.18) {
       placeStreetProp(models, group, colliders, terrain, 'metal_trash_can', x + jitter() * 2, z + jitter() * 2, rand() * 6, 1, 1.15, 'metal');
     }
-    if (i % 11 === 2 && rand() > 0.5) {
+    if (i % 7 === 2 && rand() > 0.28) {
       placeStreetProp(models, group, colliders, terrain, 'fire_hydrant', x + jitter(), z + jitter(), rand() * 6, 1, 0.95, 'metal');
-    }
-    if (i % 8 === 3 && rand() > 0.45) {
-      const inward = dir === 'ns' ? -Math.sign(x) : -Math.sign(z);
-      const px = dir === 'ns' ? x + inward * 2.2 : x + (rand() - 0.5) * 1.2;
-      const pz = dir === 'ew' ? z + inward * 2.2 : z + (rand() - 0.5) * 1.2;
-      if (cityCell(px, pz).onRoad) {
-        placeStreetProp(models, group, colliders, terrain, 'covered_car', px, pz, yaw + Math.PI * 0.5 + (rand() - 0.5) * 0.12, 0.95, 1.6);
-      }
     }
   });
 }
@@ -281,11 +275,11 @@ export function placeRoadblocks(models, group, colliders, terrain, rand) {
   };
   for (let bz = -halfBlocks; bz <= halfBlocks; bz++) {
     for (let bx = -halfBlocks; bx <= halfBlocks; bx++) {
-      if (rand() > 0.22) continue;
+      if (rand() > 0.62) continue;
       const x = (bx + 0.5) * pitch;
       const z = (bz + 0.5) * pitch;
-      if (!inPlay(x, z)) continue;
-      place(x, z, rand() > 0.5 ? 0 : Math.PI * 0.5, 2 + Math.floor(rand() * 3));
+      if (!inPlay(x, z) || Math.hypot(x, z) < CITY.plazaRoad + 4) continue;
+      place(x, z, rand() > 0.5 ? 0 : Math.PI * 0.5, 3 + Math.floor(rand() * 4));
     }
   }
 }
