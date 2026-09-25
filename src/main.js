@@ -8,6 +8,7 @@ import { Vegetation } from './world/vegetation.js';
 import { getMap } from './world/maps.js';
 import { City } from './world/city.js';
 import { Arena } from './world/arena.js';
+import { standSpawn } from './world/arenaLayout.js';
 import { Character } from './game/character.js';
 import { Player } from './game/player.js';
 import { Props } from './game/props.js';
@@ -318,8 +319,9 @@ async function init() {
   character.load(charAssets, looks[0]);
   character.lookId = fighters[0].id;
 
-  const spawn = data.spawn;
-  const facing = Math.atan2(data.peak.x - spawn.x, data.peak.z - spawn.z);
+  const gardenSpot = indoor ? standSpawn(0) : null;
+  const spawn = gardenSpot ? { x: gardenSpot.x, z: gardenSpot.z } : data.spawn;
+  const facing = gardenSpot ? gardenSpot.yaw : Math.atan2(data.peak.x - spawn.x, data.peak.z - spawn.z);
   if (mapDef.vegetation) {
     await progress.task(mapDef.plantLabel, 1, async () => veg.scatter(terrain, spawn));
     veg.scale = pipeline.quality.trees;
@@ -432,8 +434,16 @@ async function init() {
   );
 
   // Rivals appear 18-28 m away, ahead of the player on either side, on
-  // open, dry, walkable ground.
+  // open, dry, walkable ground. In the Garden each fighter starts on a
+  // different 18th-row stand.
   const spawnRivals = () => {
+    if (indoor) {
+      rivals.forEach((r, i) => {
+        const s = standSpawn(i + 1);
+        r.spawn(s.x, s.z, s.yaw);
+      });
+      return;
+    }
     const p = player.pos;
     const tmp = [];
     rivals.forEach((r, i) => {
@@ -444,8 +454,8 @@ async function init() {
         const dist = 18 + Math.random() * 10;
         const x = p.x + Math.sin(ang) * dist, z = p.z + Math.cos(ang) * dist;
         const h = terrain.heightAt(x, z);
-        if (!terrain.inBounds(x, z) || h < (mapDef.id === 'city' || indoor ? 1.2 : 0.6)) continue;
-        if (terrain.normalAt(x, z).y < (mapDef.id === 'city' || indoor ? 0.75 : 0.8)) continue;
+        if (!terrain.inBounds(x, z) || h < (mapDef.id === 'city' ? 1.2 : 0.6)) continue;
+        if (terrain.normalAt(x, z).y < (mapDef.id === 'city' ? 0.75 : 0.8)) continue;
         if (veg.colliders.query(x, z, 1.2, tmp).length) continue;
         if (rivals.some((o, j) => j < i && Math.hypot(o.pos.x - x, o.pos.z - z) < 8)) continue;
         at = { x, z };
@@ -524,7 +534,11 @@ async function init() {
       round.state = 'waiting';
       return;
     }
-    if (!player.fighter.alive) {
+    if (indoor) {
+      const s = standSpawn(0);
+      player.spawn(s.x, s.z, s.yaw);
+      player.vel.set(0, 0, 0);
+    } else if (!player.fighter.alive) {
       player.spawn(spawn.x, spawn.z, facing);
       player.vel.set(0, 0, 0);
     }

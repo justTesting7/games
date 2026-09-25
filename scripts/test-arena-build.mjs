@@ -16,10 +16,10 @@ arena.build({ seed: 20240611 });
 
 const names = [];
 arena.group.traverse((o) => { if (o.name) names.push(o.name); });
-const seats = arena.group.children.filter((c) => c.isInstancedMesh);
-const seatCount = seats.reduce((n, m) => n + m.count, 0);
-if (seatCount < 2000) {
-  console.error('expected thousands of seats, got', seatCount);
+const seatMesh = arena.group.getObjectByName('bowl-seats');
+const seatCount = seatMesh?.count || 0;
+if (seatCount < 19000) {
+  console.error('expected ~20k seats, got', seatCount);
   process.exit(1);
 }
 if (colliders.list.length < 40) {

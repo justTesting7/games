@@ -1,7 +1,10 @@
 import * as THREE from 'three';
 import { loadGLTF, modelUrl } from '../engine/assets.js';
 import { mulberry32 } from './noise.js';
-import { ARENA, arenaZone, hoopX, tunnelInfo } from './arenaLayout.js';
+import {
+  ARENA, BOWL, LOWER_ROWS, UPPER_ROWS, arenaZone, arcLength, enumerateSeats,
+  hoopX, ovalPoint, sectionAngle, standSpawn, tunnelInfo,
+} from './arenaLayout.js';
 import { PropBatcher, withBatcher } from './propBatcher.js';
 import {
   makeBanner, makeConcrete, makeCourtPaint, makeEmissive, makeGlass,
@@ -37,10 +40,6 @@ function addBox(colliders, x, z, y, hx, hz, h, type = 'concrete') {
   colliders.addBox({
     x0: x - hx, x1: x + hx, z0: z - hz, z1: z + hz, y0: y, y1: y + h, type,
   });
-}
-
-function ovalPoint(u, ang) {
-  return { x: Math.cos(ang) * ARENA.sx * u, z: Math.sin(ang) * ARENA.sz * u };
 }
 
 function seatGeo() {
@@ -85,6 +84,7 @@ export class Arena {
     this.batcher = null;
     this._leds = [];
     this._t = 0;
+    this.spawns = [];
   }
 
   async load(progress) {
@@ -126,8 +126,10 @@ export class Arena {
     this._leds.push(mats.jumbo, mats.marquee);
 
     this.buildCourt(mats, y0);
+    this.buildCourtside(mats, y0);
     this.buildHoops(mats, y0);
     this.buildStands(mats, y0, rand);
+    this.buildFascia(mats);
     this.buildJumbotron(mats);
     this.buildRoof(mats);
     this.buildConcourse(mats, y0, rand);
@@ -145,6 +147,10 @@ export class Arena {
     if (fog.uFogDensity) fog.uFogDensity.value = 0.0036;
   }
 
+  spawnFor(slot = 0) {
+    return standSpawn(slot);
+  }
+
   buildCourt(mats, y0) {
     const { courtHX: hx, courtHZ: hz } = ARENA;
     const floor = mesh(new THREE.BoxGeometry(hx * 2 + 0.08, 0.06, hz * 2 + 0.08), mats.court, 0, y0 + 0.04, 0);
@@ -153,17 +159,30 @@ export class Arena {
     floor.userData.noShadow = true;
     this.group.add(floor);
 
-    const apron = mesh(new THREE.BoxGeometry(hx * 2 + 6.4, 0.04, hz * 2 + 6.2), mats.wood, 0, y0 + 0.015, 0);
+    const apron = mesh(new THREE.BoxGeometry(hx * 2 + 8.8, 0.04, hz * 2 + 7.4), mats.wood, 0, y0 + 0.015, 0);
     apron.receiveShadow = true;
     apron.castShadow = false;
     apron.userData.noShadow = true;
     this.group.add(apron);
 
     const paint = new THREE.MeshStandardMaterial({
-      color: 0x1a1c22, roughness: 0.55, metalness: 0.04,
+      color: 0x14161c, roughness: 0.55, metalness: 0.04,
     });
     for (const s of [-1, 1]) {
-      this.group.add(mesh(new THREE.BoxGeometry(1.15, 0.02, hz * 2 + 0.4), paint, s * (hx + 0.7), y0 + 0.045, 0));
+      this.group.add(mesh(new THREE.BoxGeometry(1.35, 0.02, hz * 2 + 0.5), paint, s * (hx + 0.85), y0 + 0.045, 0));
+    }
+  }
+
+  buildCourtside(mats, y0) {
+    const hz = ARENA.courtHZ;
+    const table = mesh(new THREE.BoxGeometry(14.5, 0.08, 0.72), mats.darkConc, 0, y0 + 0.78, -(hz + 2.15));
+    this.group.add(table);
+    this.group.add(mesh(new THREE.BoxGeometry(14.5, 0.72, 0.08), mats.jumbo, 0, y0 + 1.12, -(hz + 1.78)));
+    addBox(this.colliders, 0, -(hz + 2.15), y0, 7.3, 0.4, 1.15, 'cover');
+    for (const side of [-1, 1]) {
+      const z = side * (hz + 2.05);
+      this.group.add(mesh(new THREE.BoxGeometry(9.2, 0.42, 0.55), mats.pad, side * 4.2, y0 + 0.48, z));
+      addBox(this.colliders, side * 4.2, z, y0, 4.6, 0.32, 0.7, 'cover');
     }
   }
 
@@ -198,118 +217,137 @@ export class Arena {
   }
 
   buildStands(mats, y0, rand) {
-    const geo = seatGeo();
+    const seats = enumerateSeats();
     const dummy = new THREE.Object3D();
-    const lower = [];
-    const upper = [];
-    const sections = 16;
-    for (let sec = 0; sec < sections; sec++) {
-      const a0 = (sec / sections) * Math.PI * 2 + 0.07;
-      const a1 = ((sec + 1) / sections) * Math.PI * 2 - 0.07;
-      const mid = (a0 + a1) * 0.5;
-      const doorAt = ovalPoint(2.0, mid);
-      if (tunnelInfo(doorAt.x, doorAt.z).inBand) continue;
-      const rows = 17;
-      for (let row = 0; row < rows; row++) {
-        const u = ARENA.bowlIn + (row + 0.55) / rows * (ARENA.concIn - ARENA.bowlIn - 0.08);
-        const y = y0 + 0.22 + row * 0.46;
-        const nSeats = 9 + Math.floor(row * 0.4);
-        const rowSeats = [];
-        for (let s = 0; s < nSeats; s++) {
-          const t = (s + 0.5) / nSeats;
-          const ang = a0 + (a1 - a0) * t;
-          const { x, z } = ovalPoint(u, ang);
-          const yaw = Math.atan2(x, z) + Math.PI;
-          rowSeats.push({ x, y, z, yaw, sec, row });
-        }
-        lower.push(...rowSeats);
-        if (row % 3 === 0 && rowSeats.length) {
-          const a = rowSeats[0], b = rowSeats[rowSeats.length - 1];
-          addBox(this.colliders, (a.x + b.x) * 0.5, (a.z + b.z) * 0.5, y0, Math.max(0.6, Math.abs(b.x - a.x) * 0.5 + 0.3), Math.max(0.6, Math.abs(b.z - a.z) * 0.5 + 0.3), y - y0 + 0.7, 'cover');
-        }
-      }
-      const uRows = 13;
-      for (let row = 0; row < uRows; row++) {
-        const u = ARENA.concOut + 0.08 + (row + 0.5) / uRows * (ARENA.hallOut - ARENA.concOut - 0.55);
-        const y = ARENA.concY + 0.25 + row * 0.5;
-        const nSeats = 11 + Math.floor(row * 0.35);
-        for (let s = 0; s < nSeats; s++) {
-          const t = (s + 0.5) / nSeats;
-          const ang = a0 + (a1 - a0) * t;
-          const { x, z } = ovalPoint(u, ang);
-          upper.push({ x, y, z, yaw: Math.atan2(x, z) + Math.PI, sec, row });
+    const geo = seatGeo();
+    const inst = new THREE.InstancedMesh(geo, mats.seat, seats.length);
+    inst.name = 'bowl-seats';
+    inst.frustumCulled = false;
+    inst.castShadow = false;
+    inst.receiveShadow = true;
+    inst.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(seats.length * 3), 3);
+    seats.forEach((s, i) => {
+      dummy.position.set(s.x, s.y, s.z);
+      dummy.quaternion.setFromAxisAngle(UP, s.yaw);
+      dummy.scale.set(1, 1, 1);
+      dummy.updateMatrix();
+      inst.setMatrixAt(i, dummy.matrix);
+      const end = Math.abs(s.x) > Math.abs(s.z) * 1.15;
+      let col = SEAT_NAVY;
+      if (s.tier === 'lower' && s.row <= 4) col = SEAT_DARK;
+      else if (end) col = s.sec % 2 ? SEAT_ORANGE : SEAT_BLUE;
+      else if (rand() < 0.045) col = SEAT_ORANGE;
+      inst.setColorAt(i, col);
+    });
+    inst.instanceMatrix.needsUpdate = true;
+    inst.instanceColor.needsUpdate = true;
+    this.group.add(inst);
+
+    const treads = [];
+    const banks = [
+      { rows: LOWER_ROWS, y0 },
+      { rows: UPPER_ROWS, y0: ARENA.concY },
+    ];
+    for (const bank of banks) {
+      for (const row of bank.rows) {
+        for (let sec = 0; sec < BOWL.sections; sec++) {
+          const a0 = (sec / BOWL.sections) * Math.PI * 2 + BOWL.aisleRad;
+          const a1 = ((sec + 1) / BOWL.sections) * Math.PI * 2 - BOWL.aisleRad;
+          const ang = (a0 + a1) * 0.5;
+          const mid = ovalPoint((row.u0 + row.u1) * 0.5, ang);
+          if (tunnelInfo(mid.x, mid.z).inBand) continue;
+          const depth = (row.u1 - row.u0) * (ARENA.sx + ARENA.sz) * 0.5;
+          const width = arcLength((row.u0 + row.u1) * 0.5, a0, a1);
+          treads.push({
+            x: mid.x, z: mid.z, y: row.y - 0.04, yaw: ang,
+            sx: Math.max(1.2, width), sy: 0.09, sz: Math.max(0.45, depth * 0.92),
+          });
+          if (row.wide) {
+            const back = ovalPoint(row.seatU, ang);
+            addBox(this.colliders, back.x, back.z, row.y, Math.max(0.7, width * 0.22), Math.max(0.7, depth * 0.22), 0.85, 'cover');
+          } else if (row.row % 4 === 1) {
+            addBox(this.colliders, mid.x, mid.z, row.y, Math.max(0.55, width * 0.28), Math.max(0.55, depth * 0.28), 0.7, 'cover');
+          }
         }
       }
     }
+    const slab = new THREE.BoxGeometry(1, 1, 1);
+    const treadMesh = new THREE.InstancedMesh(slab, mats.darkConc, treads.length);
+    treadMesh.name = 'bowl-treads';
+    treadMesh.frustumCulled = false;
+    treadMesh.castShadow = false;
+    treadMesh.receiveShadow = true;
+    treads.forEach((t, i) => {
+      dummy.position.set(t.x, t.y, t.z);
+      dummy.quaternion.setFromAxisAngle(UP, -t.yaw);
+      dummy.scale.set(t.sx, t.sy, t.sz);
+      dummy.updateMatrix();
+      treadMesh.setMatrixAt(i, dummy.matrix);
+    });
+    treadMesh.instanceMatrix.needsUpdate = true;
+    this.group.add(treadMesh);
 
-    const place = (list, name) => {
-      if (!list.length) return;
-      const inst = new THREE.InstancedMesh(geo, mats.seat, list.length);
-      inst.name = name;
-      inst.frustumCulled = false;
-      inst.castShadow = false;
-      inst.receiveShadow = true;
-      inst.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(list.length * 3), 3);
-      list.forEach((s, i) => {
-        dummy.position.set(s.x, s.y, s.z);
-        dummy.quaternion.setFromAxisAngle(UP, s.yaw);
-        dummy.scale.set(1, 1, 1);
-        dummy.updateMatrix();
-        inst.setMatrixAt(i, dummy.matrix);
-        const end = Math.abs(s.x) > Math.abs(s.z) * 1.1;
-        const col = end ? (s.sec % 2 ? SEAT_ORANGE : SEAT_BLUE) : (rand() < 0.08 ? SEAT_ORANGE : SEAT_NAVY);
-        const c = rand() < 0.12 ? SEAT_DARK : col;
-        inst.setColorAt(i, c);
-      });
-      inst.instanceMatrix.needsUpdate = true;
-      inst.instanceColor.needsUpdate = true;
-      this.group.add(inst);
-    };
-    place(lower, 'lower-bowl');
-    place(upper, 'upper-bowl');
-
-    const rail = mats.chrome;
-    for (let i = 0; i < 48; i++) {
-      const ang = (i / 48) * Math.PI * 2;
-      const { x, z } = ovalPoint(ARENA.bowlIn + 0.02, ang);
-      if (tunnelInfo(x, z).inBand) continue;
-      this.group.add(mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.95, 6), rail, x, y0 + 0.7, z));
+    const spawnRow = LOWER_ROWS[BOWL.spawnRow - 1];
+    for (let sec = 0; sec < BOWL.sections; sec++) {
+      const ang = sectionAngle(sec, 0.5);
+      const rail = ovalPoint(spawnRow.u0 + 0.012, ang);
+      if (tunnelInfo(rail.x, rail.z).inBand) continue;
+      this.group.add(mesh(new THREE.BoxGeometry(2.4, 0.06, 0.06), mats.chrome, rail.x, spawnRow.y + 0.92, rail.z, 0, -ang, 0));
+      this.group.add(mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.9, 6), mats.chrome, rail.x, spawnRow.y + 0.46, rail.z));
     }
-    const innerRail = new THREE.Mesh(
-      new THREE.TorusGeometry((ARENA.sx + ARENA.sz) * 0.5 * ARENA.bowlIn, 0.025, 6, 64),
-      rail,
-    );
-    innerRail.rotation.x = Math.PI / 2;
-    innerRail.position.y = y0 + 1.12;
-    innerRail.scale.set(ARENA.sx / ((ARENA.sx + ARENA.sz) * 0.5), 1, ARENA.sz / ((ARENA.sx + ARENA.sz) * 0.5));
-    this.group.add(innerRail);
+
+    for (let slot = 0; slot < 8; slot++) {
+      const ang = slot * Math.PI / 4;
+      const p = ovalPoint(ARENA.bowlIn + 0.02, ang);
+      const portal = mesh(new THREE.TorusGeometry(1.55, 0.08, 8, 18, Math.PI), mats.amber, p.x, y0 + 1.7, p.z, 0, -ang, 0);
+      portal.userData.noShadow = true;
+      this.group.add(portal);
+    }
+  }
+
+  buildFascia(mats) {
+    for (const u of [ARENA.bowlIn + 0.01, ARENA.concIn - 0.02, ARENA.concOut + 0.03]) {
+      for (let i = 0; i < 48; i++) {
+        const ang = (i / 48) * Math.PI * 2;
+        const p = ovalPoint(u, ang);
+        if (tunnelInfo(p.x, p.z).inBand && u < ARENA.concIn) continue;
+        const y = u < ARENA.concIn ? LOWER_ROWS[0].y + 0.55 : ARENA.concY + 0.7;
+        const board = mesh(new THREE.BoxGeometry(3.1, 0.55, 0.08), mats.jumbo, p.x, y, p.z, 0, -ang, 0);
+        board.userData.noShadow = true;
+        this.group.add(board);
+      }
+    }
   }
 
   buildJumbotron(mats) {
     const g = new THREE.Group();
-    g.position.set(0, 19.2, 0);
-    const body = mesh(new THREE.BoxGeometry(6.4, 4.2, 6.4), mats.steel, 0, 0, 0);
-    g.add(body);
-    const face = new THREE.PlaneGeometry(6.05, 3.7);
+    g.position.set(0, 20.6, 0);
+    g.add(mesh(new THREE.BoxGeometry(8.2, 5.1, 8.2), mats.steel, 0, 0, 0));
+    const face = new THREE.PlaneGeometry(7.7, 4.55);
     const faces = [
-      [0, 0, 3.22, 0],
-      [0, 0, -3.22, Math.PI],
-      [3.22, 0, 0, Math.PI / 2],
-      [-3.22, 0, 0, -Math.PI / 2],
+      [0, 0, 4.12, 0],
+      [0, 0, -4.12, Math.PI],
+      [4.12, 0, 0, Math.PI / 2],
+      [-4.12, 0, 0, -Math.PI / 2],
     ];
     for (const [x, y, z, ry] of faces) {
       const p = mesh(face, mats.jumbo, x, y, z, 0, ry, 0);
       p.userData.noShadow = true;
       g.add(p);
     }
-    g.add(mesh(new THREE.CylinderGeometry(2.1, 2.1, 0.35, 24), mats.led, 0, -2.25, 0));
-    g.add(mesh(new THREE.BoxGeometry(0.35, 5.2, 0.35), mats.steel, 0, 4.4, 0));
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(5.4, 0.42, 10, 40), mats.jumbo);
+    ring.rotation.x = Math.PI / 2;
+    ring.position.y = -2.85;
+    ring.userData.noShadow = true;
+    g.add(ring);
+    g.add(mesh(new THREE.CylinderGeometry(2.4, 2.4, 0.28, 24), mats.led, 0, -2.35, 0));
+    g.add(mesh(new THREE.BoxGeometry(0.32, 6.4, 0.32), mats.steel, 0, 5.4, 0));
     this.group.add(g);
-    addBox(this.colliders, 0, 0, 16.8, 3.3, 3.3, 5.2, 'metal');
+    addBox(this.colliders, 0, 0, 17.4, 4.2, 4.2, 6.4, 'metal');
   }
 
   buildRoof(mats) {
-    const roofY = 26.4;
+    const roofY = 28.8;
     const roof = new THREE.Mesh(
       new THREE.CircleGeometry((ARENA.sx + ARENA.sz) * 0.5 * ARENA.hallOut, 48),
       mats.darkConc,
@@ -340,12 +378,13 @@ export class Arena {
     }
 
     const banners = [
-      [0xc8102e, -8], [0x006bb6, -4.5], [0xf58426, -1], [0xffffff, 2.5], [0x0033a0, 6], [0xc8102e, 9.5],
+      0xc8102e, 0x006bb6, 0xf58426, 0xffffff, 0x0033a0, 0xc8102e, 0x1d428a, 0xf58426,
     ];
-    banners.forEach(([hex, x], i) => {
+    banners.forEach((hex, i) => {
+      const ang = (i / banners.length) * Math.PI * 2 + 0.2;
+      const p = ovalPoint(1.55, ang);
       const mat = makeBanner(hex);
-      const b = mesh(new THREE.BoxGeometry(1.15, 2.4, 0.04), mat, x, 23.6, 10.5 - (i % 2) * 21);
-      this.group.add(b);
+      this.group.add(mesh(new THREE.BoxGeometry(1.25, 2.6, 0.05), mat, p.x, 24.8, p.z, 0, -ang, 0));
     });
   }
 
@@ -415,7 +454,7 @@ export class Arena {
   buildFacade(mats, y0) {
     const u0 = ARENA.hallOut;
     const u1 = ARENA.facadeOut;
-    const h = 24.8;
+    const h = 27.8;
     const wall = new THREE.CylinderGeometry(1, 1, h, 48, 1, true);
     const shell = new THREE.Mesh(wall, mats.darkConc);
     shell.position.y = y0 + h * 0.5;
