@@ -127,7 +127,8 @@ function drawSmear(ctx, ox, oy, rand) {
 
 /**
  * Turns a "thickness" canvas (alpha = amount of blood) into a colour map and a
- * normal map, so thin films read bright red and thick pools dark and glossy.
+ * normal map. Fresh films stay a dark wet red; thick pools go almost black.
+ * Bright candy-red albedo blows out under the HDR sun and reads as paint.
  */
 function finishTextures(src, strength = 3) {
   const w = src.width, h = src.height;
@@ -149,10 +150,10 @@ function finishTextures(src, strength = 3) {
       const i = y * w + x;
       const t = H[i];
       const a = data[i * 4 + 3] / 255;
-      cImg.data[i * 4] = 118 - 80 * t;
-      cImg.data[i * 4 + 1] = 7 - 5 * t;
-      cImg.data[i * 4 + 2] = 6 - 4 * t;
-      cImg.data[i * 4 + 3] = Math.min(255, a * 2.4 * 255);
+      cImg.data[i * 4] = 28 - 16 * t;
+      cImg.data[i * 4 + 1] = 4 - 3 * t;
+      cImg.data[i * 4 + 2] = 3 - 2 * t;
+      cImg.data[i * 4 + 3] = Math.min(255, a * 1.45 * 255);
       const dx = (at(x + 1, y) - at(x - 1, y)) * strength;
       const dy = (at(x, y + 1) - at(x, y - 1)) * strength;
       const l = Math.hypot(dx, dy, 1);
@@ -177,8 +178,9 @@ function bloodMaterial(tex) {
     map: tex.map,
     normalMap: tex.normalMap,
     normalScale: new THREE.Vector2(1.2, 1.2),
-    roughness: 0.16,
+    roughness: 0.28,
     metalness: 0,
+    envMapIntensity: 0.12,
     transparent: true,
     depthWrite: false,
     polygonOffset: true,
