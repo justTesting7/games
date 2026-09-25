@@ -198,12 +198,13 @@ function bloodMaterial(tex) {
 }
 
 export class BloodDecals {
-  constructor(scene, terrain, { maxSplats = 56, maxDrops = 700 } = {}) {
+  constructor(scene, terrain, { maxSplats = 80, maxDrops = 2000 } = {}) {
     this.scene = scene;
     this.terrain = terrain;
     this.maxSplats = maxSplats;
     this.splats = [];
     this.pools = [];
+    this.wounds = [];
 
     const atlas = document.createElement('canvas');
     atlas.width = TILE * COLS; atlas.height = TILE * ROWS;
@@ -309,20 +310,66 @@ export class BloodDecals {
     mesh.renderOrder = 2;
     this.scene.add(mesh);
     this.splats.push(mesh);
+    this.evict();
+    return mesh;
+  }
+
+  evict() {
     while (this.splats.length > this.maxSplats) {
-      const old = this.splats.shift();
+      const i = this.splats.findIndex((m) => !m.userData.wound);
+      if (i < 0) break;
+      const old = this.splats.splice(i, 1)[0];
       old.removeFromParent();
       old.geometry.dispose();
       this.pools = this.pools.filter((p) => p.mesh !== old);
     }
+  }
+
+  keep(mesh) {
+    mesh.userData.wound = true;
     return mesh;
+  }
+
+  /**
+   * Blood at a wound stays for the whole match: a stain plus a puddle that
+   * keeps dripping. Nearby hits feed the same site instead of stacking.
+   */
+  bleed(point, dir, amount = 10) {
+    const x = point.x, z = point.z;
+    const y = this.terrain.heightAt(x, z);
+    if (y < 0.05) return null;
+    for (const w of this.wounds) {
+      if (Math.hypot(w.x - x, w.z - z) < 0.85) {
+        w.strength = Math.min(2.4, w.strength + Math.min(0.45, amount / 40));
+        w.dripEvery = Math.max(0.55, w.dripEvery * 0.9);
+        return w;
+      }
+    }
+    const travel = new THREE.Vector3(dir?.x || 0, 0, dir?.z || 0);
+    if (travel.lengthSq() < 1e-4) travel.set(Math.random() - 0.5, 0, Math.random() - 0.5);
+    travel.normalize();
+    const ground = new THREE.Vector3(x, y, z);
+    const n = this.terrain.normalAt(x, z);
+    const size = 0.55 + Math.min(0.7, amount / 50);
+    const stain = this.keep(this.splat(ground, n, travel, size, 'spatter'));
+    const puddle = this.keep(this.splat(ground, n, travel, 1.15 + size * 0.35, 'pool'));
+    puddle.scale.set(0.12, 1, 0.12);
+    const w = {
+      x, z, y, stain, pool: puddle,
+      strength: Math.min(1.5, 0.55 + amount / 50),
+      drip: 0.15,
+      dripEvery: 1.35,
+      poolT: 0,
+    };
+    this.wounds.push(w);
+    return w;
   }
 
   /** A pool that seeps out from under a body over several seconds. */
   pool(point, size = 1.6, delay = 0.8) {
     const p = point.clone();
     p.y = this.terrain.heightAt(p.x, p.z);
-    const mesh = this.splat(p, this.terrain.normalAt(p.x, p.z), new THREE.Vector3(Math.random() - 0.5, 0, Math.random() - 0.5), size, 'pool');
+    const mesh = this.keep(this.splat(p, this.terrain.normalAt(p.x, p.z), new THREE.Vector3(Math.random() - 0.5, 0, Math.random() - 0.5), size, 'pool'));
     mesh.scale.set(0.001, 1, 0.001);
     this.pools.push({ mesh, t: -delay, dur: 7 + Math.random() * 4 });
   }
@@ -341,6 +388,7 @@ export class BloodDecals {
     for (const m of this.splats) { m.removeFromParent(); m.geometry.dispose(); }
     this.splats = [];
     this.pools = [];
+    this.wounds = [];
     this.drops.count = 0;
     this.dropNext = 0;
   }
@@ -354,5 +402,19 @@ export class BloodDecals {
       p.mesh.scale.set(s, 1, s);
     }
     this.pools = this.pools.filter((p) => p.t < p.dur);
+    for (const w of this.wounds) {
+      w.drip -= dt;
+      if (w.drip <= 0) {
+        w.drip = w.dripEvery * (0.65 + Math.random() * 0.7);
+        const a = Math.random() * Math.PI * 2;
+        const r = Math.random() * 0.3 * w.strength;
+        this.drop(w.x + Math.cos(a) * r, w.y, w.z + Math.sin(a) * r, 0.035 + Math.random() * 0.08 * w.strength);
+      }
+      if (w.pool) {
+        w.poolT += dt;
+        const s = Math.min(w.strength, 0.18 + w.poolT * 0.012);
+        w.pool.scale.set(s, 1, s);
+      }
+    }
   }
 }

@@ -309,11 +309,11 @@ export class Weapons {
     }
     if (hit.fighter?.net) {
       if (shooter.isPlayer) this.session?.reportShot(from, dir, def.key, hit.fighter.id, hit.head);
-      this.combat.damage(hit.fighter, shooter, hit.head ? def.head : def.body, dir, { head: hit.head, weapon: def.key });
+      this.combat.damage(hit.fighter, shooter, hit.head ? def.head : def.body, dir, { head: hit.head, weapon: def.key, at: end });
       return hit;
     }
     if (shooter.isPlayer && this.session?.multi) this.session.reportShot(from, dir, def.key);
-    if (hit.fighter) this.combat.damage(hit.fighter, shooter, hit.head ? def.head : def.body, dir, { head: hit.head, weapon: def.key });
+    if (hit.fighter) this.combat.damage(hit.fighter, shooter, hit.head ? def.head : def.body, dir, { head: hit.head, weapon: def.key, at: end });
     else if (hit.body || hit.target) hit.scored = this.world.props.hit(hit, end, dir, def.force);
     return hit;
   }

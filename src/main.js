@@ -544,7 +544,8 @@ async function init() {
     void dmgDir.offsetWidth;
     dmgDir.classList.add('show');
   };
-  combat.onDamage = (victim, attacker, amount) => {
+  combat.onDamage = (victim, attacker, amount, dir, info = {}) => {
+    fx.decals.bleed(info.at || victim.pos, dir, amount);
     if (victim === player.fighter) {
       hurt = Math.min(1, hurt + amount / 30);
       player.shake = Math.max(player.shake, 0.25);
@@ -553,6 +554,7 @@ async function init() {
     }
   };
   combat.onKill = (victim, attacker, info) => {
+    fx.decals.bleed(info.at || victim.pos, info.dir, info.head ? 50 : 30);
     if (info.dir) {
       const flat = new THREE.Vector3(info.dir.x, 0, info.dir.z);
       if (flat.lengthSq() > 1e-4) flat.normalize();
