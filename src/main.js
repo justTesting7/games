@@ -9,6 +9,7 @@ import { getMap } from './world/maps.js';
 import { City } from './world/city.js';
 import { Arena } from './world/arena.js';
 import { standSpawn } from './world/arenaLayout.js';
+import { Fish } from './world/fish.js';
 import { Character } from './game/character.js';
 import { Player } from './game/player.js';
 import { Props } from './game/props.js';
@@ -303,6 +304,7 @@ async function init() {
   world.props = props;
   let city = null;
   let arena = null;
+  let fish = null;
   if (mapDef.id === 'city') city = new City(terrain, veg.colliders, pipeline);
   if (indoor) arena = new Arena(terrain, veg.colliders, pipeline);
   const fighters = mode === 'solo'
@@ -339,6 +341,10 @@ async function init() {
   if (arena && data.layout) {
     arena.build(data.layout);
     pipeline.scene.add(arena.group);
+  }
+  if (mapDef.fish) {
+    fish = new Fish(terrain);
+    pipeline.scene.add(fish.group);
   }
   character.addTo(pipeline.scene);
 
@@ -836,6 +842,7 @@ async function init() {
       if (mapDef.vegetation) veg.update(elapsed, camera.position);
       if (city) city.update(dt, fx, camera);
       if (arena) arena.update(dt, fx, camera);
+      if (fish) fish.update(dt, camera);
       const coast = THREE.MathUtils.clamp(1 - (terrain.heightAt(viewPos.x, viewPos.z) - 1) / 25, 0, 1);
       audio.updateAmbience(dt, { altitude: player.pos.y, coast, underwater: player.underwater });
     }
@@ -896,6 +903,11 @@ async function init() {
     $('dronesplit').classList.toggle('far', flying && !dying && far);
     const near = weapons.live.some((g) => g.pos.distanceTo(player.pos) < WEAPONS.grenade.radius && g.owner !== player.fighter);
     $('grenadewarn').classList.toggle('show', alive && near);
+    const swimEl = $('swimhint');
+    if (swimEl) {
+      swimEl.classList.toggle('show', alive && player.swimming);
+      swimEl.textContent = player.diving ? 'F swim up · surface to breathe' : 'F swim up / exit · Ctrl dive';
+    }
     const hp = spec ? spec.fighter.health : player.fighter.health;
     $('hpbar').style.width = `${(hp / MAX_HEALTH) * 100}%`;
     $('hpbar').classList.toggle('low', hp <= 35);

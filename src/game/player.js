@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { FLOAT_Y, canExitWater, shouldSwim, stepSwim, swimSpeed } from './swim.js';
 
 const GRAVITY = 16;
 const JUMP_V = 5.4;
@@ -40,6 +41,9 @@ export class Player {
     this.breath = 1;
     this.holdingBreath = false;
     this.scopeT = 0;
+    this.swimming = false;
+    this.diving = false;
+    this.swimPitch = 0;
   }
 
   spawn(x, z, yaw) {
@@ -57,6 +61,9 @@ export class Player {
     this.crouchToggle = false;
     this.crouchT = 0;
     this.crouching = false;
+    this.swimming = false;
+    this.diving = false;
+    this.swimPitch = 0;
   }
 
   kick(side, strength = 1) {
@@ -94,7 +101,7 @@ export class Player {
     if (input.toggleCrouch) this.crouchToggle = !this.crouchToggle;
     if (input.sprint && !this.scoped) this.crouchToggle = false;
     if (input.jump) this.crouchToggle = false;
-    this.crouching = !!(input.crouch || this.crouchToggle) && this.onGround;
+    this.crouching = !!(input.crouch || this.crouchToggle) && this.onGround && !this.swimming;
     this.crouchT += ((this.crouching ? 1 : 0) - this.crouchT) * Math.min(1, dt * 8);
 
     const f = (input.forward ? 1 : 0) - (input.back ? 1 : 0) + (input.moveY || 0);
@@ -123,31 +130,100 @@ export class Player {
       this.yaw += Math.sign(err) * Math.min(Math.abs(err), rate * dt);
     }
 
-    const horiz = new THREE.Vector3(this.vel.x, 0, this.vel.z);
-    const desired = wish.clone().multiplyScalar(target);
-    const accel = this.onGround ? (target > horiz.length() ? 9 : 12) : 1.5;
-    horiz.lerp(desired, Math.min(1, dt * accel));
-    this.vel.x = horiz.x;
-    this.vel.z = horiz.z;
+    const look3 = this.lookDir();
+    const swimUp = !!(input.climb || input.jump);
+    const swimDown = !!(input.crouch || (this.swimming && this.crouchToggle));
+    const floorNow = terrain.heightAt(this.pos.x, this.pos.z);
+    this.swimming = shouldSwim(this.pos.y, floorNow, this.swimming);
+    this.diving = this.swimming && (swimDown || this.pos.y < FLOAT_Y - 0.55);
 
     let jumpStarted = false;
-    if (input.jump && this.onGround) {
-      this.vel.y = JUMP_V;
+    const next = this.pos.clone();
+    if (this.swimming) {
+      const spd = swimSpeed(this.diving, !!(input.sprint && !aiming), stick);
+      const wish3 = new THREE.Vector3();
+      if (this.diving) {
+        wish3.addScaledVector(look3, f).addScaledVector(camRight, s);
+        if (swimUp) wish3.y += 1;
+        if (swimDown) wish3.y -= 1;
+      } else {
+        wish3.copy(wish);
+        if (swimUp) wish3.y += 0.55;
+        if (swimDown) wish3.y -= 1.15;
+      }
+      if (wish3.lengthSq() > 1e-6) wish3.normalize();
+      const desired = wish3.multiplyScalar(spd);
+      const accel = 7;
+      this.vel.x += (desired.x - this.vel.x) * Math.min(1, dt * accel);
+      this.vel.z += (desired.z - this.vel.z) * Math.min(1, dt * accel);
+      next.x += this.vel.x * dt;
+      next.z += this.vel.z * dt;
+      if (!terrain.inBounds(next.x, next.z)) {
+        next.x = this.pos.x;
+        next.z = this.pos.z;
+        this.vel.x *= 0.2;
+        this.vel.z *= 0.2;
+      }
+      const floor = terrain.heightAt(next.x, next.z);
+      const stepped = stepSwim({
+        y: this.pos.y, vy: this.vel.y, wishY: desired.y, diving: this.diving, dt, floor,
+      });
+      next.y = stepped.y;
+      this.vel.y = stepped.vy;
       this.onGround = false;
-      jumpStarted = true;
-    }
-    this.vel.y -= GRAVITY * dt;
+      this.airTime = 0;
+      if (canExitWater(floor, next.y, swimUp && floor > -0.55)) {
+        next.y = floor;
+        this.vel.y = swimUp ? 3.2 : 0;
+        this.swimming = false;
+        this.diving = false;
+        this.onGround = true;
+        this.onLand?.(2);
+      }
+    } else {
+      const horiz = new THREE.Vector3(this.vel.x, 0, this.vel.z);
+      const desired = wish.clone().multiplyScalar(target);
+      const accel = this.onGround ? (target > horiz.length() ? 9 : 12) : 1.5;
+      horiz.lerp(desired, Math.min(1, dt * accel));
+      this.vel.x = horiz.x;
+      this.vel.z = horiz.z;
 
-    const next = this.pos.clone().addScaledVector(this.vel, dt);
-    const ground = terrain.heightAt(next.x, next.z);
-    const n = terrain.normalAt(next.x, next.z);
-    // Too steep or too deep: stop at the edge.
-    const uphill = n.x * this.vel.x + n.z * this.vel.z < 0;
-    if ((n.y < 0.62 && uphill && ground > this.pos.y + 0.05) || ground < -1.15 || !terrain.inBounds(next.x, next.z)) {
-      next.x = this.pos.x;
-      next.z = this.pos.z;
-      this.vel.x *= 0.2;
-      this.vel.z *= 0.2;
+      if (input.jump && this.onGround) {
+        this.vel.y = JUMP_V;
+        this.onGround = false;
+        jumpStarted = true;
+      }
+      this.vel.y -= GRAVITY * dt;
+
+      next.addScaledVector(this.vel, dt);
+      const ground = terrain.heightAt(next.x, next.z);
+      const n = terrain.normalAt(next.x, next.z);
+      const uphill = n.x * this.vel.x + n.z * this.vel.z < 0;
+      if ((n.y < 0.62 && uphill && ground > this.pos.y + 0.05) || !terrain.inBounds(next.x, next.z)) {
+        next.x = this.pos.x;
+        next.z = this.pos.z;
+        this.vel.x *= 0.2;
+        this.vel.z *= 0.2;
+      }
+
+      const g2 = terrain.heightAt(next.x, next.z);
+      if (shouldSwim(next.y, g2, false) && next.y < 0.35) {
+        this.swimming = true;
+        this.onGround = false;
+        this.world.fx?.impact?.(next.clone().setY(0.02), new THREE.Vector3(0, 1, 0), 'water', new THREE.Vector3(0, -1, 0));
+      } else {
+        const wasGround = this.onGround;
+        if (next.y <= g2 || (wasGround && this.vel.y <= 0 && next.y - g2 < 0.45)) {
+          if (!wasGround && this.airTime > 0.25) this.onLand?.(-this.vel.y);
+          next.y = g2;
+          this.vel.y = 0;
+          this.onGround = true;
+          this.airTime = 0;
+        } else {
+          this.onGround = false;
+          this.airTime += dt;
+        }
+      }
     }
 
     const standH = 1.7 - this.crouchT * 1.05;
@@ -159,23 +235,10 @@ export class Player {
       const d = Math.hypot(dx, dz);
       if (d < RADIUS * 2 && d > 1e-4) { next.x = f.pos.x + (dx / d) * RADIUS * 2; next.z = f.pos.z + (dz / d) * RADIUS * 2; }
     }
-
-    const g2 = terrain.heightAt(next.x, next.z);
-    const wasGround = this.onGround;
-    if (next.y <= g2 || (wasGround && this.vel.y <= 0 && next.y - g2 < 0.45)) {
-      if (!wasGround && this.airTime > 0.25) this.onLand?.(-this.vel.y);
-      next.y = g2;
-      this.vel.y = 0;
-      this.onGround = true;
-      this.airTime = 0;
-    } else {
-      this.onGround = false;
-      this.airTime += dt;
-    }
     this.pos.copy(next);
 
     this.facingError = Math.abs(wrapAngle(this.camYaw - this.yaw));
-    const speed = Math.hypot(this.vel.x, this.vel.z);
+    const speed = Math.hypot(this.vel.x, this.vel.y * (this.swimming ? 1 : 0), this.vel.z);
     const fwdBody = new THREE.Vector3(Math.sin(this.yaw), 0, Math.cos(this.yaw));
     // The avatar's local +X is her left side.
     const leftBody = new THREE.Vector3(fwdBody.z, 0, -fwdBody.x);
@@ -183,7 +246,12 @@ export class Player {
 
     const ch = this.character;
     ch.root.position.copy(this.pos);
+    const pitchGoal = this.diving ? 1.05 : this.swimming ? 0.32 : 0;
+    this.swimPitch += (pitchGoal - this.swimPitch) * Math.min(1, dt * 5);
+    ch.root.rotation.order = 'YXZ';
+    ch.root.rotation.x = this.swimPitch;
     ch.root.rotation.y = this.yaw;
+    ch.root.rotation.z = 0;
 
     if (follow) {
       this.scoped = false;
@@ -197,8 +265,8 @@ export class Player {
 
     ch.update(dt, {
       speed, onGround: this.onGround, airTime: this.airTime, strafe: true, localDir: this.localDir,
-      jumpStarted, predictedAir: (2 * JUMP_V) / GRAVITY, aiming, aimPoint: this.aimPoint,
-      lookDir: this.lookDir(), crouch: this.crouchT,
+      jumpStarted, predictedAir: (2 * JUMP_V) / GRAVITY, aiming: aiming && !this.swimming, aimPoint: this.aimPoint,
+      lookDir: this.lookDir(), crouch: this.crouchT, swimming: this.swimming, diving: this.diving,
     });
     return { speed, aiming };
   }
@@ -215,7 +283,8 @@ export class Player {
     const reloading = !follow && (this.character.action?.type === 'reload' || this.character.action?.type === 'pistolReload');
     const through = !follow && this.scopeT > 0.55 && !reloading;
     this.reloadLook = (this.reloadLook || 0) + ((reloading ? 1 : 0) - (this.reloadLook || 0)) * Math.min(1, dt * 8);
-    this.camDist += ((through ? 0.04 : reloading ? 1.18 : aiming ? 1.55 : 3.1) - this.camDist) * k;
+    const swimCam = !follow && this.swimming;
+    this.camDist += ((through ? 0.04 : reloading ? 1.18 : swimCam ? 2.4 : aiming ? 1.55 : 3.1) - this.camDist) * k;
     this.shoulder += ((through ? 0.02 : reloading ? 0.4 : aiming ? 0.6 : 0.5) - this.shoulder) * k;
     const fovGoal = through ? 7.5 : aiming ? 48 : sprinting ? 66 : 60;
     this.fov += (fovGoal - this.fov) * Math.min(1, dt * (through ? 11 : 6));
@@ -318,5 +387,5 @@ export class Player {
     if (block && block.fighter !== this.aimHit.fighter) this.aimHit = null;
   }
 
-  get underwater() { return this.camera.position.y < 0.05; }
+  get underwater() { return this.camera.position.y < 0.02 || (this.diving && this.pos.y < FLOAT_Y - 0.2); }
 }

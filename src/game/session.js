@@ -65,7 +65,13 @@ class Remote {
     this.yaw += wrap(this.targetYaw - this.yaw) * Math.min(1, dt * 10);
     const ch = this.character;
     ch.root.position.copy(this.pos);
-    if (!ch.dead) ch.root.rotation.y = this.yaw;
+    const swimming = this.pos.y < 0.15;
+    if (!ch.dead) {
+      ch.root.rotation.order = 'YXZ';
+      ch.root.rotation.x = swimming && this.pos.y < -1.6 ? 0.9 : swimming ? 0.3 : 0;
+      ch.root.rotation.y = this.yaw;
+      ch.root.rotation.z = 0;
+    }
     const look = new THREE.Vector3(
       Math.sin(this.yaw) * Math.cos(this.pitch || 0),
       Math.sin(this.pitch || 0),
@@ -80,10 +86,12 @@ class Remote {
       localDir: new THREE.Vector3(0, 0, 1),
       jumpStarted: false,
       predictedAir: 0.6,
-      aiming: this.aiming,
+      aiming: this.aiming && !swimming,
       aimPoint,
       lookDir: look,
       crouch: this.crouch,
+      swimming,
+      diving: swimming && this.pos.y < -1.5,
     });
   }
 

@@ -682,7 +682,12 @@ export class Character {
     };
 
     let fade = 0.18;
-    if (s.jumpStarted) {
+    if (s.swimming) {
+      this.jump = null;
+      target.fall = s.diving ? 0.85 : 0.35;
+      target.idle = s.diving ? 0.15 : 0.65;
+      fade = 0.22;
+    } else if (s.jumpStarted) {
       const kind = s.speed > 4.6 ? 'jumpRun' : 'jumpJog';
       const info = JUMPS[kind];
       const a = this.actions[kind];
@@ -692,7 +697,7 @@ export class Character {
       a.play();
       this.jump = { kind, info, t: 0, landed: false, airTime: s.predictedAir };
     }
-    if (this.jump) {
+    if (!s.swimming && this.jump) {
       const j = this.jump;
       const a = this.actions[j.kind];
       j.t += dt;
@@ -712,6 +717,8 @@ export class Character {
         fade = 0.05;
         if (blend >= 1) this.jump = null;
       }
+    } else if (s.swimming) {
+      // Swim weights already set.
     } else if (!s.onGround && s.airTime > 0.35) {
       target.fall = 1;
       fade = 0.3;
@@ -749,6 +756,7 @@ export class Character {
       this.flinch *= Math.exp(-dt * 9);
     }
     this.applyAim(s);
+    if (s.swimming) this.applySwim(s, dt);
     if (this.weapon === 'grenade') this.applyThrow(dt);
     this.placeRifle(dt);
     this.placeGrenade();
@@ -1015,6 +1023,28 @@ export class Character {
       const poleL = shL.clone().addScaledVector(UP, -0.4).addScaledVector(left, 0.38);
       solveArm(B, 'Left', rest, poleL, fwd.clone().addScaledVector(UP, -0.35).normalize(), left, k * 0.8, this.tmp);
     }
+  }
+
+  applySwim(s, dt) {
+    const B = this.bones;
+    if (!B.RightArm || !B.LeftArm) return;
+    this.swimT = (this.swimT || 0) + dt * (0.9 + Math.min(2.2, s.speed));
+    const t = this.swimT;
+    const { fwd, left, right } = this.bodyAxes();
+    const stroke = (side, sign) => {
+      const phase = Math.sin(t * 5.2 + (sign > 0 ? 0 : Math.PI));
+      const sh = B[`${side}Arm`].getWorldPosition(new THREE.Vector3());
+      const reach = sh.clone()
+        .addScaledVector(fwd, 0.22 + phase * 0.28)
+        .addScaledVector(sign > 0 ? right : left, 0.22)
+        .addScaledVector(UP, -0.08 + phase * 0.16);
+      solveArm(B, side, reach,
+        sh.clone().addScaledVector(UP, -0.35).addScaledVector(sign > 0 ? right : left, 0.4),
+        fwd.clone().addScaledVector(UP, -0.2).normalize(),
+        sign > 0 ? right : left, 0.85, this.tmp);
+    };
+    stroke('Right', 1);
+    stroke('Left', -1);
   }
 
   applyAim(s) {

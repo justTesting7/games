@@ -2,7 +2,7 @@ export const MAPS = {
   island: {
     id: 'island',
     label: 'Relic Isle',
-    subtitle: 'Photoreal island · two Jev rivals',
+    subtitle: 'Photoreal island · swim the coast, fish in the water',
     loadLabel: 'Shaping the island',
     plantLabel: 'Planting the forest',
     textures: {
@@ -14,6 +14,7 @@ export const MAPS = {
     grass: true,
     vegetation: true,
     waterCamp: true,
+    fish: true,
     timeOfDay: 0.09,
     fogDensity: 0.0016,
     radarRange: 120,
