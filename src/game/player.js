@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { FLOAT_Y, canExitWater, shouldSwim, stepSwim, swimSpeed } from './swim.js';
+import { cockpitEye } from './cars.js';
 
 const GRAVITY = 16;
 const JUMP_V = 5.4;
@@ -77,6 +78,7 @@ export class Player {
 
   spawn(x, z, yaw) {
     if (this.vehicle) this.world.cars?.ejectLocal(this);
+    this._carYaw = undefined;
     this.pos.set(x, this.world.terrain.heightAt(x, z), z);
     this.yaw = this.camYaw = yaw;
     this.character.root.position.copy(this.pos);
@@ -309,6 +311,9 @@ export class Player {
 
   updateInCar(dt, input) {
     const car = this.vehicle;
+    const dyaw = wrapAngle(car.yaw - (this._carYaw ?? car.yaw));
+    this.camYaw += dyaw;
+    this._carYaw = car.yaw;
     this.pos.copy(car.seat);
     this.vel.copy(car.vel);
     this.yaw = car.yaw;
@@ -348,7 +353,13 @@ export class Player {
     const k = Math.min(1, dt * 10);
     const scoped = follow ? false : this.scoped;
     const ride = follow?.vehicle || (!follow && this.vehicle);
-    const body = ride ? new THREE.Vector3(ride.x, ride.y, ride.z) : (follow?.pos || this.pos);
+    if (ride) {
+      this.updateCockpitCamera(dt, ride, follow, sprinting, speed);
+      return;
+    }
+    if (this._cockpitHide?.root) this._cockpitHide.root.visible = true;
+    this._cockpitHide = null;
+    const body = follow?.pos || this.pos;
     const crouch = follow
       ? (follow.crouchT ?? follow.crouch ?? follow.character?.crouchT ?? 0)
       : this.crouchT;
@@ -356,9 +367,9 @@ export class Player {
     const through = !follow && this.scopeT > 0.55 && !reloading;
     this.reloadLook = (this.reloadLook || 0) + ((reloading ? 1 : 0) - (this.reloadLook || 0)) * Math.min(1, dt * 8);
     const swimCam = !follow && this.swimming;
-    this.camDist += ((ride ? 7.6 : through ? 0.04 : reloading ? 1.18 : swimCam ? 2.4 : aiming ? 1.55 : 3.1) - this.camDist) * k;
-    this.shoulder += ((ride ? 0 : through ? 0.02 : reloading ? 0.4 : aiming ? 0.6 : 0.5) - this.shoulder) * k;
-    const fovGoal = through ? 7.5 : ride ? (sprinting ? 68 : 58) : aiming ? 48 : sprinting ? 66 : 60;
+    this.camDist += ((through ? 0.04 : reloading ? 1.18 : swimCam ? 2.4 : aiming ? 1.55 : 3.1) - this.camDist) * k;
+    this.shoulder += ((through ? 0.02 : reloading ? 0.4 : aiming ? 0.6 : 0.5) - this.shoulder) * k;
+    const fovGoal = through ? 7.5 : aiming ? 48 : sprinting ? 66 : 60;
     this.fov += (fovGoal - this.fov) * Math.min(1, dt * (through ? 11 : 6));
     if (Math.abs(cam.fov - this.fov) > 0.01) { cam.fov = this.fov; cam.updateProjectionMatrix(); }
     if (this.character.root && !this.vehicle) this.character.root.visible = follow ? true : !through;
@@ -380,7 +391,7 @@ export class Player {
     const yaw = this.camYaw + swayYaw;
     const dir = new THREE.Vector3(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch));
     const right = new THREE.Vector3(-Math.cos(this.camYaw), 0, Math.sin(this.camYaw));
-    const eye = ride ? 2.2 : (through ? 1.64 : aiming ? 1.58 : 1.55) - crouch * 0.52;
+    const eye = (through ? 1.64 : aiming ? 1.58 : 1.55) - crouch * 0.52;
     const pivot = body.clone().add(new THREE.Vector3(0, eye, 0));
     const smoothPivot = this.smoothPivot || pivot.clone();
     smoothPivot.x = pivot.x;
@@ -404,6 +415,37 @@ export class Player {
     cam.position.copy(this.camPos).addScaledVector(right, this.shake * this.shakeSide * 0.04);
     cam.lookAt(cam.position.clone().add(dir));
     cam.rotateZ(this.shake * this.shakeSide * 0.06);
+  }
+
+  updateCockpitCamera(dt, ride, follow, sprinting, speed = 0) {
+    const cam = this.camera;
+    const eye = cockpitEye(ride);
+    this.camDist = 0;
+    this.smoothDist = 0;
+    const fovGoal = sprinting || speed > 18 ? 76 : 70;
+    this.fov += (fovGoal - this.fov) * Math.min(1, dt * 6);
+    if (Math.abs(cam.fov - this.fov) > 0.01) { cam.fov = this.fov; cam.updateProjectionMatrix(); }
+    if (this.character.root) this.character.root.visible = false;
+    if (this.character.rifle) this.character.rifle.visible = false;
+    if (follow?.character?.root) {
+      follow.character.root.visible = false;
+      this._cockpitHide = follow.character;
+    }
+    const look = follow ? spectateLook(follow) : null;
+    const yaw = look ? look.yaw : this.camYaw;
+    const pitch = THREE.MathUtils.clamp(look ? look.pitch : this.camPitch, -0.55, 0.42);
+    const dir = new THREE.Vector3(
+      Math.sin(yaw) * Math.cos(pitch),
+      Math.sin(pitch),
+      Math.cos(yaw) * Math.cos(pitch),
+    );
+    const right = new THREE.Vector3(-Math.cos(yaw), 0, Math.sin(yaw));
+    this.camPos.set(eye.x, eye.y, eye.z);
+    this.smoothPivot = this.camPos.clone();
+    this.shake *= Math.exp(-dt * 18);
+    cam.position.copy(this.camPos).addScaledVector(right, this.shake * this.shakeSide * 0.012);
+    cam.lookAt(cam.position.clone().add(dir));
+    cam.rotateZ((ride.steer || 0) * -0.035 + this.shake * this.shakeSide * 0.02);
   }
 
   // Eye height at the body, not the shoulder camera, so cover the player is

@@ -20,7 +20,44 @@ export const CAR = {
   steer: 2.05,
   killSpeed: 5.8,
   collideR: 1.08,
+  eyeY: 0.64,
+  eyeZ: 0.18,
 };
+
+export const PANES = ['wind', 'rear', 'leftF', 'rightF', 'leftR', 'rightR'];
+
+export const PANE_BOXES = {
+  wind: { x0: -0.70, x1: 0.70, y0: 0.90, y1: 1.36, z0: 0.56, z1: 0.70 },
+  rear: { x0: -0.70, x1: 0.70, y0: 0.90, y1: 1.36, z0: -1.20, z1: -1.06 },
+  leftF: { x0: -0.92, x1: -0.86, y0: 0.88, y1: 1.32, z0: -0.30, z1: 0.50 },
+  rightF: { x0: 0.86, x1: 0.92, y0: 0.88, y1: 1.32, z0: -0.30, z1: 0.50 },
+  leftR: { x0: -0.92, x1: -0.86, y0: 0.88, y1: 1.32, z0: -1.04, z1: -0.36 },
+  rightR: { x0: 0.86, x1: 0.92, y0: 0.88, y1: 1.32, z0: -1.04, z1: -0.36 },
+};
+
+export const METAL_BOXES = [
+  { x0: -0.90, x1: 0.90, y0: 0.20, y1: 0.78, z0: -2.12, z1: 2.12 },
+  { x0: -0.86, x1: 0.86, y0: 0.74, y1: 0.90, z0: 0.72, z1: 2.10 },
+  { x0: -0.86, x1: 0.86, y0: 0.74, y1: 0.90, z0: -2.08, z1: -1.18 },
+  { x0: -0.70, x1: 0.70, y0: 1.36, y1: 1.48, z0: -1.05, z1: 0.52 },
+  { x0: -0.88, x1: -0.70, y0: 0.80, y1: 1.42, z0: 0.48, z1: 0.70 },
+  { x0: 0.70, x1: 0.88, y0: 0.80, y1: 1.42, z0: 0.48, z1: 0.70 },
+  { x0: -0.88, x1: -0.70, y0: 0.80, y1: 1.42, z0: -0.40, z1: -0.22 },
+  { x0: 0.70, x1: 0.88, y0: 0.80, y1: 1.42, z0: -0.40, z1: -0.22 },
+];
+
+export function paneBit(name) {
+  const i = PANES.indexOf(name);
+  return i < 0 ? 0 : 1 << i;
+}
+
+export function glassIntact(mask, name) {
+  return !(mask & paneBit(name));
+}
+
+export function glassMaskAfterHit(mask, name) {
+  return mask | paneBit(name);
+}
 
 const COLORS = [0xc23b2c, 0x1c2a3a, 0xd8d2c4, 0x2f4a32, 0x8a6a28, 0x1a1c1e, 0x3a5e78, 0x5a4036];
 
@@ -147,6 +184,83 @@ export function stepDrive({ speed, yaw, throttle, steer, dt, sprint = false }) {
   };
 }
 
+export function cockpitEye(car) {
+  const o = localOffset(car.x, car.z, car);
+  return {
+    x: car.x + o.rightX * CAR.seatX + o.fwdX * (CAR.seatZ + CAR.eyeZ),
+    y: car.y + CAR.seatY + CAR.eyeY,
+    z: car.z + o.rightZ * CAR.seatX + o.fwdZ * (CAR.seatZ + CAR.eyeZ),
+  };
+}
+
+export function rayAABB(o, d, b, maxDist) {
+  let tmin = 0;
+  let tmax = maxDist;
+  let axis = -1;
+  let sign = 1;
+  const mins = [b.x0, b.y0, b.z0];
+  const maxs = [b.x1, b.y1, b.z1];
+  const orig = [o.x, o.y, o.z];
+  const dir = [d.x, d.y, d.z];
+  for (let k = 0; k < 3; k++) {
+    if (Math.abs(dir[k]) < 1e-8) {
+      if (orig[k] < mins[k] || orig[k] > maxs[k]) return null;
+      continue;
+    }
+    let t1 = (mins[k] - orig[k]) / dir[k];
+    let t2 = (maxs[k] - orig[k]) / dir[k];
+    let s = -1;
+    if (t1 > t2) { const tmp = t1; t1 = t2; t2 = tmp; s = 1; }
+    if (t1 > tmin) { tmin = t1; axis = k; sign = s; }
+    if (t2 < tmax) tmax = t2;
+    if (tmin > tmax) return null;
+  }
+  if (tmax < 0) return null;
+  const t = tmin > 1e-4 ? tmin : 0.02;
+  if (t > maxDist) return null;
+  const n = [0, 0, 0];
+  if (axis >= 0) n[axis] = sign;
+  else n[1] = 1;
+  return { t, nx: n[0], ny: n[1], nz: n[2] };
+}
+
+export function hitCar(origin, dir, car, maxDist, opts = {}) {
+  if (!car || maxDist <= 0) return null;
+  const basis = localOffset(origin.x, origin.z, car);
+  const o = { x: basis.side, y: origin.y - car.y, z: basis.along };
+  const d = {
+    x: dir.x * basis.rightX + dir.z * basis.rightZ,
+    y: dir.y,
+    z: dir.x * basis.fwdX + dir.z * basis.fwdZ,
+  };
+  let best = null;
+  if (!opts.glassOnly) {
+    for (const b of METAL_BOXES) {
+      const h = rayAABB(o, d, b, best ? best.t : maxDist);
+      if (h && (!best || h.t < best.t)) best = { ...h, surface: 'metal' };
+    }
+  }
+  if (!opts.metalOnly) {
+    const mask = car.glass || 0;
+    for (const name of PANES) {
+      if (!glassIntact(mask, name)) continue;
+      const h = rayAABB(o, d, PANE_BOXES[name], best ? best.t : maxDist);
+      if (h && (!best || h.t < best.t)) best = { ...h, surface: 'glass', pane: name };
+    }
+  }
+  if (!best) return null;
+  const nx = best.nx * basis.rightX + best.nz * basis.fwdX;
+  const nz = best.nx * basis.rightZ + best.nz * basis.fwdZ;
+  return {
+    t: best.t,
+    normal: { x: nx, y: best.ny, z: nz },
+    surface: best.surface,
+    pane: best.pane,
+    glass: best.surface === 'glass',
+    car,
+  };
+}
+
 export function runOverHits(car, fighters, now = 0) {
   if (!car || Math.abs(car.speed) < CAR.killSpeed) return [];
   const hits = [];
@@ -166,16 +280,48 @@ function shade(mat) {
   return mat;
 }
 
+function boxMesh(w, h, d, mat, x, y, z) {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+  m.position.set(x, y, z);
+  return m;
+}
+
+function makeCluster() {
+  if (typeof document === 'undefined') return null;
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 128;
+  const ctx = canvas.getContext('2d');
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return { canvas, ctx, tex };
+}
+
+function paintCluster(cluster, speed, on) {
+  if (!cluster?.ctx) return;
+  const { ctx, canvas, tex } = cluster;
+  ctx.fillStyle = '#07080a';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = on ? '#d8dde4' : '#3a4048';
+  ctx.font = '700 64px "Segoe UI", system-ui, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(String(Math.max(0, Math.round(Math.abs(speed) * 3.6))), 128, 52);
+  ctx.font = '600 18px "Segoe UI", system-ui, sans-serif';
+  ctx.fillStyle = on ? '#8a9098' : '#2e3338';
+  ctx.fillText('km/h', 128, 100);
+  tex.needsUpdate = true;
+}
+
 function makeCarMesh(color) {
   const g = new THREE.Group();
   g.name = 'car';
   const paint = shade(new THREE.MeshStandardMaterial({ color, metalness: 0.58, roughness: 0.34 }));
-  const dark = shade(new THREE.MeshStandardMaterial({ color: 0x141618, metalness: 0.35, roughness: 0.62 }));
-  const glass = new THREE.MeshStandardMaterial({
-    color: 0x6a8498, metalness: 0.85, roughness: 0.1, transparent: true, opacity: 0.42,
-  });
+  const dark = shade(new THREE.MeshStandardMaterial({ color: 0x121416, metalness: 0.28, roughness: 0.7 }));
+  const cabin = shade(new THREE.MeshStandardMaterial({ color: 0x1a1c1f, metalness: 0.2, roughness: 0.62 }));
   const chrome = shade(new THREE.MeshStandardMaterial({ color: 0xc5ccd2, metalness: 0.92, roughness: 0.18 }));
   const rubber = shade(new THREE.MeshStandardMaterial({ color: 0x161616, metalness: 0.08, roughness: 0.92 }));
+  const leather = shade(new THREE.MeshStandardMaterial({ color: 0x1c1c1e, metalness: 0.08, roughness: 0.78 }));
   const light = new THREE.MeshStandardMaterial({
     color: 0xfff1c4, emissive: 0xffd27a, emissiveIntensity: 0.55, metalness: 0.4, roughness: 0.28,
   });
@@ -183,39 +329,78 @@ function makeCarMesh(color) {
     color: 0xc41818, emissive: 0x6a0808, emissiveIntensity: 0.45, metalness: 0.35, roughness: 0.35,
   });
 
-  const body = new THREE.Mesh(new THREE.BoxGeometry(1.78, 0.5, 4.2), paint);
-  body.position.y = 0.56;
-  g.add(body);
-  const rocker = new THREE.Mesh(new THREE.BoxGeometry(1.84, 0.16, 4.05), dark);
-  rocker.position.y = 0.3;
-  g.add(rocker);
-  const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.64, 0.58, 1.82), paint);
-  cabin.position.set(0, 1.06, -0.18);
-  g.add(cabin);
-  const wind = new THREE.Mesh(new THREE.BoxGeometry(1.52, 0.46, 1.55), glass);
-  wind.position.set(0, 1.1, -0.14);
-  g.add(wind);
-  const hood = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.07, 1.2), paint);
-  hood.position.set(0, 0.84, 1.32);
-  hood.rotation.x = -0.1;
-  g.add(hood);
-  const trunk = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.07, 0.72), paint);
-  trunk.position.set(0, 0.82, -1.62);
-  g.add(trunk);
-  const bumperF = new THREE.Mesh(new THREE.BoxGeometry(1.82, 0.22, 0.22), chrome);
-  bumperF.position.set(0, 0.34, 2.12);
-  g.add(bumperF);
-  const bumperR = new THREE.Mesh(new THREE.BoxGeometry(1.82, 0.22, 0.2), chrome);
-  bumperR.position.set(0, 0.34, -2.12);
-  g.add(bumperR);
+  g.add(boxMesh(1.80, 0.50, 4.20, paint, 0, 0.52, 0));
+  g.add(boxMesh(1.84, 0.16, 4.05, dark, 0, 0.28, 0));
+  g.add(boxMesh(1.72, 0.10, 1.36, paint, 0, 0.84, 1.38));
+  g.add(boxMesh(1.72, 0.10, 0.88, paint, 0, 0.82, -1.62));
+  g.add(boxMesh(1.82, 0.22, 0.22, chrome, 0, 0.34, 2.12));
+  g.add(boxMesh(1.82, 0.22, 0.20, chrome, 0, 0.34, -2.12));
+  g.add(boxMesh(1.40, 0.08, 1.55, paint, 0, 1.42, -0.26));
+  g.add(boxMesh(0.16, 0.62, 0.20, paint, -0.79, 1.10, 0.58));
+  g.add(boxMesh(0.16, 0.62, 0.20, paint, 0.79, 1.10, 0.58));
+  g.add(boxMesh(0.16, 0.62, 0.18, paint, -0.79, 1.10, -0.32));
+  g.add(boxMesh(0.16, 0.62, 0.18, paint, 0.79, 1.10, -0.32));
+  g.add(boxMesh(0.10, 0.58, 1.72, paint, -0.86, 1.08, -0.28));
+  g.add(boxMesh(0.10, 0.58, 1.72, paint, 0.86, 1.08, -0.28));
+
+  const dash = boxMesh(1.58, 0.22, 0.42, cabin, 0, 0.78, 0.46);
+  g.add(dash);
+  g.add(boxMesh(1.50, 0.06, 0.36, dark, 0, 0.90, 0.48));
+  const cluster = makeCluster();
+  paintCluster(cluster, 0, false);
+  const dial = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.28, 0.14),
+    new THREE.MeshBasicMaterial({ map: cluster.tex }),
+  );
+  dial.position.set(CAR.seatX, 0.92, 0.38);
+  dial.rotation.x = -0.18;
+  g.add(dial);
+
+  const wheelRig = new THREE.Group();
+  wheelRig.position.set(CAR.seatX, 0.82, 0.34);
+  wheelRig.rotation.x = -0.48;
+  const rim = new THREE.Mesh(new THREE.TorusGeometry(0.16, 0.018, 8, 22), leather);
+  const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.03, 10), chrome);
+  hub.rotation.x = Math.PI * 0.5;
+  const spoke = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.016, 0.02), leather);
+  const spoke2 = spoke.clone();
+  spoke2.rotation.z = 2.1;
+  const spoke3 = spoke.clone();
+  spoke3.rotation.z = -2.1;
+  wheelRig.add(rim, hub, spoke, spoke2, spoke3);
+  g.add(wheelRig);
+
+  const seatMat = leather;
+  for (const sx of [CAR.seatX, 0.38]) {
+    g.add(boxMesh(0.42, 0.10, 0.46, seatMat, sx, 0.58, 0.04));
+    g.add(boxMesh(0.42, 0.42, 0.10, seatMat, sx, 0.80, -0.18));
+  }
+
+  g.add(boxMesh(0.22, 0.08, 0.12, dark, -0.86, 1.18, 0.72));
+  g.add(boxMesh(0.22, 0.08, 0.12, dark, 0.86, 1.18, 0.72));
+  g.add(boxMesh(0.18, 0.06, 0.08, dark, 0, 1.32, 0.50));
+
+  const panes = {};
+  const addPane = (name, w, h, d, x, y, z) => {
+    const mat = new THREE.MeshStandardMaterial({
+      color: 0x6a8498, metalness: 0.85, roughness: 0.08, transparent: true, opacity: 0.28, depthWrite: false,
+    });
+    const m = boxMesh(w, h, d, mat, x, y, z);
+    m.name = `glass-${name}`;
+    m.userData.pane = name;
+    g.add(m);
+    panes[name] = m;
+  };
+  addPane('wind', 1.40, 0.46, 0.03, 0, 1.13, 0.63);
+  addPane('rear', 1.40, 0.46, 0.03, 0, 1.13, -1.13);
+  addPane('leftF', 0.03, 0.44, 0.78, -0.89, 1.10, 0.10);
+  addPane('rightF', 0.03, 0.44, 0.78, 0.89, 1.10, 0.10);
+  addPane('leftR', 0.03, 0.44, 0.66, -0.89, 1.10, -0.70);
+  addPane('rightR', 0.03, 0.44, 0.66, 0.89, 1.10, -0.70);
 
   for (const sx of [-0.68, 0.68]) {
-    const lamp = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.14, 0.08), light);
-    lamp.position.set(sx, 0.52, 2.12);
-    g.add(lamp);
-    const stop = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.12, 0.06), tail);
-    stop.position.set(sx, 0.54, -2.13);
-    g.add(stop);
+    g.add(boxMesh(0.32, 0.14, 0.08, light, sx, 0.52, 2.12));
+    g.add(boxMesh(0.34, 0.12, 0.06, tail, sx, 0.54, -2.13));
   }
 
   const wheels = [];
@@ -225,16 +410,16 @@ function makeCarMesh(color) {
     const w = new THREE.Mesh(wheelGeo, rubber);
     w.position.set(sx, 0.32, sz);
     g.add(w);
-    const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.13, 0.24, 8), chrome);
-    hub.rotation.z = Math.PI * 0.5;
-    hub.position.copy(w.position);
-    g.add(hub);
+    const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.13, 0.24, 8), chrome);
+    cap.rotation.z = Math.PI * 0.5;
+    cap.position.copy(w.position);
+    g.add(cap);
     wheels.push(w);
   }
   g.traverse((o) => {
     if (o.isMesh) o.castShadow = o.receiveShadow = true;
   });
-  return { group: g, wheels, lights: light, tails: tail };
+  return { group: g, wheels, lights: light, tails: tail, panes, wheelRig, cluster };
 }
 
 export class Cars {
@@ -271,10 +456,15 @@ export class Cars {
         lastDriver: null,
         remote: false,
         squash: {},
+        glass: 0,
+        steer: 0,
         mesh: built.group,
         wheels: built.wheels,
         lights: built.lights,
         tails: built.tails,
+        panes: built.panes,
+        wheelRig: built.wheelRig,
+        cluster: built.cluster,
         home: { x: s.x, z: s.z, yaw: s.yaw },
       };
       this.placeMesh(car);
@@ -306,6 +496,8 @@ export class Cars {
       car.yaw = car.home.yaw;
       car.y = this.world.terrain.heightAt(car.x, car.z);
       car.squash = {};
+      car.steer = 0;
+      this.applyGlass(car, 0);
       this.placeMesh(car);
       this.refreshSeat(car);
     }
@@ -356,6 +548,10 @@ export class Cars {
     this.refreshSeat(car);
     player.pos.copy(car.seat);
     player.yaw = car.yaw;
+    player.camYaw = car.yaw;
+    player.camPitch = -0.04;
+    player.camDist = 0;
+    player.smoothDist = 0;
     this.world.session?.reportCar?.('in', this.pack(car));
     return true;
   }
@@ -372,6 +568,7 @@ export class Cars {
     if (!car) return;
     if (car.driver === player.fighter) car.driver = null;
     player.vehicle = null;
+    player._carYaw = undefined;
     if (player.character?.root) player.character.root.visible = true;
     const side = 1;
     const at = exitOf(car, side);
@@ -392,6 +589,8 @@ export class Cars {
     }
     if (Number.isFinite(snap.yaw)) car.yaw = snap.yaw;
     if (Number.isFinite(snap.spd)) car.speed = snap.spd;
+    if (Number.isFinite(snap.g)) this.applyGlass(car, snap.g);
+    if (snap.a === 'glass' && Number.isFinite(snap.g)) this.applyGlass(car, snap.g);
     if (snap.a === 'in' && driver) {
       if (car.driver?.isPlayer) return;
       car.driver = driver;
@@ -421,7 +620,78 @@ export class Cars {
       p: [+car.x.toFixed(2), +car.y.toFixed(2), +car.z.toFixed(2)],
       yaw: +car.yaw.toFixed(3),
       spd: +car.speed.toFixed(2),
+      g: car.glass || 0,
     };
+  }
+
+  applyGlass(car, mask) {
+    car.glass = mask || 0;
+    if (!car.panes) return;
+    for (const name of PANES) {
+      const pane = car.panes[name];
+      if (pane) pane.visible = glassIntact(car.glass, name);
+    }
+  }
+
+  breakGlass(car, pane, from, dir, hit, opts = {}) {
+    if (!car || !pane || !glassIntact(car.glass || 0, pane)) return false;
+    this.applyGlass(car, glassMaskAfterHit(car.glass || 0, pane));
+    const t = hit?.t || 0.6;
+    const at = new THREE.Vector3(from.x + dir.x * t, from.y + dir.y * t, from.z + dir.z * t);
+    const n = hit?.normal
+      ? new THREE.Vector3(hit.normal.x, hit.normal.y, hit.normal.z)
+      : dir.clone().negate();
+    this.world.fx?.impact?.(at, n, 'glass', dir);
+    this.world.audio?.impact?.('glass', at.distanceTo(this.world.player?.camera?.position || at));
+    if (this.world.fx?.alpha) {
+      for (let i = 0; i < 10; i++) {
+        this.world.fx.alpha.spawn({
+          pos: at.clone(),
+          vel: new THREE.Vector3().copy(dir).multiplyScalar(1.2 + Math.random())
+            .add(new THREE.Vector3().randomDirection().multiplyScalar(2.2)),
+          size: 0.04 + Math.random() * 0.05, grow: 0.2, life: 0.45 + Math.random() * 0.35,
+          color: [0.72, 0.82, 0.9], alpha: 0.7, drag: 1.1, gravity: 9,
+        });
+      }
+    }
+    if (!opts.silent) this.world.session?.reportCar?.('glass', { i: car.id, g: car.glass, pane });
+    return true;
+  }
+
+  breakAlong(o, d, maxDist, ignore, opts = {}) {
+    const origin = { x: o.x, y: o.y, z: o.z };
+    let traveled = 0;
+    const broken = [];
+    for (let i = 0; i < 3; i++) {
+      let best = null;
+      for (const car of this.list) {
+        if (car.driver === ignore) continue;
+        const hit = hitCar(origin, d, car, maxDist - traveled, { glassOnly: true });
+        if (hit && (!best || hit.t < best.t)) best = hit;
+      }
+      if (!best) break;
+      this.breakGlass(best.car, best.pane, o, d, { ...best, t: best.t + traveled }, opts);
+      broken.push(best);
+      traveled += best.t + 0.03;
+      origin.x = o.x + d.x * traveled;
+      origin.y = o.y + d.y * traveled;
+      origin.z = o.z + d.z * traveled;
+    }
+    return broken;
+  }
+
+  raycast(o, d, maxDist, ignore) {
+    let best = null;
+    for (const car of this.list) {
+      if (car.driver === ignore) continue;
+      const hit = hitCar(o, d, car, best ? best.t : maxDist, { metalOnly: true });
+      if (!hit) continue;
+      const normal = new THREE.Vector3(hit.normal.x, hit.normal.y, hit.normal.z);
+      if (!normal.lengthSq()) normal.set(0, 1, 0);
+      else normal.normalize();
+      best = { t: hit.t, normal, surface: 'metal', car };
+    }
+    return best;
   }
 
   collideWalker(pos, radius, ignore) {
@@ -451,11 +721,12 @@ export class Cars {
     if (active && player?.fighter?.alive && local) {
       const f = (input.forward ? 1 : 0) - (input.back ? 1 : 0) + (input.moveY || 0);
       const s = (input.right ? 1 : 0) - (input.left ? 1 : 0) + (input.moveX || 0);
+      local.steer = THREE.MathUtils.clamp(s, -1, 1);
       const stepped = stepDrive({
         speed: local.speed,
         yaw: local.yaw,
         throttle: THREE.MathUtils.clamp(f, -1, 1),
-        steer: THREE.MathUtils.clamp(s, -1, 1),
+        steer: local.steer,
         dt,
         sprint: !!input.sprint,
       });
@@ -492,6 +763,10 @@ export class Cars {
       }
       const spin = car.speed * dt / 0.32;
       for (const w of car.wheels) w.rotation.x += spin;
+      if (car.wheels[0]) car.wheels[0].rotation.y = (car.steer || 0) * 0.38;
+      if (car.wheels[1]) car.wheels[1].rotation.y = (car.steer || 0) * 0.38;
+      if (car.wheelRig) car.wheelRig.rotation.z = -(car.steer || 0) * 0.65;
+      if (car.cluster) paintCluster(car.cluster, car.speed, !!car.driver);
       car.mesh.rotation.z = THREE.MathUtils.clamp(-car.speed * 0.002, -0.06, 0.06);
       car.lights.emissiveIntensity = car.driver ? 1.15 : 0.45;
       car.tails.emissiveIntensity = car.speed < -0.4 || (car.driver?.isPlayer && input?.back) ? 1.2 : 0.4;

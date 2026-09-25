@@ -262,6 +262,7 @@ export class Weapons {
       target.add(new THREE.Vector3().randomDirection().multiplyScalar(r * Math.random()));
       dir = target.sub(from).normalize();
     }
+    this.world.cars?.breakAlong(from, dir, 900, shooter);
     let hit = this.world.raycast(from, dir, 900, shooter);
     // Cover the chest is standing behind still stops the shot. A fighter
     // on that chest line that the crosshair missed is ignored.

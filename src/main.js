@@ -101,6 +101,8 @@ world.raycast = (o, d, maxDist, ignore) => {
   };
   checkDrone(world.drone);
   if (world.netDrones) for (const drone of world.netDrones.values()) checkDrone(drone);
+  const carHit = world.cars?.raycast(o, d, best ? best.t : maxDist, ignore);
+  if (carHit && (!best || carHit.t < best.t)) best = carHit;
   const fh = world.combat.raycast(o, d, best ? best.t : maxDist, ignore);
   if (fh) best = fh;
   return best;

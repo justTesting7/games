@@ -337,6 +337,12 @@ export class GameRoom extends DurableObject {
     const p = Array.isArray(msg.p) ? msg.p.slice(0, 3).map(num) : mine.p;
     const yaw = num(msg.yaw);
     const spd = num(msg.spd);
+    if (act === 'glass') {
+      const g = Math.max(0, Math.min(63, Math.round(num(msg.g))));
+      this.fleet[i] = { ...(this.fleet[i] || { p, yaw, spd: 0 }), g };
+      this.broadcast(ws, { t: 'car', a: 'glass', id: mine.id, i, g, pane: str(msg.pane, 8) });
+      return;
+    }
     if (act === 'in') {
       if (this.seats[i] && this.seats[i] !== mine.id) return;
       this.freeSeat(mine.id);
@@ -350,8 +356,8 @@ export class GameRoom extends DurableObject {
     } else {
       return;
     }
-    this.fleet[i] = { p, yaw, spd: act === 'out' ? 0 : spd };
-    this.broadcast(ws, { t: 'car', a: act, id: mine.id, i, p, yaw, spd: this.fleet[i].spd });
+    this.fleet[i] = { p, yaw, spd: act === 'out' ? 0 : spd, g: this.fleet[i]?.g || 0 };
+    this.broadcast(ws, { t: 'car', a: act, id: mine.id, i, p, yaw, spd: this.fleet[i].spd, g: this.fleet[i].g });
   }
 
   async onDrone(mine, ws, msg) {
