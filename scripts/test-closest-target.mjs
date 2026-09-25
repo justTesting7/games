@@ -4,9 +4,9 @@ const rival = readFileSync(new URL('../src/game/rival.js', import.meta.url), 'ut
 
 for (const needle of [
   'closestEnemy(',
-  'this.setTarget(this.closestEnemy(alive));',
-  'this.setTarget(this.closestEnemy(this.enemies()));',
+  'pickTarget()',
   'const seen = list.filter((e) => this.seen(e).visible);',
+  'TARGET_STICK',
 ]) {
   if (!rival.includes(needle)) throw new Error(`rival.js missing ${needle}`);
 }

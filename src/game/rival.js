@@ -9,6 +9,13 @@ const SHELTER_SPRINT = 5.6;
 const EXPOSE_LIMIT = 1.15;
 const COVER_PAD = RADIUS + 0.5;
 const SEARCH_R = 40;
+// Humans commit to a plan for a few seconds. Sub-second retargets look robotic.
+const THINK_HOLD = 2.8;
+const THINK_SPREAD = 1.6;
+const HIT_RETHINK = 0.7;
+const STRAFE_HOLD = 2.8;
+const STRAFE_SPREAD = 2.0;
+const TARGET_STICK = 8;
 
 const wrapAngle = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 const gauss = () => (Math.random() + Math.random() + Math.random() - 1.5) / 0.5;
@@ -66,7 +73,7 @@ export class Rival {
     this.target = null;
     this.confidence = 0;
     this.source = 'local';
-    this.thinkT = 0.2 + Math.random() * 0.5;
+    this.thinkT = 0.8 + Math.random() * 1.2;
     this.thinking = false;
     this.epoch = (this.epoch || 0) + 1;
     this.perceiveT = 0;
@@ -75,7 +82,7 @@ export class Rival {
     this.burstPause = 0;
     this.side = 0;
     this.strafeDir = Math.random() < 0.5 ? 1 : -1;
-    this.strafeT = 1;
+    this.strafeT = STRAFE_HOLD + Math.random() * STRAFE_SPREAD;
     this.flankSide = Math.random() < 0.5 ? 1 : -1;
     this.errT = 0;
     this.cover = null;
@@ -88,7 +95,7 @@ export class Rival {
     this.droneSightT = 0;
     this.peeking = false;
     this.peekT = 0;
-    this.peekWait = 0.2;
+    this.peekWait = 0.55 + Math.random() * 0.4;
     this.stuckT = 0;
     this.detour = 0;
     this.lastProgress = this.pos.clone();
@@ -297,14 +304,14 @@ export class Rival {
     if (this.peeking && this.combat.time - this.fighter.lastHitT < 0.12 && this.fighter.health < 40) {
       this.peeking = false;
       this.peekT = 0;
-      this.peekWait = 0.12 + Math.random() * 0.15;
+      this.peekWait = 0.45 + Math.random() * 0.3;
       return;
     }
     if (this.peeking) {
       this.peekT -= dt;
       if (this.peekT <= 0) {
         this.peeking = false;
-        this.peekWait = 0.12 + Math.random() * 0.22;
+        this.peekWait = 0.7 + Math.random() * 0.5;
       }
       return;
     }
@@ -526,8 +533,8 @@ export class Rival {
       tactic: {
         type: 'choice',
         instructions: this.persona.ruthless
-          ? `You are ${me.name}, ${this.persona.personality}. Never take cover. Never retreat. Always push and shoot. Last one standing wins. Pick your tactic for the next second, in character.`
-          : `You are ${me.name}, ${this.persona.personality}. Fight aggressively. Push, flank, and shoot. Only take cover if you are badly wounded. Last one standing wins. Pick your tactic for the next second, in character.`,
+          ? `You are ${me.name}, ${this.persona.personality}. Never take cover. Never retreat. Always push and shoot. Last one standing wins. Pick your tactic for the next few seconds and commit to it, in character.`
+          : `You are ${me.name}, ${this.persona.personality}. Fight aggressively. Push, flank, and shoot. Only take cover if you are badly wounded. Last one standing wins. Pick your tactic for the next few seconds and commit to it, in character.`,
         criteria: options,
       },
     };
@@ -557,14 +564,14 @@ export class Rival {
     }).finally(() => {
       if (epoch !== this.epoch) return;
       this.thinking = false;
-      this.thinkT = 0.8 + Math.random() * 0.5;
+      this.thinkT = THINK_HOLD + Math.random() * THINK_SPREAD;
     });
   }
 
   decide(ans, options, enemies, cover) {
     const alive = enemies.filter((e) => e.alive);
     if (!alive.length) return;
-    this.setTarget(this.closestEnemy(alive));
+    this.pickTarget();
 
     if (this.isRuthless()) {
       this.source = ans?.tactic ? 'jev' : 'local';
@@ -648,11 +655,31 @@ export class Rival {
     const me = this.fighter;
     const visible = this.target && this.seen(this.target).visible;
     if (this.shouldShelter()) return cover ? 'take_cover' : 'retreat';
-    if (!visible) return 'hunt';
+    if (!visible) return this.tactic === 'hold' && options?.hold ? 'hold' : 'hunt';
     const d = this.target.pos.distanceTo(this.pos);
     if (me.health < 26 && cover && this.underFire()) return 'take_cover';
+    // Keep a still-valid plan instead of rolling a new one every think.
+    if (this.tactic === 'strafe' && d < 22) return 'strafe';
+    if (this.tactic === 'hold' && d > 8) return 'hold';
+    if (this.tactic === 'push' || this.tactic === 'flank') return this.tactic;
     if (d > 7) return Math.random() < 0.38 ? 'flank' : 'push';
     return Math.random() < 0.55 ? 'strafe' : 'push';
+  }
+
+  // Stick with the current mark unless they die or someone else is clearly closer.
+  pickTarget() {
+    const alive = this.enemies();
+    if (!alive.length) { this.setTarget(null); return; }
+    const cur = this.target?.alive ? this.target : null;
+    const best = this.closestEnemy(alive);
+    if (!cur) { this.setTarget(best); return; }
+    if (!best || best === cur) return;
+    const curVis = this.seen(cur).visible;
+    const bestVis = this.seen(best).visible;
+    const curD = cur.pos.distanceTo(this.pos);
+    const bestD = best.pos.distanceTo(this.pos);
+    if (!curVis && bestVis) this.setTarget(best);
+    else if (bestD + TARGET_STICK < curD) this.setTarget(best);
   }
 
   setTarget(t) {
@@ -670,7 +697,7 @@ export class Rival {
     if (t === this.tactic) return;
     this.tactic = t;
     this.strafeDir = Math.random() < 0.5 ? 1 : -1;
-    this.strafeT = 1.1 + Math.random() * 0.8;
+    this.strafeT = STRAFE_HOLD + Math.random() * 1.2;
     this.flankSide = Math.random() < 0.5 ? 1 : -1;
     if (t !== 'take_cover' && !this.runningToShelter) this.cover = cover || this.cover;
   }
@@ -706,7 +733,7 @@ export class Rival {
     }
     this.coverScanT = (this.coverScanT || 0) - dt;
     if (threat && (this.coverScanT <= 0 || !this.cover)) {
-      this.coverScanT = this.runningToShelter ? 0.75 : 0.55;
+      this.coverScanT = this.runningToShelter ? 1.2 : 1.5;
       const found = this.pickCover(threat);
       if (found) this.cover = found;
       if (this.cover && threat) {
@@ -799,7 +826,7 @@ export class Rival {
     out.aim = visible && d < 70 && this.canFight();
 
     this.strafeT -= dt;
-    if (this.strafeT <= 0) { this.strafeDir *= -1; this.strafeT = 1.4 + Math.random() * 1.6; }
+    if (this.strafeT <= 0) { this.strafeDir *= -1; this.strafeT = STRAFE_HOLD + Math.random() * STRAFE_SPREAD; }
 
     if (this.isRuthless()) {
       this.needFirstCover = false;
@@ -1035,7 +1062,7 @@ export class Rival {
     const m = this.seen(T);
     const rifle = L.current === 'rifle';
     const rush = this.peeking || this.isRuthless() || this.tactic === 'push' || this.tactic === 'flank';
-    const react = this.persona.reaction * (rush ? 0.28 : 0.4) + (rifle ? 0.12 : 0);
+    const react = this.persona.reaction * (rush ? 0.75 : 1) + (rifle ? 0.12 : 0);
     if (!m.visible || m.sightT < react) return;
     if (this.character.aimWeight < (rush ? 0.55 : 0.68)) return;
     const want = Math.atan2(this.aimPoint.x - this.pos.x, this.aimPoint.z - this.pos.z);
@@ -1137,9 +1164,9 @@ export class Rival {
     let wish = { dir: new THREE.Vector3(), speed: 0, aim: false, jump: false };
     if (active) {
       this.perceive(dt);
-      this.setTarget(this.closestEnemy(this.enemies()));
-      // Getting shot or losing the target calls for a quick rethink.
-      if (this.combat.time - this.fighter.lastHitT < dt * 1.5) this.thinkT = Math.min(this.thinkT, 0.12);
+      this.pickTarget();
+      // A hit gets a human beat to reconsider — not an instant plan swap.
+      if (this.combat.time - this.fighter.lastHitT < dt * 1.5) this.thinkT = Math.min(this.thinkT, HIT_RETHINK);
       this.thinkT -= dt;
       if (this.thinkT <= 0 && !this.thinking) this.think();
       if (this.target && !this.enemies().includes(this.target)) this.target = null;
@@ -1152,9 +1179,9 @@ export class Rival {
     if (wish.aim) {
       const want = Math.atan2(this.aimPoint.x - this.pos.x, this.aimPoint.z - this.pos.z);
       const err = wrapAngle(want - this.yaw);
-      this.yaw += Math.sign(err) * Math.min(Math.abs(err), Math.max(Math.abs(err) * 10, 4) * dt);
+      this.yaw += Math.sign(err) * Math.min(Math.abs(err), Math.max(Math.abs(err) * 5, 2.2) * dt);
     } else if (speed > 0.4) {
-      this.yaw += wrapAngle(Math.atan2(this.vel.x, this.vel.z) - this.yaw) * Math.min(1, dt * 8);
+      this.yaw += wrapAngle(Math.atan2(this.vel.x, this.vel.z) - this.yaw) * Math.min(1, dt * 5);
     }
     const fwd = new THREE.Vector3(Math.sin(this.yaw), 0, Math.cos(this.yaw));
     const left = new THREE.Vector3(fwd.z, 0, -fwd.x);
