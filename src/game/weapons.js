@@ -288,6 +288,11 @@ export class Weapons {
     const end = hit ? from.clone().addScaledVector(dir, hit.t) : from.clone().addScaledVector(dir, 500);
     this.fx.tracer(flashAt, end);
     if (!shooter.isPlayer) this.checkNearMiss(from, end, hit);
+    // Open-air misses used to return here, so the room never heard the
+    // round. The other player only saw the aim pose until a hit landed.
+    if (shooter.isPlayer && this.session?.multi && !hit?.drone) {
+      this.session.reportShot(from, dir, def.key, hit?.fighter?.net ? hit.fighter.id : undefined, !!hit?.head);
+    }
     if (!hit) return null;
     const hitDist = end.distanceTo(this.player.camera.position);
     if (hit.fighter) {
@@ -319,11 +324,9 @@ export class Weapons {
       return hit;
     }
     if (hit.fighter?.net) {
-      if (shooter.isPlayer) this.session?.reportShot(from, dir, def.key, hit.fighter.id, hit.head);
       this.combat.damage(hit.fighter, shooter, hit.head ? def.head : def.body, dir, { head: hit.head, weapon: def.key, at: end });
       return hit;
     }
-    if (shooter.isPlayer && this.session?.multi) this.session.reportShot(from, dir, def.key);
     if (hit.fighter) this.combat.damage(hit.fighter, shooter, hit.head ? def.head : def.body, dir, { head: hit.head, weapon: def.key, at: end });
     else if (hit.body || hit.target) hit.scored = this.world.props.hit(hit, end, dir, def.force);
     return hit;

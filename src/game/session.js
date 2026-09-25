@@ -186,8 +186,10 @@ export class Session {
 
   reportShot(o, d, w, hid, head) {
     if (!this.multi) return;
+    this.shotSeq = (this.shotSeq || 0) + 1;
     this.net.send({
       t: 'shot',
+      n: this.shotSeq,
       o: [o.x, o.y, o.z],
       d: [d.x, d.y, d.z],
       w,
@@ -470,13 +472,15 @@ export class Session {
     const r = this.remotes.get(msg.id);
     if (!r) return;
     const from = vec(msg.o);
-    const dir = vec(msg.d);
+    const dir = vec(msg.d, [0, 0, 1]);
+    if (!dir.lengthSq()) dir.set(Math.sin(r.yaw || 0), 0, Math.cos(r.yaw || 0));
     if (!dir.lengthSq()) return;
     dir.normalize();
     const ch = r.character;
     const rifle = msg.w === 'rifle';
     const flash = rifle && ch.rifleMuzzle ? ch.rifleMuzzle() : ch.muzzleWorld?.(0) || from;
     this.world.fx.muzzle(flash, dir, rifle ? 2.4 : 1);
+    if (!rifle) ch.fired?.(0);
     const hit = this.world.raycast(from, dir, 900, r.fighter);
     const end = hit ? from.clone().addScaledVector(dir, hit.t) : from.clone().addScaledVector(dir, 80);
     this.world.fx.tracer(flash, end);
