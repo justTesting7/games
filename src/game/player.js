@@ -259,7 +259,7 @@ export class Player {
       }
     }
 
-    const standH = 1.7 - this.crouchT * 1.05;
+    const standH = 1.7 - this.crouchT * 0.50;
     this.world.veg.colliders.resolveXZ(next, RADIUS, next.y, next.y + standH);
     this.world.props.collidePlayer(next, RADIUS, this.vel, standH);
     this.world.cars?.collideWalker(next, RADIUS, this.vehicle);
@@ -391,7 +391,7 @@ export class Player {
     const yaw = this.camYaw + swayYaw;
     const dir = new THREE.Vector3(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch));
     const right = new THREE.Vector3(-Math.cos(this.camYaw), 0, Math.sin(this.camYaw));
-    const eye = (through ? 1.64 : aiming ? 1.58 : 1.55) - crouch * 0.52;
+    const eye = (through ? 1.64 : aiming ? 1.58 : 1.55) - crouch * 0.38;
     const pivot = body.clone().add(new THREE.Vector3(0, eye, 0));
     const smoothPivot = this.smoothPivot || pivot.clone();
     smoothPivot.x = pivot.x;
@@ -452,7 +452,7 @@ export class Player {
   // standing behind actually sits on the aim ray.
   eyeHeight() {
     const through = this.scopeT > 0.4;
-    return (through ? 1.64 : this.character?.aimWeight > 0.5 ? 1.58 : 1.55) - this.crouchT * 0.52;
+    return (through ? 1.64 : this.character?.aimWeight > 0.5 ? 1.58 : 1.55) - this.crouchT * 0.38;
   }
 
   losOrigin(out = new THREE.Vector3()) {
