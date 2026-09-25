@@ -122,6 +122,7 @@ self.onmessage = (e) => {
   const t0 = performance.now();
   const { seed, map = 'island' } = e.data;
   const out = map === 'city' ? buildCityHeightmap(seed)
+    : map === 'manhattan' ? buildCityHeightmap(seed, { theme: 'manhattan' })
     : map === 'garden' ? buildArenaHeightmap(seed)
     : generateIsland(seed);
   out.ms = performance.now() - t0;

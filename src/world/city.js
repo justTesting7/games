@@ -155,30 +155,81 @@ export class City {
       placeStreetProp(this.models, this.group, this.colliders, this.terrain, id, x, z, yaw, scale, coverY, type)
     );
 
+    const manhattan = layout.theme === 'manhattan';
     withBatcher(this.batcher, () => {
       this.fountain = buildPlaza(this.group, this.colliders, this.terrain, this.models, rand, place, this.pipeline);
       this.treeWind = buildStreetTrees(this.group, this.colliders, this.terrain, rand);
-      buildSewers(this.group, this.colliders, this.terrain, rand);
       dressSidewalks(this.models, this.group, this.colliders, this.terrain, rand);
       dressCityFurniture(this.models, this.group, this.colliders, this.terrain, rand, place);
-      placeRoadblocks(this.models, this.group, this.colliders, this.terrain, rand);
-      scatterStreetClutter(this.models, this.group, this.colliders, this.terrain, rand);
-      scatterLotWreckage(this.models, this.group, this.colliders, this.terrain, layout, rand);
-      scatterPlazaRing(this.models, this.group, this.colliders, this.terrain, rand);
-
-      for (let n = 0; n < 22; n++) {
-        const x = (rand() - 0.5) * 90, z = (rand() - 0.5) * 90;
-        const cell = cityCell(x, z);
-        if (cell.onRoad || Math.hypot(x, z) < CITY.plazaRoad) continue;
-        const stove = place('barrel_stove', x, z, rand() * 6, 1, 1.1);
-        if (stove) this.fires.push({ x: stove.position.x, z: stove.position.z, y: stove.position.y + 0.5, phase: rand() * 10 });
+      if (manhattan) {
+        this.buildLanes();
+      } else {
+        buildSewers(this.group, this.colliders, this.terrain, rand);
+        placeRoadblocks(this.models, this.group, this.colliders, this.terrain, rand);
+        scatterStreetClutter(this.models, this.group, this.colliders, this.terrain, rand);
+        scatterLotWreckage(this.models, this.group, this.colliders, this.terrain, layout, rand);
+        scatterPlazaRing(this.models, this.group, this.colliders, this.terrain, rand);
+        for (let n = 0; n < 22; n++) {
+          const x = (rand() - 0.5) * 90, z = (rand() - 0.5) * 90;
+          const cell = cityCell(x, z);
+          if (cell.onRoad || Math.hypot(x, z) < CITY.plazaRoad) continue;
+          const stove = place('barrel_stove', x, z, rand() * 6, 1, 1.1);
+          if (stove) this.fires.push({ x: stove.position.x, z: stove.position.z, y: stove.position.y + 0.5, phase: rand() * 10 });
+        }
       }
     });
     this.batcher.bake(this.group);
     this.batcher.update({ x: 0, y: 2, z: 13 });
 
     const fog = this.pipeline.fogMaterial.uniforms;
-    if (fog.uFogDensity) fog.uFogDensity.value = 0.0028;
+    if (fog.uFogDensity) fog.uFogDensity.value = manhattan ? 0.0018 : 0.0028;
+  }
+
+  /** Painted lane dashes so the avenues read as clear driving roads. */
+  buildLanes() {
+    const { pitch, halfBlocks, playRadius, baseY } = CITY;
+    const addMarks = (spots, color, geo) => {
+      if (!spots.length) return;
+      const paint = new THREE.MeshStandardMaterial({
+        color, roughness: 0.5, metalness: 0.02, emissive: color, emissiveIntensity: 0.12,
+      });
+      const mesh = new THREE.InstancedMesh(geo, paint, spots.length);
+      mesh.receiveShadow = true;
+      const m = new THREE.Matrix4(), q = new THREE.Quaternion(), p = new THREE.Vector3(), s = new THREE.Vector3(1, 1, 1);
+      spots.forEach((sp, i) => {
+        q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), sp.yaw);
+        p.set(sp.x, baseY - 0.08, sp.z);
+        mesh.setMatrixAt(i, m.compose(p, q, s));
+      });
+      mesh.instanceMatrix.needsUpdate = true;
+      this.group.add(mesh);
+    };
+    const white = [];
+    const yellow = [];
+    const lim = halfBlocks * pitch;
+    for (let n = -halfBlocks; n < halfBlocks; n++) {
+      const c = pitch * 0.5 + n * pitch;
+      for (let t = -lim; t <= lim; t += 5.4) {
+        if (Math.hypot(c, t) > playRadius - 10) continue;
+        const cell = cityCell(c, t);
+        if (!cell.onRoad || cell.intersection) continue;
+        white.push({ x: c - 2.35, z: t, yaw: 0 });
+        white.push({ x: c + 2.35, z: t, yaw: 0 });
+        yellow.push({ x: c - 0.12, z: t, yaw: 0 });
+        yellow.push({ x: c + 0.12, z: t, yaw: 0 });
+      }
+      for (let t = -lim; t <= lim; t += 5.4) {
+        if (Math.hypot(t, c) > playRadius - 10) continue;
+        const cell = cityCell(t, c);
+        if (!cell.onRoad || cell.intersection) continue;
+        white.push({ x: t, z: c - 2.35, yaw: Math.PI * 0.5 });
+        white.push({ x: t, z: c + 2.35, yaw: Math.PI * 0.5 });
+        yellow.push({ x: t, z: c - 0.12, yaw: Math.PI * 0.5 });
+        yellow.push({ x: t, z: c + 0.12, yaw: Math.PI * 0.5 });
+      }
+    }
+    addMarks(white, 0xe8e2c4, new THREE.BoxGeometry(0.12, 0.02, 2.2));
+    addMarks(yellow, 0xf0c400, new THREE.BoxGeometry(0.10, 0.02, 2.4));
   }
 
   update(dt, fx, camera) {

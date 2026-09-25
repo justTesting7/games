@@ -290,9 +290,10 @@ async function init() {
     progress.task('Loading terrain materials', 3, () => loadTerrainTextures(mapDef)),
   ]);
   const indoor = mapDef.id === 'garden';
+  const urban = mapDef.id === 'city' || mapDef.id === 'manhattan' || indoor;
   pipeline.indoor = indoor;
   const terrain = new Terrain(data, textures, {
-    urban: mapDef.id === 'city' || indoor, arena: indoor, heightFn: indoor ? arenaHeightAt : null,
+    urban, arena: indoor, heightFn: indoor ? arenaHeightAt : null,
   });
   world.terrain = terrain;
   pipeline.scene.add(terrain.group);
@@ -315,7 +316,7 @@ async function init() {
   let city = null;
   let arena = null;
   let fish = null;
-  if (mapDef.id === 'city') city = new City(terrain, veg.colliders, pipeline);
+  if (mapDef.id === 'city' || mapDef.id === 'manhattan') city = new City(terrain, veg.colliders, pipeline);
   if (indoor) arena = new Arena(terrain, veg.colliders, pipeline);
   const fighters = mode === 'solo'
     ? [selection.player, ...selection.rivals].map(byId)
@@ -349,7 +350,7 @@ async function init() {
   if (city && data.layout) {
     city.build(data.layout);
     pipeline.scene.add(city.group);
-    cars.spawnCity();
+    cars.spawnMap(mapDef.id);
   }
   if (arena && data.layout) {
     arena.build(data.layout);
@@ -474,8 +475,8 @@ async function init() {
         const dist = 18 + Math.random() * 10;
         const x = p.x + Math.sin(ang) * dist, z = p.z + Math.cos(ang) * dist;
         const h = terrain.heightAt(x, z);
-        if (!terrain.inBounds(x, z) || h < (mapDef.id === 'city' ? 1.2 : 0.6)) continue;
-        if (terrain.normalAt(x, z).y < (mapDef.id === 'city' ? 0.75 : 0.8)) continue;
+        if (!terrain.inBounds(x, z) || h < (urban ? 1.2 : 0.6)) continue;
+        if (terrain.normalAt(x, z).y < (urban ? 0.75 : 0.8)) continue;
         if (veg.colliders.query(x, z, 1.2, tmp).length) continue;
         if (rivals.some((o, j) => j < i && Math.hypot(o.pos.x - x, o.pos.z - z) < 8)) continue;
         at = { x, z };

@@ -1,5 +1,5 @@
 import {
-  CAR, cityCarSpots, spotOnRoad, canEnter, nearestEnter, carOverlap, resolveCarBox,
+  CAR, cityCarSpots, manhattanCarSpots, carSpotsForMap, spotOnRoad, canEnter, nearestEnter, carOverlap, resolveCarBox,
   runOverHits, stepDrive, seatOf, exitOf, localOffset, cockpitEye, hitCar,
   paneBit, glassIntact, glassMaskAfterHit,
 } from '../src/game/cars.js';
@@ -70,21 +70,38 @@ if (!room.includes('car: { body: 200')) throw new Error('room must treat a run-o
 if (!room.includes("t === 'runover'")) throw new Error('room must accept run-over reports');
 if (!room.includes("t === 'car'")) throw new Error('room must sync enter/leave/drive');
 if (!room.includes("act === 'glass'")) throw new Error('room must sync broken glass');
+if (!room.includes("'manhattan'")) throw new Error('room must accept the midtown map');
+if (!room.includes('const FLEET = 64')) throw new Error('room fleet must cover the packed midtown cars');
+
+const maps = await import('node:fs').then((fs) => fs.readFileSync(new URL('../src/world/maps.js', import.meta.url), 'utf8'));
+if (!maps.includes("id: 'manhattan'")) throw new Error('maps must expose Midtown');
+
+const midtown = manhattanCarSpots();
+if (midtown.length < 40) throw new Error(`midtown should pack the avenues, got ${midtown.length}`);
+const midKeys = new Set(midtown.map((s) => `${s.x.toFixed(2)},${s.z.toFixed(2)}`));
+if (midKeys.size !== midtown.length) throw new Error('midtown spots must be unique');
+for (const s of midtown) {
+  if (!spotOnRoad(s)) throw new Error(`midtown spot ${s.x},${s.z} is not on a road`);
+  if (Math.hypot(s.x, s.z) < 28) throw new Error('keep the plaza clear of parked cars');
+}
+if (carSpotsForMap('manhattan').length !== midtown.length) throw new Error('manhattan map must use the packed fleet');
+if (carSpotsForMap('city').length !== 8) throw new Error('dead district still has eight cars');
+if (carSpotsForMap('island').length) throw new Error('island should not spawn street cars');
 
 const car = { x: 0, y: 0, z: 0, yaw: 0, glass: 0 };
-const throughWind = hitCar({ x: 0, y: 1.12, z: 2.4 }, { x: 0, y: 0, z: -1 }, car, 8);
+const throughWind = hitCar({ x: 0, y: 0.88, z: 2.4 }, { x: 0, y: 0, z: -1 }, car, 8);
 if (!throughWind?.glass || throughWind.pane !== 'wind') {
   throw new Error(`windshield should catch a shot into the cabin, got ${throughWind?.surface} ${throughWind?.pane}`);
 }
-const hood = hitCar({ x: 0, y: 0.82, z: 3 }, { x: 0, y: 0, z: -1 }, car, 8);
+const hood = hitCar({ x: 0, y: 0.60, z: 3 }, { x: 0, y: 0, z: -1 }, car, 8);
 if (!hood || hood.surface !== 'metal') throw new Error('the hood must stop a low shot');
-const open = hitCar({ x: 0, y: 1.12, z: 2.4 }, { x: 0, y: 0, z: -1 }, { ...car, glass: paneBit('wind') }, 2.2, { metalOnly: true });
+const open = hitCar({ x: 0, y: 0.88, z: 2.4 }, { x: 0, y: 0, z: -1 }, { ...car, glass: paneBit('wind') }, 2.2, { metalOnly: true });
 if (open) throw new Error('broken windshield should leave a hole into the cabin');
 if (glassIntact(glassMaskAfterHit(0, 'wind'), 'wind')) throw new Error('a hit pane must stay broken');
 
 const eye = cockpitEye({ x: 10, y: 2, z: 4, yaw: 0 });
-if (eye.y < 2.9) throw new Error('cockpit eye should sit above the dash');
-if (eye.z >= 4 + 0.56) throw new Error('driver view must start behind the windshield');
+if (eye.y < 2.7 || eye.y > 3.0) throw new Error(`cockpit eye should sit in the low cabin, got ${eye.y}`);
+if (eye.z >= 4 + 0.40) throw new Error('driver view must start behind the windshield');
 
 const weapons = await import('node:fs').then((fs) => fs.readFileSync(new URL('../src/game/weapons.js', import.meta.url), 'utf8'));
 if (!weapons.includes('breakAlong')) throw new Error('shots into a car must break glass along the ray');

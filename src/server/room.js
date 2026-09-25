@@ -12,7 +12,8 @@ const DAMAGE = {
 };
 const ROSTERS = new Set(['adventurer', 'redpolo', 'greytee', 'checkers', 'denim', 'linen']);
 const WEAPONS = new Set(['pistols', 'rifle', 'grenade', 'drone']);
-const MAPS = new Set(['island', 'city', 'garden']);
+const MAPS = new Set(['island', 'city', 'garden', 'manhattan']);
+const FLEET = 64;
 const clampMin = (v) => {
   const n = Math.round(num(v));
   return Number.isFinite(n) ? Math.max(2, Math.min(12, n)) : 2;
@@ -33,8 +34,8 @@ export class GameRoom extends DurableObject {
     this.map = this.settings.map || (await this.ctx.storage.get('map')) || '';
     this.hostId = (await this.ctx.storage.get('hostId')) || '';
     this.nextSlot = 0;
-    this.fleet = Array.from({ length: 8 }, () => null);
-    this.seats = Array(8).fill(null);
+    this.fleet = Array.from({ length: FLEET }, () => null);
+    this.seats = Array(FLEET).fill(null);
     const saved = (await this.ctx.storage.get('players')) || {};
     for (const [id, rec] of Object.entries(saved)) {
       this.adopt(null, { ...rec, id, away: true, awayAt: rec.awayAt || Date.now() });
@@ -265,7 +266,7 @@ export class GameRoom extends DurableObject {
       mine.aim = !!msg.aim;
       if (WEAPONS.has(msg.w)) mine.w = msg.w;
       if (msg.car === null) mine.car = null;
-      else if (Number.isFinite(+msg.car)) mine.car = Math.max(0, Math.min(7, Math.round(+msg.car)));
+      else if (Number.isFinite(+msg.car)) mine.car = Math.max(0, Math.min(FLEET - 1, Math.round(+msg.car)));
       this.broadcast(ws, {
         t: 'pose', id: mine.id, p: mine.p, yaw: mine.yaw, pitch: num(msg.pitch),
         spd: mine.spd, g: mine.g, cr: mine.cr, aim: mine.aim, w: mine.w,
@@ -332,7 +333,7 @@ export class GameRoom extends DurableObject {
 
   async onCar(mine, ws, msg) {
     const i = Math.round(num(msg.i));
-    if (i < 0 || i > 7) return;
+    if (i < 0 || i >= FLEET) return;
     const act = str(msg.a, 8);
     const p = Array.isArray(msg.p) ? msg.p.slice(0, 3).map(num) : mine.p;
     const yaw = num(msg.yaw);
@@ -421,8 +422,8 @@ export class GameRoom extends DurableObject {
       p.drone = null;
       p.car = null;
     }
-    this.fleet = Array.from({ length: 8 }, () => null);
-    this.seats = Array(8).fill(null);
+    this.fleet = Array.from({ length: FLEET }, () => null);
+    this.seats = Array(FLEET).fill(null);
     this.round = { state: 'countdown', ends: Date.now() + 3000 };
     this.broadcast(null, {
       t: 'round',
