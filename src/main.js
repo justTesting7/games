@@ -8,7 +8,7 @@ import { Vegetation } from './world/vegetation.js';
 import { getMap } from './world/maps.js';
 import { City } from './world/city.js';
 import { Arena } from './world/arena.js';
-import { standSpawn } from './world/arenaLayout.js';
+import { arenaHeightAt, standSpawn } from './world/arenaLayout.js';
 import { Fish } from './world/fish.js';
 import { Character } from './game/character.js';
 import { Player } from './game/player.js';
@@ -287,7 +287,9 @@ async function init() {
   ]);
   const indoor = mapDef.id === 'garden';
   pipeline.indoor = indoor;
-  const terrain = new Terrain(data, textures, { urban: mapDef.id === 'city' || indoor, arena: indoor });
+  const terrain = new Terrain(data, textures, {
+    urban: mapDef.id === 'city' || indoor, arena: indoor, heightFn: indoor ? arenaHeightAt : null,
+  });
   world.terrain = terrain;
   pipeline.scene.add(terrain.group);
 

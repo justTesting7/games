@@ -27,8 +27,9 @@ for (let i = 0; i < 8; i++) {
   if (used.has(s.section)) fail(`two players share stand ${s.section}`);
   used.add(s.section);
   if (Math.abs(arenaHeightAt(s.x, s.z, layout, noise) - s.y) > 0.08) fail(`slot ${i} not standing on the terrace`);
-  const facing = Math.atan2(-s.x, -s.z);
-  if (Math.abs(Math.atan2(Math.sin(s.yaw - facing), Math.cos(s.yaw - facing))) > 0.05) fail(`slot ${i} not facing the court`);
+  const toCourt = Math.hypot(s.x, s.z);
+  const dot = (Math.sin(s.yaw) * -s.x + Math.cos(s.yaw) * -s.z) / toCourt;
+  if (dot < 0.6) fail(`slot ${i} not facing the court (${dot.toFixed(2)})`);
 }
 
 if (arenaZone(0, 0) !== 'court') fail(`center is ${arenaZone(0, 0)}, expected court`);
@@ -51,18 +52,14 @@ for (const ang of [0, Math.PI / 4, Math.PI / 2, Math.PI]) {
 const courtH = arenaHeightAt(0, 0, layout, noise);
 if (Math.abs(courtH - ARENA.baseY) > 0.08) fail(`court height ${courtH}`);
 
-const concX = Math.cos(0.35) * ARENA.sx * ((ARENA.concIn + ARENA.concOut) * 0.5);
-const concZ = Math.sin(0.35) * ARENA.sz * ((ARENA.concIn + ARENA.concOut) * 0.5);
-if (arenaZone(concX, concZ) !== 'concourse') fail(`expected concourse zone, got ${arenaZone(concX, concZ)}`);
-const concH = arenaHeightAt(concX, concZ, layout, noise);
-if (concH < ARENA.concY - 0.3) fail(`concourse should be raised, got ${concH}`);
+const conc = ovalPoint((ARENA.concIn + ARENA.concOut) * 0.5, 0.35);
+if (arenaZone(conc.x, conc.z) !== 'concourse') fail(`expected concourse zone, got ${arenaZone(conc.x, conc.z)}`);
+const concH = arenaHeightAt(conc.x, conc.z, layout, noise);
+if (Math.abs(concH - ARENA.concY) > 0.05) fail(`concourse should be raised, got ${concH}`);
 
-const hallU = (ARENA.hallOut + ARENA.concOut) > ARENA.hallOut
-  ? ARENA.hallOut - 0.25
-  : ARENA.hallOut - 0.2;
-const hallX = Math.cos(0.35) * ARENA.sx * hallU;
-const hallZ = Math.sin(0.35) * ARENA.sz * hallU;
-if (arenaZone(hallX, hallZ) !== 'hall') fail(`expected hall, got ${arenaZone(hallX, hallZ)} u=${ovalU(hallX, hallZ)}`);
+const hall = ovalPoint((ARENA.hallIn + ARENA.hallOut) * 0.5, 2.2);
+if (arenaZone(hall.x, hall.z) !== 'hall') fail(`expected hall, got ${arenaZone(hall.x, hall.z)} u=${ovalU(hall.x, hall.z)}`);
+if (Math.abs(arenaHeightAt(hall.x, hall.z) - ARENA.topY) > 0.05) fail('hall should sit level with the top row');
 
 const data = buildArenaHeightmap(20240611);
 if (data.heights.length !== 1025 * 1025) fail('heightmap size');

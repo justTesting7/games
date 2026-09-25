@@ -1,79 +1,153 @@
-import { makeNoise } from './noise.js';
 import { GRID_N, GRID_SPACING, HALF_WORLD } from './constants.js';
 
-const SX = 22;
-const SZ = 15.6;
-const AVG = (SX + SZ) * 0.5;
+// Rows are offset curves of the court rectangle: straight along the
+// sidelines and baselines, quarter circles in the corners. `u` is distance
+// from the court edge in units of RU metres.
+const CX = 14.325;
+const CZ = 7.62;
+const RU = 6.0;
 
 export const BOWL = {
-  sections: 24,
+  sections: 26,
   lowerRows: 26,
-  upperRows: 22,
+  upperRows: 18,
   spawnRow: 18,
-  rise: 0.32,
-  tread: 0.74,
+  rise: 0.38,
+  upperRise: 0.44,
+  tread: 0.8,
+  upperTread: 0.82,
   spawnTread: 3.2,
-  seatPitch: 0.485,
-  aisleRad: 0.038,
-  seatSetback: 0.32,
+  seatPitch: 0.48,
+  aisle: 1.3,
+  seatSetback: 0.34,
 };
 
-function rowPlan(startU, rows, startY, spawnRow = 0) {
-  const out = [];
-  let u = startU;
-  for (let r = 1; r <= rows; r++) {
-    const wide = spawnRow > 0 && r === spawnRow;
-    const depth = wide ? BOWL.spawnTread : BOWL.tread;
-    const du = depth / AVG;
-    const y = startY + (r - 1) * BOWL.rise;
-    out.push({
-      row: r, u0: u, u1: u + du, y, wide,
-      walkU: u + (wide ? du * 0.48 : du * 0.42),
-      seatU: u + du - BOWL.seatSetback / AVG,
-    });
-    u += du;
-  }
-  return { rows: out, endU: u };
+// East half-baseline, NE corner, north sideline, NW corner, west baseline,
+// SW corner, south sideline, SE corner, east half-baseline. Widths are in
+// sections so every section sits on exactly one segment.
+const SEGMENTS = [
+  { n: 1, kind: 'line', a: [CX, 0], b: [CX, CZ], nrm: [1, 0] },
+  { n: 4, kind: 'arc', c: [CX, CZ], t0: 0, t1: Math.PI / 2 },
+  { n: 3, kind: 'line', a: [CX, CZ], b: [-CX, CZ], nrm: [0, 1] },
+  { n: 4, kind: 'arc', c: [-CX, CZ], t0: Math.PI / 2, t1: Math.PI },
+  { n: 2, kind: 'line', a: [-CX, CZ], b: [-CX, -CZ], nrm: [-1, 0] },
+  { n: 4, kind: 'arc', c: [-CX, -CZ], t0: Math.PI, t1: Math.PI * 1.5 },
+  { n: 3, kind: 'line', a: [-CX, -CZ], b: [CX, -CZ], nrm: [0, -1] },
+  { n: 4, kind: 'arc', c: [CX, -CZ], t0: Math.PI * 1.5, t1: Math.PI * 2 },
+  { n: 1, kind: 'line', a: [CX, -CZ], b: [CX, 0], nrm: [1, 0] },
+];
+{
+  let s = 0;
+  for (const seg of SEGMENTS) { seg.s0 = s; s += seg.n; seg.s1 = s; }
 }
 
-const lowerBowl = rowPlan(1.08, BOWL.lowerRows, 2.18, BOWL.spawnRow);
-const concIn = lowerBowl.endU + 0.05;
-const concOut = concIn + 0.78;
-const concY = lowerBowl.rows[lowerBowl.rows.length - 1].y + 0.22;
-const upperBowl = rowPlan(concOut + 0.06, BOWL.upperRows, concY + 0.38);
-const hallIn = upperBowl.endU + 0.04;
-const hallOut = hallIn + 0.82;
-const facadeOut = hallOut + 0.34;
-const plazaOut = hallOut + 2.05;
+function rowPlan(startR, rows, startY, tread, rise, spawnRow = 0) {
+  const out = [];
+  let r = startR;
+  for (let i = 1; i <= rows; i++) {
+    const wide = spawnRow > 0 && i === spawnRow;
+    const depth = wide ? BOWL.spawnTread : tread;
+    const y = startY + (i - 1) * rise;
+    out.push({
+      row: i, r0: r, r1: r + depth, y, wide,
+      u0: r / RU, u1: (r + depth) / RU,
+      walkR: r + depth * (wide ? 0.48 : 0.42),
+      seatR: r + depth - BOWL.seatSetback,
+      get walkU() { return this.walkR / RU; },
+      get seatU() { return this.seatR / RU; },
+    });
+    r += depth;
+  }
+  return { rows: out, endR: r };
+}
+
+const baseY = 2.05;
+const bowlR = 6.48;
+const lowerBowl = rowPlan(bowlR, BOWL.lowerRows, baseY + 0.4, BOWL.tread, BOWL.rise, BOWL.spawnRow);
+const lastLow = lowerBowl.rows[lowerBowl.rows.length - 1];
+const concInR = lowerBowl.endR + 0.02;
+const concOutR = concInR + 3.0;
+const concY = lastLow.y + 0.22;
+const upperBowl = rowPlan(concOutR, BOWL.upperRows, concY + BOWL.upperRise, BOWL.upperTread, BOWL.upperRise);
+const lastUp = upperBowl.rows[upperBowl.rows.length - 1];
+const hallInR = upperBowl.endR;
+const hallOutR = hallInR + 6.5;
+const facadeOutR = hallOutR + 1.2;
+const plazaOutR = facadeOutR + 14;
 
 export const ARENA = {
-  baseY: 2.05,
-  courtHX: 14.325,
-  courtHZ: 7.62,
+  baseY,
+  courtHX: CX,
+  courtHZ: CZ,
   hoopInset: 1.575,
-  sx: SX,
-  sz: SZ,
-  bowlIn: 1.08,
-  concIn,
-  concOut,
-  hallOut,
-  facadeOut,
-  plazaOut,
-  playU: plazaOut + 0.9,
+  RU,
+  bowlR,
+  bowlIn: bowlR / RU,
+  concIn: concInR / RU,
+  concOut: concOutR / RU,
+  hallIn: hallInR / RU,
+  hallOut: hallOutR / RU,
+  facadeOut: facadeOutR / RU,
+  plazaOut: plazaOutR / RU,
+  playU: (plazaOutR + 6) / RU,
   concY,
+  topY: lastUp.y,
+  hallY: lastUp.y,
+  roofY: lastUp.y + 10.5,
   playRadius: 195,
-  tunnelHalf: 2.7,
 };
 
 export const LOWER_ROWS = lowerBowl.rows;
 export const UPPER_ROWS = upperBowl.rows;
 
+const TAU = Math.PI * 2;
+
+/** Offset-curve frame at distance r (m) from the court and parameter t in [0,1). */
+export function bowlFrame(r, t) {
+  let s = (((t % 1) + 1) % 1) * BOWL.sections;
+  let seg = SEGMENTS[SEGMENTS.length - 1];
+  for (const g of SEGMENTS) { if (s < g.s1) { seg = g; break; } }
+  const f = Math.min(1, Math.max(0, (s - seg.s0) / seg.n));
+  if (seg.kind === 'line') {
+    const bx = seg.a[0] + (seg.b[0] - seg.a[0]) * f;
+    const bz = seg.a[1] + (seg.b[1] - seg.a[1]) * f;
+    const [nx, nz] = seg.nrm;
+    return { x: bx + nx * r, z: bz + nz * r, nx, nz, tx: -nz, tz: nx };
+  }
+  const th = seg.t0 + (seg.t1 - seg.t0) * f;
+  const nx = Math.cos(th), nz = Math.sin(th);
+  return { x: seg.c[0] + nx * r, z: seg.c[1] + nz * r, nx, nz, tx: -nz, tz: nx };
+}
+
+/** Inverse of bowlFrame: distance from the court edge and perimeter parameter. */
+export function bowlParam(x, z) {
+  const qx = Math.abs(x) - CX, qz = Math.abs(z) - CZ;
+  const S = BOWL.sections;
+  if (qx > 0 && qz > 0) {
+    const cx = Math.sign(x) * CX, cz = Math.sign(z) * CZ;
+    let th = Math.atan2(z - cz, x - cx);
+    if (th < 0) th += TAU;
+    const seg = SEGMENTS.find((g) => g.kind === 'arc' && th >= g.t0 - 1e-9 && th <= g.t1 + 1e-9) || SEGMENTS[1];
+    const f = (th - seg.t0) / (seg.t1 - seg.t0);
+    return { r: Math.hypot(qx, qz), t: (seg.s0 + f * seg.n) / S };
+  }
+  if (qx > qz) {
+    const r = qx;
+    if (x > 0) return { r, t: z >= 0 ? (z / CZ) / S : (25 + (z + CZ) / CZ) / S };
+    return { r, t: (12 + 2 * (CZ - z) / (2 * CZ)) / S };
+  }
+  const r = qz;
+  if (z > 0) return { r, t: (5 + 3 * (CX - x) / (2 * CX)) / S };
+  return { r, t: (18 + 3 * (x + CX) / (2 * CX)) / S };
+}
+
 export function ovalU(x, z) {
-  return Math.hypot(x / ARENA.sx, z / ARENA.sz);
+  return bowlParam(x, z).r / RU;
 }
 
 export function ovalPoint(u, ang) {
-  return { x: Math.cos(ang) * ARENA.sx * u, z: Math.sin(ang) * ARENA.sz * u };
+  const f = bowlFrame(u * RU, ang / TAU);
+  return { x: f.x, z: f.z };
 }
 
 export function hoopX() {
@@ -81,87 +155,80 @@ export function hoopX() {
 }
 
 export function sectionAngle(sec, t = 0.5) {
-  const n = BOWL.sections;
-  const a0 = (sec / n) * Math.PI * 2 + BOWL.aisleRad;
-  const a1 = ((sec + 1) / n) * Math.PI * 2 - BOWL.aisleRad;
-  return a0 + (a1 - a0) * t;
+  return ((sec + t) / BOWL.sections) * TAU;
+}
+
+/** Length along the row at distance r (m) between two parameters inside one section. */
+export function rowLength(r, t0, t1) {
+  const s0 = t0 * BOWL.sections;
+  const seg = SEGMENTS.find((g) => s0 >= g.s0 - 1e-9 && s0 < g.s1 - 1e-9) || SEGMENTS[0];
+  const df = ((t1 - t0) * BOWL.sections) / seg.n;
+  if (seg.kind === 'line') return Math.abs(df) * Math.hypot(seg.b[0] - seg.a[0], seg.b[1] - seg.a[1]);
+  return Math.abs(df) * (seg.t1 - seg.t0) * r;
 }
 
 export function arcLength(u, a0, a1) {
-  const mid = (a0 + a1) * 0.5;
-  return Math.abs(a1 - a0) * u * Math.hypot(ARENA.sx * Math.sin(mid), ARENA.sz * Math.cos(mid));
-}
-
-/** Eight vomitoria: cardinals stay at court level, diagonals ramp to the concourse. */
-export function tunnelInfo(x, z) {
-  const ang = Math.atan2(z / ARENA.sz, x / ARENA.sx);
-  const step = Math.PI / 4;
-  const slot = Math.round(ang / step);
-  const center = slot * step;
-  const dAng = Math.abs(Math.atan2(Math.sin(ang - center), Math.cos(ang - center)));
-  const radius = Math.hypot(x, z);
-  const halfAng = Math.max(0.095, ARENA.tunnelHalf / Math.max(radius, 10));
-  const u = ovalU(x, z);
-  const inBand = dAng < halfAng && u > 0.98 && u < ARENA.facadeOut + 0.18;
-  const isRamp = inBand && (Math.abs(slot) & 1) === 1;
-  return { slot, center, lat: dAng * Math.max(radius, 1), inBand, isRamp, u };
+  return rowLength(u * RU, a0 / TAU, a1 / TAU);
 }
 
 export function rowAtU(u, bank = LOWER_ROWS) {
+  const r = u * RU;
   for (const row of bank) {
-    if (u >= row.u0 && u < row.u1) return row;
+    if (r >= row.r0 && r < row.r1) return row;
   }
   return null;
 }
 
-export function arenaZone(x, z) {
-  const u = ovalU(x, z);
-  const tun = tunnelInfo(x, z);
-  if (Math.abs(x) <= ARENA.courtHX && Math.abs(z) <= ARENA.courtHZ) return 'court';
-  if (u < ARENA.bowlIn) return 'apron';
-  if (tun.inBand && tun.isRamp) {
-    if (u < ARENA.concIn) return 'ramp';
-    if (u < ARENA.concOut) return 'concourse';
-    return 'hall';
+function rowAtR(r, bank) {
+  let lo = 0, hi = bank.length - 1;
+  if (r < bank[0].r0 || r >= bank[hi].r1) return null;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (bank[mid].r0 <= r) lo = mid; else hi = mid - 1;
   }
-  if (tun.inBand) return 'tunnel';
-  if (u < ARENA.concIn) return 'bowl';
-  if (u < ARENA.concOut) return 'concourse';
-  if (u < hallIn) return 'upper';
-  if (u < ARENA.hallOut) return 'hall';
-  if (u < ARENA.facadeOut) return 'facade';
-  if (u < ARENA.plazaOut) return 'plaza';
+  return bank[lo];
+}
+
+export function arenaZone(x, z) {
+  if (Math.abs(x) <= CX && Math.abs(z) <= CZ) return 'court';
+  const r = bowlParam(x, z).r;
+  if (r < bowlR) return 'apron';
+  if (r < concInR) return 'bowl';
+  if (r < concOutR) return 'concourse';
+  if (r < hallInR) return 'upper';
+  if (r < hallOutR) return 'hall';
+  if (r < facadeOutR) return 'facade';
+  if (r < plazaOutR) return 'plaza';
   return 'outside';
 }
 
-/** Consecutive slots land 7 sections apart so neighbours start on opposite sides. */
+/** Each slot gets its own section, seven apart so neighbours start across the bowl. */
 export function standSpawn(slot = 0) {
-  const sec = ((slot * 7) % BOWL.sections + BOWL.sections) % BOWL.sections;
+  const S = BOWL.sections;
+  const sec = ((slot * 7) % S + S) % S;
   const row = LOWER_ROWS[BOWL.spawnRow - 1];
-  const ang = sectionAngle(sec, 0.5);
-  const { x, z } = ovalPoint(row.walkU, ang);
+  const f = bowlFrame(row.walkR, (sec + 0.5) / S);
   return {
-    x, z, y: row.y, yaw: Math.atan2(-x, -z),
+    x: f.x, z: f.z, y: row.y, yaw: Math.atan2(-f.nx, -f.nz),
     section: sec, row: BOWL.spawnRow,
   };
 }
 
 export function enumerateSeats() {
   const seats = [];
+  const S = BOWL.sections;
   const placeBank = (bank, tier) => {
     for (const row of bank) {
-      for (let sec = 0; sec < BOWL.sections; sec++) {
-        const a0 = (sec / BOWL.sections) * Math.PI * 2 + BOWL.aisleRad;
-        const a1 = ((sec + 1) / BOWL.sections) * Math.PI * 2 - BOWL.aisleRad;
-        const mid = ovalPoint(row.seatU, (a0 + a1) * 0.5);
-        if (tunnelInfo(mid.x, mid.z).inBand) continue;
-        const arc = arcLength(row.seatU, a0, a1);
-        const n = Math.max(5, Math.floor(arc / BOWL.seatPitch));
+      for (let sec = 0; sec < S; sec++) {
+        const t0 = sec / S, t1 = (sec + 1) / S;
+        const L = rowLength(row.seatR, t0, t1);
+        const usable = L - BOWL.aisle;
+        const n = Math.max(0, Math.floor(usable / BOWL.seatPitch));
         for (let s = 0; s < n; s++) {
-          const ang = a0 + (a1 - a0) * ((s + 0.5) / n);
-          const { x, z } = ovalPoint(row.seatU, ang);
+          const d = BOWL.aisle * 0.5 + (s + 0.5) * (usable / n);
+          const f = bowlFrame(row.seatR, t0 + (d / L) * (t1 - t0));
           seats.push({
-            x, z, y: row.y + 0.02, yaw: Math.atan2(x, z) + Math.PI,
+            x: f.x, z: f.z, y: row.y + 0.02, yaw: Math.atan2(-f.nx, -f.nz),
             sec, row: row.row, tier, wide: row.wide,
           });
         }
@@ -182,40 +249,31 @@ export function generateArenaLayout(seed) {
   };
 }
 
-function steppedHeight(u) {
-  if (u < ARENA.bowlIn) return ARENA.baseY;
-  const low = rowAtU(u, LOWER_ROWS);
+function heightAtR(r) {
+  if (r < bowlR) return baseY;
+  const low = rowAtR(r, LOWER_ROWS);
   if (low) return low.y;
-  const lastLow = LOWER_ROWS[LOWER_ROWS.length - 1];
-  if (u < ARENA.concIn) return lastLow.y;
-  if (u < ARENA.concOut) return ARENA.concY;
-  const up = rowAtU(u, UPPER_ROWS);
+  if (r < concOutR) return concY;
+  const up = rowAtR(r, UPPER_ROWS);
   if (up) return up.y;
-  const lastUp = UPPER_ROWS[UPPER_ROWS.length - 1];
-  if (u < lastUp.u1 + 0.1) return lastUp.y;
-  return ARENA.baseY;
+  if (r < facadeOutR) return lastUp.y;
+  return baseY;
 }
 
-export function arenaHeightAt(x, z, _layout, noise) {
-  const { baseY, playRadius } = ARENA;
+/** Exact stepped floor height; the heightmap grid is too coarse for 0.8 m treads. */
+export function arenaHeightAt(x, z) {
   const r = Math.hypot(x, z);
-  if (r > playRadius + 18) {
-    const t = Math.min(1, (r - playRadius) / 32);
+  if (r > ARENA.playRadius + 18) {
+    const t = Math.min(1, (r - ARENA.playRadius) / 32);
     return baseY + t * t * 26;
   }
-  const u = ovalU(x, z);
-  let h = steppedHeight(u);
-  const n = noise.fbm2(x * 0.11 + 2.1, z * 0.11, 2) * 0.02;
-  if (u < ARENA.bowlIn) h += n * 0.2;
-  else if (u >= ARENA.facadeOut) h += n * 0.55;
-  return h;
+  return heightAtR(bowlParam(x, z).r);
 }
 
 export function arenaBiomeAt(x, z) {
   const zone = arenaZone(x, z);
   if (zone === 'court' || zone === 'apron') return { sand: 0.05, grass: 0.08, rock: 0.05, forest: 0.82 };
-  if (zone === 'concourse' || zone === 'ramp') return { sand: 0.08, grass: 0.78, rock: 0.1, forest: 0.04 };
-  if (zone === 'hall' || zone === 'tunnel') return { sand: 0.12, grass: 0.7, rock: 0.14, forest: 0.04 };
+  if (zone === 'concourse' || zone === 'hall') return { sand: 0.08, grass: 0.78, rock: 0.1, forest: 0.04 };
   if (zone === 'bowl' || zone === 'upper' || zone === 'facade') return { sand: 0.08, grass: 0.12, rock: 0.72, forest: 0.08 };
   if (zone === 'plaza') return { sand: 0.82, grass: 0.08, rock: 0.08, forest: 0.02 };
   return { sand: 0.55, grass: 0.1, rock: 0.3, forest: 0.05 };
@@ -224,13 +282,12 @@ export function arenaBiomeAt(x, z) {
 export function buildArenaHeightmap(seed) {
   const N = GRID_N;
   const layout = generateArenaLayout(seed);
-  const noise = makeNoise(seed + 417);
   const heights = new Float32Array(N * N);
   for (let j = 0; j < N; j++) {
     const z = j * GRID_SPACING - HALF_WORLD;
     for (let i = 0; i < N; i++) {
       const x = i * GRID_SPACING - HALF_WORLD;
-      heights[j * N + i] = arenaHeightAt(x, z, layout, noise);
+      heights[j * N + i] = arenaHeightAt(x, z);
     }
   }
   const normals = new Uint8Array(N * N * 4);

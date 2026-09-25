@@ -541,6 +541,7 @@ uniform float uUnderwater;
 uniform float uTime;
 uniform float uExposureBias;
 uniform float uAutoExposure;
+uniform float uScotopic;
 uniform float uVignette;
 uniform float uFlash;
 
@@ -572,7 +573,7 @@ void main() {
 
   float pl = dot(col, vec3(0.2126, 0.7152, 0.0722));
   float scot = 1.0 - smoothstep(0.004, 0.08, pl);
-  col = mix(col, vec3(0.55, 0.7, 1.0) * pl * 1.1, scot * 0.6);
+  col = mix(col, vec3(0.55, 0.7, 1.0) * pl * 1.1, scot * 0.6 * uScotopic);
 
   float avgLum = texture(tLum, vec2(0.5)).r;
   if (!(avgLum > 0.0) || avgLum != avgLum) avgLum = 0.18;

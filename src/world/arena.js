@@ -2,30 +2,31 @@ import * as THREE from 'three';
 import { loadGLTF, modelUrl } from '../engine/assets.js';
 import { mulberry32 } from './noise.js';
 import {
-  ARENA, BOWL, LOWER_ROWS, UPPER_ROWS, arenaZone, arcLength, enumerateSeats,
-  hoopX, ovalPoint, sectionAngle, standSpawn, tunnelInfo,
+  ARENA, BOWL, LOWER_ROWS, UPPER_ROWS, bowlFrame, enumerateSeats, hoopX, rowLength, standSpawn,
 } from './arenaLayout.js';
 import { PropBatcher, withBatcher } from './propBatcher.js';
 import {
-  makeBanner, makeConcrete, makeCourtPaint, makeEmissive, makeGardenSign, makeGlass,
-  makeHardwood, makeJumbotron, makeMarquee, makeMetal, makeSeatFabric, makeTerrazzo,
+  COURT_BORDER, makeBanner, makeConcrete, makeCourtPaint, makeEmissive, makeGardenSign, makeGlass,
+  makeHardwood, makeJumbotron, makeMetal, makeSeatFabric,
 } from './arenaMaterials.js';
 
 const UP = new THREE.Vector3(0, 1, 0);
-const SEAT_NAVY = new THREE.Color(0x12151c);
-const SEAT_WEAR = new THREE.Color(0x1a1e26);
+const S = BOWL.sections;
+const AISLE_W = BOWL.aisle * 0.5;
+const SEAT_NAVY = new THREE.Color(0x2a3450);
+const SEAT_WEAR = new THREE.Color(0x323d5a);
+const HALL_DOORS = new Set([3, 9, 16, 22]);
+const DOOR_W = 2.8;
+const DOOR_H = 2.9;
 
-function shade(o) {
-  o.traverse((c) => {
-    if (!c.isMesh) return;
-    if (c.material?.transparent || c.material?.isShaderMaterial) {
-      c.castShadow = false;
-      return;
-    }
-    c.castShadow = c.receiveShadow = true;
-  });
-  return o;
-}
+const C_TREAD = new THREE.Color(0x5c5e62);
+const C_RISER = new THREE.Color(0x303236);
+const C_AISLE = new THREE.Color(0xa4a5a4);
+const C_AISLE_RISER = new THREE.Color(0x7c7d7e);
+const C_CONC = new THREE.Color(0x4a4b4e);
+const C_BEIGE = new THREE.Color(0xc2a578);
+const C_WALL = new THREE.Color(0x1b1c20);
+const C_HALL = new THREE.Color(0x6e6a64);
 
 function mesh(geo, mat, x, y, z, rx = 0, ry = 0, rz = 0) {
   const m = new THREE.Mesh(geo, mat);
@@ -40,15 +41,107 @@ function addBox(colliders, x, z, y, hx, hz, h, type = 'concrete') {
   });
 }
 
+/** Distance `d` metres along section `sec` at offset `r`, as a perimeter parameter. */
+function paramAt(sec, r, d) {
+  const t0 = sec / S, t1 = (sec + 1) / S;
+  const L = rowLength(r, t0, t1);
+  return t0 + (Math.min(L, Math.max(0, d)) / L) * (t1 - t0);
+}
+
+function isArc(sec) {
+  return rowLength(10, sec / S, (sec + 1) / S) !== rowLength(20, sec / S, (sec + 1) / S);
+}
+
+const FULL = (L) => [0, L];
+const INNER = (L) => [AISLE_W, L - AISLE_W];
+const AISLE_A = () => [0, AISLE_W];
+const AISLE_B = (L) => [L - AISLE_W, L];
+
+/**
+ * Pieces of a section, fine enough to follow the corner arcs. `span(L)` gives
+ * the [start, end] distance along the row, so aisles keep a constant width.
+ */
+function sectionPieces(sec, span = FULL) {
+  const k = isArc(sec) ? 8 : 1;
+  const at = (r, f) => {
+    const L = rowLength(r, sec / S, (sec + 1) / S);
+    const [d0, d1] = span(L);
+    return paramAt(sec, r, d0 + (d1 - d0) * f);
+  };
+  const out = [];
+  for (let i = 0; i < k; i++) {
+    out.push({ at: (r) => at(r, i / k), bt: (r) => at(r, (i + 1) / k) });
+  }
+  return out;
+}
+
+class GeoBuilder {
+  constructor() {
+    this.pos = [];
+    this.nrm = [];
+    this.col = [];
+    this.idx = [];
+  }
+
+  vert(x, y, z, nx, ny, nz, c) {
+    this.pos.push(x, y, z);
+    this.nrm.push(nx, ny, nz);
+    this.col.push(c.r, c.g, c.b);
+    return this.pos.length / 3 - 1;
+  }
+
+  /** Quad from four vertices given counter-clockwise when seen from the front. */
+  quad(v, c) {
+    const [a, b, cc, d] = v.map((p) => this.vert(p[0], p[1], p[2], p[3], p[4], p[5], c));
+    this.idx.push(a, b, cc, a, cc, d);
+  }
+
+  /** Horizontal band between offsets r0..r1 at height y. */
+  flat(sec, r0, r1, y, c, span = FULL) {
+    for (const p of sectionPieces(sec, span)) {
+      const a0 = bowlFrame(r0, p.at(r0)), b0 = bowlFrame(r0, p.bt(r0));
+      const a1 = bowlFrame(r1, p.at(r1)), b1 = bowlFrame(r1, p.bt(r1));
+      this.quad([
+        [a0.x, y, a0.z, 0, 1, 0], [b0.x, y, b0.z, 0, 1, 0],
+        [b1.x, y, b1.z, 0, 1, 0], [a1.x, y, a1.z, 0, 1, 0],
+      ], c);
+    }
+  }
+
+  /** Vertical band at offset r from y0 to y1, facing the court. */
+  wall(sec, r, y0, y1, c, span = FULL, outward = false) {
+    const s = outward ? 1 : -1;
+    for (const p of sectionPieces(sec, span)) {
+      const a = bowlFrame(r, p.at(r)), b = bowlFrame(r, p.bt(r));
+      const va = [a.x, 0, a.z, a.nx * s, 0, a.nz * s];
+      const vb = [b.x, 0, b.z, b.nx * s, 0, b.nz * s];
+      const at = (v, y) => [v[0], y, v[2], v[3], v[4], v[5]];
+      if (outward) this.quad([at(vb, y0), at(va, y0), at(va, y1), at(vb, y1)], c);
+      else this.quad([at(va, y0), at(vb, y0), at(vb, y1), at(va, y1)], c);
+    }
+  }
+
+  build() {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(this.pos, 3));
+    g.setAttribute('normal', new THREE.Float32BufferAttribute(this.nrm, 3));
+    g.setAttribute('color', new THREE.Float32BufferAttribute(this.col, 3));
+    g.setIndex(this.idx);
+    g.computeBoundingSphere();
+    return g;
+  }
+}
+
 function seatGeo() {
-  const cushion = new THREE.BoxGeometry(0.46, 0.09, 0.42);
-  const back = new THREE.BoxGeometry(0.46, 0.5, 0.07);
-  const armL = new THREE.BoxGeometry(0.05, 0.16, 0.4);
+  const cushion = new THREE.BoxGeometry(0.44, 0.07, 0.3);
+  const back = new THREE.BoxGeometry(0.46, 0.56, 0.06);
+  const armL = new THREE.BoxGeometry(0.04, 0.5, 0.34);
   const armR = armL.clone();
-  cushion.translate(0, 0.045, 0);
-  back.translate(0, 0.3, -0.175);
-  armL.translate(-0.215, 0.12, 0);
-  armR.translate(0.215, 0.12, 0);
+  cushion.rotateX(-1.2);
+  cushion.translate(0, 0.36, -0.06);
+  back.translate(0, 0.52, -0.2);
+  armL.translate(-0.235, 0.25, -0.08);
+  armR.translate(0.235, 0.25, -0.08);
   const pos = [];
   const nrm = [];
   const idx = [];
@@ -72,6 +165,21 @@ function seatGeo() {
   return g;
 }
 
+/** Filled rounded rectangle at offset r from the court, lying flat. */
+function roundedRectShape(r, hx = ARENA.courtHX, hz = ARENA.courtHZ) {
+  const s = new THREE.Shape();
+  s.moveTo(hx + r, -hz);
+  s.lineTo(hx + r, hz);
+  s.absarc(hx, hz, r, 0, Math.PI / 2, false);
+  s.lineTo(-hx, hz + r);
+  s.absarc(-hx, hz, r, Math.PI / 2, Math.PI, false);
+  s.lineTo(-hx - r, -hz);
+  s.absarc(-hx, -hz, r, Math.PI, Math.PI * 1.5, false);
+  s.lineTo(hx, -hz - r);
+  s.absarc(hx, -hz, r, Math.PI * 1.5, Math.PI * 2, false);
+  return s;
+}
+
 export class Arena {
   constructor(terrain, colliders, pipeline) {
     this.terrain = terrain;
@@ -83,15 +191,12 @@ export class Arena {
     this._leds = [];
     this._t = 0;
     this.spawns = [];
+    this.models = {};
   }
 
   async load(progress) {
-    const ids = [
-      'painted_wooden_bench', 'metal_trash_can', 'wooden_crate_01', 'barrel_03',
-      'utility_box_01', 'utility_box_02', 'street_lamp_01', 'concrete_road_barrier',
-      'planter_box_01', 'barrel_stove',
-    ];
-    const models = await progress.task('Loading Garden dressing', 6, () => (
+    const ids = ['metal_trash_can', 'painted_wooden_bench', 'barrel_03'];
+    const models = await progress.task('Loading Garden dressing', 3, () => (
       Promise.all(ids.map((id) => loadGLTF(modelUrl(id))))
     ));
     this.models = Object.fromEntries(ids.map((id, i) => [id, models[i]]));
@@ -101,51 +206,51 @@ export class Arena {
     const rand = mulberry32((layout?.seed || 0) ^ 0x5a9e);
     const y0 = ARENA.baseY;
     const mats = {
-      wood: makeHardwood(),
       court: makeCourtPaint(makeHardwood()),
-      conc: makeConcrete(0x6a6762),
-      darkConc: makeConcrete(0x2a2c32),
-      terrazzo: makeTerrazzo(),
+      steps: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.88, metalness: 0.02, envMapIntensity: 0.1 }),
+      trim: new THREE.MeshStandardMaterial({
+        vertexColors: true, roughness: 0.6, metalness: 0.05, emissive: 0x2a1e0e, emissiveIntensity: 0.35,
+      }),
+      conc: makeConcrete(0x5a5854),
       seat: makeSeatFabric(),
-      steel: makeMetal(0x6a7078, 0.4),
-      chrome: makeMetal(0xb8bec6, 0.22),
+      steel: makeMetal(0x2a2c30, 0.5),
+      chrome: makeMetal(0xb8bec6, 0.25),
       glass: makeGlass(),
-      led: makeEmissive(0xc8b48a, 0.42),
-      amber: makeEmissive(0xff9a32, 0.7),
+      suite: new THREE.MeshStandardMaterial({
+        color: 0x0c0d10, roughness: 0.18, metalness: 0.4, emissive: 0x6a4a28, emissiveIntensity: 0.22,
+      }),
+      fixture: makeEmissive(0xfff6e8, 3.2),
+      amber: makeEmissive(0xff9a32, 0.9),
       jumbo: makeJumbotron(),
       sign: makeGardenSign(),
-      marquee: makeMarquee(),
-      orange: makeBanner(0xc45a18),
-      blue: makeBanner(0x0c3a7a),
-      housing: new THREE.MeshStandardMaterial({ color: 0x0c0d10, roughness: 0.62, metalness: 0.18 }),
-      pad: new THREE.MeshStandardMaterial({ color: 0x101214, roughness: 0.78, metalness: 0.06 }),
+      housing: new THREE.MeshStandardMaterial({ color: 0x0b0c0e, roughness: 0.5, metalness: 0.3 }),
+      pad: new THREE.MeshStandardMaterial({ color: 0x0e0f12, roughness: 0.8, metalness: 0.05 }),
+      roof: new THREE.MeshStandardMaterial({ color: 0x0d0e11, roughness: 0.95, metalness: 0.05, side: THREE.DoubleSide }),
       rim: new THREE.MeshStandardMaterial({
         color: 0xe85a12, roughness: 0.28, metalness: 0.55, emissive: 0x5a1c04, emissiveIntensity: 0.25,
       }),
     };
-    this._leds.push(mats.jumbo, mats.marquee);
+    this._leds.push(mats.jumbo);
     if (this.pipeline) this.pipeline.indoor = true;
 
     this.buildCourt(mats, y0);
     this.buildCourtside(mats, y0);
     this.buildHoops(mats, y0);
     this.buildStands(mats, y0, rand);
-    this.buildFascia(mats);
-    this.buildJumbotron(mats);
+    this.buildRails(mats);
+    this.buildParapet(mats);
+    this.buildBackWall(mats);
+    this.buildHall(mats, rand);
     this.buildRoof(mats);
-    this.buildConcourse(mats, y0, rand);
-    this.buildFacade(mats, y0);
-    this.buildPlaza(mats, y0);
-    this.dressProps(rand);
+    this.buildJumbotron(mats);
     this.lightArena(y0);
     this.group.traverse((o) => {
-      if (o.isMesh && !o.material?.transparent && !o.material?.isShaderMaterial) {
-        o.receiveShadow = true;
-        if (!o.userData.noShadow) o.castShadow = true;
-      }
+      if (!o.isMesh) return;
+      o.receiveShadow = !o.material?.isShaderMaterial;
+      o.castShadow = !!o.userData.shadow;
     });
-    const fog = this.pipeline.fogMaterial.uniforms;
-    if (fog.uFogDensity) fog.uFogDensity.value = 0.0016;
+    const fog = this.pipeline?.fogMaterial?.uniforms;
+    if (fog?.uFogDensity) fog.uFogDensity.value = 0.0009;
   }
 
   spawnFor(slot = 0) {
@@ -154,37 +259,25 @@ export class Arena {
 
   buildCourt(mats, y0) {
     const { courtHX: hx, courtHZ: hz } = ARENA;
-    const floor = mesh(new THREE.BoxGeometry(hx * 2 + 0.08, 0.06, hz * 2 + 0.08), mats.court, 0, y0 + 0.04, 0);
+    const [bx, bz] = COURT_BORDER;
+    const floor = mesh(new THREE.BoxGeometry((hx + bx) * 2, 0.06, (hz + bz) * 2), mats.court, 0, y0 + 0.03, 0);
     floor.name = 'msg-court';
-    floor.receiveShadow = true;
-    floor.castShadow = false;
-    floor.userData.noShadow = true;
     this.group.add(floor);
-
-    const apron = mesh(new THREE.BoxGeometry(hx * 2 + 8.8, 0.04, hz * 2 + 7.4), mats.pad, 0, y0 + 0.015, 0);
-    apron.receiveShadow = true;
-    apron.castShadow = false;
-    apron.userData.noShadow = true;
-    this.group.add(apron);
-
-    const paint = new THREE.MeshStandardMaterial({
-      color: 0x14161c, roughness: 0.55, metalness: 0.04,
-    });
-    for (const s of [-1, 1]) {
-      this.group.add(mesh(new THREE.BoxGeometry(1.35, 0.02, hz * 2 + 0.5), paint, s * (hx + 0.85), y0 + 0.045, 0));
-    }
   }
 
   buildCourtside(mats, y0) {
-    const hz = ARENA.courtHZ;
-    const table = mesh(new THREE.BoxGeometry(14.5, 0.08, 0.72), mats.darkConc, 0, y0 + 0.78, -(hz + 2.15));
+    const hz = ARENA.courtHZ + COURT_BORDER[1];
+    const table = mesh(new THREE.BoxGeometry(12.5, 0.08, 0.72), mats.pad, 0, y0 + 0.78, -(hz + 1.2));
+    table.userData.shadow = true;
     this.group.add(table);
-    this.group.add(mesh(new THREE.BoxGeometry(14.5, 0.72, 0.08), mats.jumbo, 0, y0 + 1.12, -(hz + 1.78)));
-    addBox(this.colliders, 0, -(hz + 2.15), y0, 7.3, 0.4, 1.15, 'cover');
+    const front = mesh(new THREE.BoxGeometry(12.5, 0.72, 0.08), mats.jumbo, 0, y0 + 0.4, -(hz + 0.82));
+    this.group.add(front);
+    addBox(this.colliders, 0, -(hz + 1.2), y0, 6.25, 0.4, 1.0, 'cover');
     for (const side of [-1, 1]) {
-      const z = side * (hz + 2.05);
-      this.group.add(mesh(new THREE.BoxGeometry(9.2, 0.42, 0.55), mats.pad, side * 4.2, y0 + 0.48, z));
-      addBox(this.colliders, side * 4.2, z, y0, 4.6, 0.32, 0.7, 'cover');
+      const bench = mesh(new THREE.BoxGeometry(8.4, 0.46, 0.55), mats.pad, side * 8.6, y0 + 0.23, hz + 1.0);
+      bench.userData.shadow = true;
+      this.group.add(bench);
+      addBox(this.colliders, side * 8.6, hz + 1.0, y0, 4.2, 0.3, 0.5, 'cover');
     }
   }
 
@@ -192,10 +285,10 @@ export class Arena {
     const hx = hoopX();
     for (const s of [-1, 1]) {
       const g = new THREE.Group();
-      const stanchionX = s * (ARENA.courtHX + 2.15);
-      g.add(mesh(new THREE.BoxGeometry(1.35, 2.15, 1.55), mats.pad, stanchionX, y0 + 1.08, 0));
-      g.add(mesh(new THREE.BoxGeometry(0.28, 0.22, 2.6), mats.steel, s * (hx + 0.55), y0 + 3.12, 0));
-      const arm = mesh(new THREE.BoxGeometry(2.05, 0.16, 0.22), mats.steel, s * (hx + 0.15), y0 + 3.18, 0);
+      const stanchionX = s * (ARENA.courtHX + 2.4);
+      g.add(mesh(new THREE.BoxGeometry(1.4, 1.1, 2.0), mats.pad, stanchionX, y0 + 0.55, 0));
+      g.add(mesh(new THREE.BoxGeometry(0.36, 2.5, 0.36), mats.pad, stanchionX - s * 0.3, y0 + 2.2, 0, 0, 0, s * 0.35));
+      const arm = mesh(new THREE.BoxGeometry(2.5, 0.2, 0.26), mats.steel, s * (hx + 1.1), y0 + 3.28, 0);
       g.add(arm);
       const glass = mesh(new THREE.BoxGeometry(0.04, 1.07, 1.83), mats.glass, s * hx + s * 0.22, y0 + 3.52, 0);
       g.add(glass);
@@ -212,8 +305,9 @@ export class Arena {
       );
       net.position.set(s * hx, y0 + 2.82, 0);
       g.add(net);
-      this.group.add(shade(g));
-      addBox(this.colliders, stanchionX, 0, y0, 0.7, 0.8, 2.2, 'cover');
+      g.traverse((o) => { if (o.isMesh && !o.material.transparent) o.userData.shadow = true; });
+      this.group.add(g);
+      addBox(this.colliders, stanchionX, 0, y0, 0.75, 1.0, 2.4, 'cover');
       addBox(this.colliders, s * hx + s * 0.2, 0, y0 + 2.4, 0.2, 1.0, 1.5, 'metal');
     }
   }
@@ -221,391 +315,380 @@ export class Arena {
   buildStands(mats, y0, rand) {
     const seats = enumerateSeats();
     const dummy = new THREE.Object3D();
-    const geo = seatGeo();
-    const inst = new THREE.InstancedMesh(geo, mats.seat, seats.length);
+    const inst = new THREE.InstancedMesh(seatGeo(), mats.seat, seats.length);
     inst.name = 'bowl-seats';
     inst.frustumCulled = false;
-    inst.castShadow = false;
-    inst.receiveShadow = true;
     inst.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(seats.length * 3), 3);
+    const col = new THREE.Color();
     seats.forEach((s, i) => {
       dummy.position.set(s.x, s.y, s.z);
       dummy.quaternion.setFromAxisAngle(UP, s.yaw);
-      dummy.scale.set(1, 1, 1);
       dummy.updateMatrix();
       inst.setMatrixAt(i, dummy.matrix);
-      const col = rand() < 0.07 ? SEAT_WEAR : SEAT_NAVY;
+      col.copy(rand() < 0.08 ? SEAT_WEAR : SEAT_NAVY).multiplyScalar(0.94 + rand() * 0.1);
       inst.setColorAt(i, col);
     });
     inst.instanceMatrix.needsUpdate = true;
     inst.instanceColor.needsUpdate = true;
     this.group.add(inst);
 
-    const treads = [];
-    const banks = [
-      { rows: LOWER_ROWS, y0 },
-      { rows: UPPER_ROWS, y0: ARENA.concY },
-    ];
-    for (const bank of banks) {
-      for (const row of bank.rows) {
-        for (let sec = 0; sec < BOWL.sections; sec++) {
-          const a0 = (sec / BOWL.sections) * Math.PI * 2;
-          const a1 = ((sec + 1) / BOWL.sections) * Math.PI * 2;
-          const ang = (a0 + a1) * 0.5;
-          const mid = ovalPoint((row.u0 + row.u1) * 0.5, ang);
-          const depth = (row.u1 - row.u0) * (ARENA.sx + ARENA.sz) * 0.5;
-          const width = arcLength((row.u0 + row.u1) * 0.5, a0, a1);
-          treads.push({
-            x: mid.x, z: mid.z, y: row.y - 0.04, yaw: ang,
-            sx: Math.max(1.2, width), sy: 0.09, sz: Math.max(0.45, depth * 0.92),
-          });
-          if (row.wide) {
-            const back = ovalPoint(row.seatU, ang);
-            addBox(this.colliders, back.x, back.z, row.y, Math.max(0.7, width * 0.22), Math.max(0.7, depth * 0.22), 0.85, 'cover');
-          } else if (row.row % 4 === 1) {
-            addBox(this.colliders, mid.x, mid.z, row.y, Math.max(0.55, width * 0.28), Math.max(0.55, depth * 0.28), 0.7, 'cover');
+    const steps = new GeoBuilder();
+    const tint = (c, k) => c.clone().multiplyScalar(k);
+    const bank = (rows, yFront) => {
+      let yPrev = yFront;
+      for (const row of rows) {
+        const k = 0.92 + rand() * 0.12;
+        for (let sec = 0; sec < S; sec++) {
+          steps.flat(sec, row.r0, row.r1, row.y, tint(C_TREAD, k), INNER);
+          steps.wall(sec, row.r0, yPrev, row.y, C_RISER, INNER);
+          for (const span of [AISLE_A, AISLE_B]) {
+            steps.flat(sec, row.r0, row.r1, row.y, C_AISLE, span);
+            steps.wall(sec, row.r0, yPrev, row.y, C_AISLE_RISER, span);
           }
         }
+        yPrev = row.y;
       }
+      return yPrev;
+    };
+    const lastLow = bank(LOWER_ROWS, ARENA.baseY);
+    const concIn = ARENA.concIn * ARENA.RU, concOut = ARENA.concOut * ARENA.RU;
+    for (let sec = 0; sec < S; sec++) {
+      steps.flat(sec, LOWER_ROWS[LOWER_ROWS.length - 1].r1, concOut, ARENA.concY, C_CONC);
+      steps.wall(sec, concIn, lastLow, ARENA.concY, C_RISER);
     }
-    const slab = new THREE.BoxGeometry(1, 1, 1);
-    const treadMesh = new THREE.InstancedMesh(slab, mats.pad, treads.length);
-    treadMesh.name = 'bowl-treads';
-    treadMesh.frustumCulled = false;
-    treadMesh.castShadow = false;
-    treadMesh.receiveShadow = true;
-    treads.forEach((t, i) => {
-      dummy.position.set(t.x, t.y, t.z);
-      dummy.quaternion.setFromAxisAngle(UP, -t.yaw);
-      dummy.scale.set(t.sx, t.sy, t.sz);
-      dummy.updateMatrix();
-      treadMesh.setMatrixAt(i, dummy.matrix);
-    });
-    treadMesh.instanceMatrix.needsUpdate = true;
-    this.group.add(treadMesh);
+    bank(UPPER_ROWS, ARENA.concY);
+    const bowl = new THREE.Mesh(steps.build(), mats.steps);
+    bowl.name = 'bowl-steps';
+    this.group.add(bowl);
 
     const spawnRow = LOWER_ROWS[BOWL.spawnRow - 1];
-    for (let sec = 0; sec < BOWL.sections; sec++) {
-      const ang = sectionAngle(sec, 0.5);
-      const rail = ovalPoint(spawnRow.u0 + 0.012, ang);
-      this.group.add(mesh(new THREE.BoxGeometry(2.4, 0.06, 0.06), mats.chrome, rail.x, spawnRow.y + 0.92, rail.z, 0, -ang, 0));
-      this.group.add(mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.9, 6), mats.chrome, rail.x, spawnRow.y + 0.46, rail.z));
-    }
-
-    const lastUp = UPPER_ROWS[UPPER_ROWS.length - 1];
-    for (let i = 0; i < 48; i++) {
-      const ang = (i / 48) * Math.PI * 2;
-      const p = ovalPoint(lastUp.u1, ang);
-      this.group.add(mesh(new THREE.BoxGeometry(4.6, 1.55, 0.22), mats.pad, p.x, lastUp.y + 0.78, p.z, 0, -ang, 0));
-      addBox(this.colliders, p.x, p.z, lastUp.y, 2.1, 1.1, 1.6, 'cover');
-    }
-
-    for (let slot = 0; slot < 8; slot++) {
-      const ang = slot * Math.PI / 4;
-      const p = ovalPoint(ARENA.bowlIn + 0.02, ang);
-      const portal = mesh(new THREE.TorusGeometry(1.55, 0.08, 8, 18, Math.PI), mats.steel, p.x, y0 + 1.7, p.z, 0, -ang, 0);
-      portal.userData.noShadow = true;
-      this.group.add(portal);
-    }
-  }
-
-  buildFascia(mats) {
-    for (const u of [ARENA.bowlIn + 0.01, ARENA.concIn - 0.02, ARENA.concOut + 0.03]) {
-      for (let i = 0; i < 48; i++) {
-        const ang = (i / 48) * Math.PI * 2;
-        const p = ovalPoint(u, ang);
-        const y = u < ARENA.concIn ? LOWER_ROWS[0].y + 0.55 : ARENA.concY + 0.7;
-        const board = mesh(new THREE.BoxGeometry(3.1, 0.55, 0.08), mats.jumbo, p.x, y, p.z, 0, -ang, 0);
-        board.userData.noShadow = true;
-        this.group.add(board);
+    const railGeo = new THREE.BoxGeometry(1, 0.05, 0.05);
+    const rails = [];
+    const railSpan = (L) => [AISLE_W + 0.2, L - AISLE_W - 0.2];
+    for (let sec = 0; sec < S; sec++) {
+      for (const p of sectionPieces(sec, railSpan)) {
+        const r = spawnRow.r0 + 0.12;
+        const a = bowlFrame(r, p.at(r)), b = bowlFrame(r, p.bt(r));
+        rails.push({ a, b, y: spawnRow.y + 0.95 });
       }
     }
-  }
-
-  buildJumbotron(mats) {
-    const g = new THREE.Group();
-    g.name = 'msg-scoreboard';
-    g.position.set(0, ARENA.baseY + 14.4, 0);
-    const body = mesh(new THREE.BoxGeometry(8.8, 5.1, 8.8), mats.housing, 0, 0, 0);
-    g.add(body);
-    const face = new THREE.PlaneGeometry(8.25, 4.55);
-    const faces = [
-      [0, 0, 4.42, 0],
-      [0, 0, -4.42, Math.PI],
-      [4.42, 0, 0, Math.PI / 2],
-      [-4.42, 0, 0, -Math.PI / 2],
-    ];
-    for (const [x, y, z, ry] of faces) {
-      const p = mesh(face, mats.jumbo, x, y, z, 0, ry, 0);
-      p.userData.noShadow = true;
-      g.add(p);
-      const strip = mesh(new THREE.PlaneGeometry(8.3, 0.38), mats.sign, x * 1.006, -2.42, z * 1.006, 0, ry, 0);
-      strip.userData.noShadow = true;
-      g.add(strip);
-    }
-    g.add(mesh(new THREE.BoxGeometry(9.1, 0.16, 9.1), mats.housing, 0, 2.64, 0));
-    g.add(mesh(new THREE.BoxGeometry(9.1, 0.16, 9.1), mats.housing, 0, -2.64, 0));
-    for (const [x, z] of [[-3.9, -3.9], [3.9, -3.9], [-3.9, 3.9], [3.9, 3.9]]) {
-      g.add(mesh(new THREE.CylinderGeometry(0.045, 0.045, 13.4, 6), mats.steel, x, 8.6, z));
-    }
-    this.group.add(g);
-    addBox(this.colliders, 0, 0, ARENA.baseY + 12.1, 4.8, 4.8, 4.6, 'metal');
-  }
-
-  buildRoof(mats) {
-    const roofY = 29.2;
-    const roofMat = new THREE.MeshStandardMaterial({
-      color: 0x121418, roughness: 0.94, metalness: 0.03, envMapIntensity: 0.06,
+    const railMesh = new THREE.InstancedMesh(railGeo, mats.chrome, rails.length);
+    railMesh.name = 'cross-aisle-rail';
+    rails.forEach((rl, i) => {
+      const dx = rl.b.x - rl.a.x, dz = rl.b.z - rl.a.z;
+      dummy.position.set((rl.a.x + rl.b.x) * 0.5, rl.y, (rl.a.z + rl.b.z) * 0.5);
+      dummy.quaternion.setFromAxisAngle(UP, -Math.atan2(dz, dx));
+      dummy.scale.set(Math.hypot(dx, dz), 1, 1);
+      dummy.updateMatrix();
+      railMesh.setMatrixAt(i, dummy.matrix);
     });
-    const roof = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 2.6, 48, 1, false), roofMat);
-    roof.name = 'msg-roof';
-    roof.position.y = roofY;
-    roof.scale.set(ARENA.sx * ARENA.hallOut * 1.08, 1, ARENA.sz * ARENA.hallOut * 1.08);
-    roof.receiveShadow = true;
-    this.group.add(roof);
+    railMesh.instanceMatrix.needsUpdate = true;
+    this.group.add(railMesh);
+    dummy.scale.set(1, 1, 1);
+  }
 
-    for (let i = 0; i < 20; i++) {
-      const ang = (i / 20) * Math.PI * 2;
-      const { x, z } = ovalPoint(ARENA.hallOut * 0.92, ang);
-      this.group.add(mesh(new THREE.BoxGeometry(0.22, 2.4, 0.22), mats.steel, x * 0.15, roofY - 1.1, z * 0.15));
-      const beam = mesh(new THREE.BoxGeometry(Math.hypot(x, z) * 0.92, 0.16, 0.2), mats.steel, x * 0.46, roofY - 0.2, z * 0.46, 0, -ang, 0);
-      this.group.add(beam);
-    }
+  /** Handrails down the middle of every aisle, like the Garden's stair rails. */
+  buildRails(mats) {
+    const dummy = new THREE.Object3D();
+    const pieces = [];
+    const posts = [];
+    const runBank = (rows) => {
+      for (let sec = 0; sec < S; sec++) {
+        const t = sec / S;
+        for (let i = 0; i < rows.length - 1; i++) {
+          const a = rows[i], b = rows[i + 1];
+          if (a.wide || b.wide) continue;
+          const pa = bowlFrame(a.r0 + 0.3, t), pb = bowlFrame(b.r0 + 0.3, t);
+          pieces.push({ pa, pb, ya: a.y + 0.9, yb: b.y + 0.9 });
+          if (i % 3 === 0) posts.push({ p: pa, y: a.y });
+        }
+      }
+    };
+    runBank(LOWER_ROWS);
+    runBank(UPPER_ROWS);
+    const railMesh = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.022, 0.022, 1, 5), mats.chrome, pieces.length);
+    railMesh.name = 'aisle-rails';
+    const dir = new THREE.Vector3();
+    pieces.forEach((pc, i) => {
+      dir.set(pc.pb.x - pc.pa.x, pc.yb - pc.ya, pc.pb.z - pc.pa.z);
+      const len = dir.length();
+      dummy.position.set((pc.pa.x + pc.pb.x) * 0.5, (pc.ya + pc.yb) * 0.5, (pc.pa.z + pc.pb.z) * 0.5);
+      dummy.quaternion.setFromUnitVectors(UP, dir.normalize());
+      dummy.scale.set(1, len, 1);
+      dummy.updateMatrix();
+      railMesh.setMatrixAt(i, dummy.matrix);
+    });
+    railMesh.instanceMatrix.needsUpdate = true;
+    this.group.add(railMesh);
+    const postMesh = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.025, 0.025, 0.9, 5), mats.chrome, posts.length);
+    dummy.quaternion.identity();
+    dummy.scale.set(1, 1, 1);
+    posts.forEach((p, i) => {
+      dummy.position.set(p.p.x, p.y + 0.45, p.p.z);
+      dummy.updateMatrix();
+      postMesh.setMatrixAt(i, dummy.matrix);
+    });
+    postMesh.instanceMatrix.needsUpdate = true;
+    this.group.add(postMesh);
+  }
 
-    for (let ring = 0; ring < 3; ring++) {
-      const u = 0.55 + ring * 0.7;
-      const n = 16 + ring * 8;
-      for (let i = 0; i < n; i++) {
-        const ang = (i / n) * Math.PI * 2;
-        const { x, z } = ovalPoint(u, ang);
-        const lamp = mesh(new THREE.CylinderGeometry(0.28, 0.28, 0.08, 8), mats.led, x, roofY - 0.55, z);
-        lamp.userData.noShadow = true;
-        this.group.add(lamp);
+  /** Beige fascia along the front of the concourse, open at every aisle. */
+  buildParapet(mats) {
+    const g = new GeoBuilder();
+    const r = ARENA.concIn * ARENA.RU + 0.05;
+    const y0 = ARENA.concY;
+    const h = 1.05;
+    const lastLowY = LOWER_ROWS[LOWER_ROWS.length - 1].y;
+    for (let sec = 0; sec < S; sec++) {
+      g.wall(sec, r, lastLowY, y0 + h, C_BEIGE, INNER);
+      g.wall(sec, r + 0.22, y0, y0 + h, C_WALL, INNER, true);
+      g.flat(sec, r, r + 0.22, y0 + h, C_WALL, INNER);
+      const L = rowLength(r, sec / S, (sec + 1) / S);
+      for (let d = AISLE_W + 0.3; d < L - AISLE_W - 0.2; d += 0.55) {
+        const f = bowlFrame(r + 0.11, paramAt(sec, r + 0.11, d));
+        addBox(this.colliders, f.x, f.z, y0 - 0.3, 0.2, 0.2, h + 0.3, 'cover');
       }
     }
-
-    const banners = [0x006bb6, 0xf58426, 0xffffff, 0x006bb6, 0xf58426, 0x0a0c12, 0xffffff, 0x006bb6];
-    banners.forEach((hex, i) => {
-      const ang = (i / banners.length) * Math.PI * 2 + 0.18;
-      const p = ovalPoint(1.72, ang);
-      const mat = makeBanner(hex);
-      this.group.add(mesh(new THREE.BoxGeometry(0.95, 1.7, 0.04), mat, p.x, 26.1, p.z, 0, -ang, 0));
-    });
-    const flag = new THREE.Group();
-    flag.position.set(0, roofY - 1.6, ARENA.sz * 1.35);
-    flag.add(mesh(new THREE.BoxGeometry(1.35, 0.82, 0.03), makeBanner(0xb22234), 0, 0, 0));
-    flag.add(mesh(new THREE.BoxGeometry(0.52, 0.42, 0.035), makeBanner(0x1a237e), -0.4, 0.18, 0.01));
-    this.group.add(flag);
+    const m = new THREE.Mesh(g.build(), mats.trim);
+    m.name = 'concourse-fascia';
+    this.group.add(m);
   }
 
-  buildConcourse(mats, y0, rand) {
-    const hallY = y0;
-    const concY = ARENA.concY;
-
-    for (let i = 0; i < 28; i++) {
-      const ang = (i / 28) * Math.PI * 2 + 0.04;
-      const inner = ovalPoint((ARENA.concIn + ARENA.concOut) * 0.5, ang);
-      if (tunnelInfo(inner.x, inner.z).inBand) continue;
-      const col = mesh(new THREE.CylinderGeometry(0.42, 0.48, 4.6, 10), mats.conc, inner.x, concY + 2.3, inner.z);
-      this.group.add(col);
-      addBox(this.colliders, inner.x, inner.z, concY, 0.5, 0.5, 4.6, 'concrete');
+  /** Suite level and bridge band closing the top of the bowl, with four doors to the hall. */
+  buildBackWall(mats) {
+    const g = new GeoBuilder();
+    const bands = new GeoBuilder();
+    const glass = new GeoBuilder();
+    const r = ARENA.hallIn * ARENA.RU;
+    const top = ARENA.topY;
+    const roofY = ARENA.roofY;
+    const doorL = (L) => [0, (L - DOOR_W) * 0.5];
+    const doorR = (L) => [(L + DOOR_W) * 0.5, L];
+    for (let sec = 0; sec < S; sec++) {
+      const L = rowLength(r, sec / S, (sec + 1) / S);
+      if (HALL_DOORS.has(sec)) {
+        for (const span of [doorL, doorR]) {
+          g.wall(sec, r, top, top + 1.2, C_WALL, span);
+          bands.wall(sec, r - 0.04, top + 1.2, DOOR_H + top, C_BEIGE, span);
+        }
+        bands.wall(sec, r - 0.04, top + DOOR_H, top + 3.1, C_BEIGE);
+      } else {
+        g.wall(sec, r, top, top + 1.2, C_WALL);
+        bands.wall(sec, r - 0.04, top + 1.2, top + 3.1, C_BEIGE);
+      }
+      glass.wall(sec, r - 0.02, top + 3.1, top + 6.2, C_WALL);
+      bands.wall(sec, r - 2.6, top + 6.2, top + 7.0, C_BEIGE);
+      bands.flat(sec, r - 2.6, r, top + 6.2, C_WALL);
+      bands.flat(sec, r - 2.6, r, top + 7.0, C_WALL);
+      g.wall(sec, r, top + 7.0, roofY + 0.2, C_WALL);
+      for (let d = 0.4; d < L; d += 0.8) {
+        if (HALL_DOORS.has(sec) && Math.abs(d - L * 0.5) < DOOR_W * 0.5) continue;
+        const f = bowlFrame(r + 0.45, paramAt(sec, r + 0.45, d));
+        addBox(this.colliders, f.x, f.z, top - 0.2, 0.45, 0.45, 8, 'concrete');
+      }
     }
-
-    for (let i = 0; i < 22; i++) {
-      const ang = (i / 22) * Math.PI * 2;
-      const p = ovalPoint((ARENA.hallOut + ARENA.concOut) * 0.52, ang);
-      if (tunnelInfo(p.x, p.z).inBand) continue;
-      const col = mesh(new THREE.CylinderGeometry(0.48, 0.55, 7.2, 10), mats.conc, p.x, hallY + 3.6, p.z);
-      this.group.add(col);
-      addBox(this.colliders, p.x, p.z, hallY, 0.55, 0.55, 7.2, 'concrete');
-    }
-
-    for (let i = 0; i < 12; i++) {
-      const ang = (i / 12) * Math.PI * 2 + 0.2;
-      const p = ovalPoint(ARENA.hallOut - 0.55, ang);
-      if (tunnelInfo(p.x, p.z).lat < 4.2 && tunnelInfo(p.x, p.z).inBand) continue;
-      const yaw = ang + Math.PI;
-      const stall = new THREE.Group();
-      stall.add(mesh(new THREE.BoxGeometry(4.6, 1.12, 1.35), mats.darkConc, 0, 0.56, 0));
-      stall.add(mesh(new THREE.BoxGeometry(4.4, 0.08, 0.7), mats.steel, 0, 1.16, 0.15));
-      stall.add(mesh(new THREE.BoxGeometry(3.6, 0.85, 0.06), mats.amber, 0, 2.05, -0.55));
-      stall.position.set(p.x, hallY, p.z);
-      stall.rotation.y = yaw;
-      this.group.add(stall);
-      addBox(this.colliders, p.x, p.z, hallY, 2.1, 0.7, 1.2, 'cover');
-    }
-
-    for (let i = 0; i < 8; i++) {
-      const ang = (i / 8) * Math.PI * 2 + 0.35;
-      const p = ovalPoint((ARENA.concIn + ARENA.concOut) * 0.5, ang);
-      if (tunnelInfo(p.x, p.z).inBand) continue;
-      const room = mesh(new THREE.BoxGeometry(5.2, 3.1, 3.4), mats.darkConc, p.x, concY + 1.55, p.z, 0, -ang, 0);
-      this.group.add(room);
-      addBox(this.colliders, p.x, p.z, concY, 2.4, 1.6, 3.1, 'concrete');
-    }
-
-    for (let i = 0; i < 36; i++) {
-      const ang = (i / 36) * Math.PI * 2;
-      const p = ovalPoint((ARENA.concIn + ARENA.concOut) * 0.5, ang);
-      if (tunnelInfo(p.x, p.z).inBand) continue;
-      const strip = mesh(new THREE.BoxGeometry(1.6, 0.05, 0.12), mats.led, p.x, concY + 3.55, p.z, 0, -ang, 0);
-      strip.userData.noShadow = true;
-      this.group.add(strip);
-    }
-
-    for (let i = 0; i < 10; i++) {
-      const ang = (i / 10) * Math.PI * 2 + 0.12 + rand() * 0.05;
-      const p = ovalPoint(ARENA.hallOut - 0.22, ang);
-      const board = mesh(new THREE.BoxGeometry(2.4, 1.6, 0.08), i % 2 ? mats.orange : mats.blue, p.x, hallY + 3.4, p.z, 0, -ang, 0);
-      this.group.add(board);
-    }
+    const wall = new THREE.Mesh(g.build(), mats.steps);
+    wall.name = 'msg-suite-wall';
+    this.group.add(wall);
+    this.group.add(new THREE.Mesh(bands.build(), mats.trim));
+    const glassMesh = new THREE.Mesh(glass.build(), mats.suite);
+    glassMesh.name = 'msg-suites';
+    this.group.add(glassMesh);
   }
 
-  buildFacade(mats, y0) {
-    const u0 = ARENA.hallOut;
-    const u1 = ARENA.facadeOut;
-    const h = 27.8;
-    const wall = new THREE.CylinderGeometry(1, 1, h, 48, 1, true);
-    const shell = new THREE.Mesh(wall, mats.darkConc);
-    shell.position.y = y0 + h * 0.5;
-    shell.scale.set(ARENA.sx * u1, 1, ARENA.sz * u1);
-    this.group.add(shell);
+  /** Outer ring hall behind the suites: concourse floor, concessions, the building shell. */
+  buildHall(mats, rand) {
+    const g = new GeoBuilder();
+    const rIn = ARENA.hallIn * ARENA.RU;
+    const rOut = ARENA.hallOut * ARENA.RU;
+    const y = ARENA.hallY;
+    for (let sec = 0; sec < S; sec++) {
+      g.flat(sec, rIn, rOut + 0.4, y, C_HALL);
+      g.wall(sec, rIn + 0.02, y, y + 4.6, C_HALL, FULL, true);
+      g.wall(sec, rOut, y, ARENA.roofY + 0.2, C_HALL);
+      g.flat(sec, rIn, rOut, y + 4.6, C_WALL);
+      const L = rowLength(rOut, sec / S, (sec + 1) / S);
+      for (let d = 0.4; d < L; d += 0.8) {
+        const f = bowlFrame(rOut + 0.45, paramAt(sec, rOut + 0.45, d));
+        addBox(this.colliders, f.x, f.z, y - 0.2, 0.45, 0.45, 8, 'concrete');
+      }
+    }
+    const hall = new THREE.Mesh(g.build(), mats.steps);
+    hall.name = 'msg-hall';
+    this.group.add(hall);
 
-    const inner = new THREE.Mesh(wall.clone(), mats.conc);
-    inner.position.y = y0 + h * 0.5;
-    inner.scale.set(ARENA.sx * u0, 1, ARENA.sz * u0);
-    this.group.add(inner);
-
-    for (let i = 0; i < 36; i++) {
-      const ang = (i / 36) * Math.PI * 2;
-      const p = ovalPoint((u0 + u1) * 0.5, ang);
-      if (tunnelInfo(p.x, p.z).inBand) continue;
-      const win = mesh(new THREE.BoxGeometry(2.6, 3.4, 0.12), mats.glass, p.x, y0 + 14.2, p.z, 0, -ang, 0);
-      this.group.add(win);
-      const win2 = mesh(new THREE.BoxGeometry(2.6, 2.2, 0.12), mats.glass, p.x, y0 + 8.6, p.z, 0, -ang, 0);
-      this.group.add(win2);
+    const mid = (rIn + rOut) * 0.5;
+    for (let sec = 0; sec < S; sec++) {
+      if (sec % 2) {
+        const f = bowlFrame(rOut - 0.8, (sec + 0.5) / S);
+        const yaw = Math.atan2(-f.nx, -f.nz);
+        const stall = new THREE.Group();
+        stall.add(mesh(new THREE.BoxGeometry(4.4, 1.1, 1.2), mats.pad, 0, 0.55, 0));
+        stall.add(mesh(new THREE.BoxGeometry(4.2, 0.06, 0.6), mats.chrome, 0, 1.13, 0.1));
+        stall.add(mesh(new THREE.BoxGeometry(3.6, 0.8, 0.06), mats.amber, 0, 2.6, -0.5));
+        stall.position.set(f.x, y, f.z);
+        stall.rotation.y = yaw;
+        this.group.add(stall);
+        addBox(this.colliders, f.x, f.z, y, 1.6, 1.6, 1.2, 'cover');
+      } else {
+        const f = bowlFrame(mid, (sec + 0.5) / S);
+        this.group.add(mesh(new THREE.CylinderGeometry(0.42, 0.42, 4.6, 10), mats.conc, f.x, y + 2.3, f.z));
+        addBox(this.colliders, f.x, f.z, y, 0.45, 0.45, 4.6, 'concrete');
+      }
+      const lamp = bowlFrame(mid, (sec + 0.25) / S);
+      const l = mesh(new THREE.BoxGeometry(1.6, 0.05, 0.3), mats.fixture, lamp.x, y + 4.55, lamp.z);
+      this.group.add(l);
     }
 
-    for (let slot = 0; slot < 8; slot += 2) {
-      const ang = slot * Math.PI / 4;
-      const p = ovalPoint((u0 + u1) * 0.5, ang);
-      const door = mesh(new THREE.BoxGeometry(5.2, 3.6, 0.2), mats.glass, p.x, y0 + 1.85, p.z, 0, -ang, 0);
-      this.group.add(door);
-      const frame = mesh(new THREE.BoxGeometry(5.5, 0.18, 0.35), mats.chrome, p.x, y0 + 3.7, p.z, 0, -ang, 0);
-      this.group.add(frame);
-    }
-
-    const signR = (ARENA.sx + ARENA.sz) * 0.5 * u1 + 0.2;
-    const marquees = [
-      [0, signR * ARENA.sz / ((ARENA.sx + ARENA.sz) * 0.5)],
-      [0, -signR * ARENA.sz / ((ARENA.sx + ARENA.sz) * 0.5)],
-      [ARENA.sx * u1 + 0.35, 0],
-      [-ARENA.sx * u1 - 0.35, 0],
-    ];
-    marquees.forEach(([x, z], i) => {
-      const yaw = i < 2 ? 0 : Math.PI / 2;
-      const board = mesh(new THREE.BoxGeometry(18, 1.8, 0.22), mats.marquee, x, y0 + 16.4, z, 0, yaw, 0);
-      board.userData.noShadow = true;
-      this.group.add(board);
-    });
-
-    const badge = mesh(new THREE.CircleGeometry(3.4, 28), mats.orange, 0, y0 + 20.2, ARENA.sz * u1 + 0.15);
-    badge.userData.noShadow = true;
-    this.group.add(badge);
-    const badgeIn = mesh(new THREE.CircleGeometry(2.55, 28), mats.blue, 0, y0 + 20.2, ARENA.sz * u1 + 0.18);
-    this.group.add(badgeIn);
-
-    for (let i = 0; i < 64; i++) {
-      const ang = (i / 64) * Math.PI * 2;
-      const p = ovalPoint(u1, ang);
-      const next = ovalPoint(u1, ang + Math.PI / 64);
-      const mx = (p.x + next.x) * 0.5, mz = (p.z + next.z) * 0.5;
-      if (tunnelInfo(mx, mz).inBand) continue;
-      addBox(this.colliders, mx, mz, y0, Math.max(0.8, Math.abs(next.x - p.x) * 0.5 + 0.45), Math.max(0.8, Math.abs(next.z - p.z) * 0.5 + 0.45), h, 'concrete');
-    }
-  }
-
-  buildPlaza(mats, y0) {
-    for (let i = 0; i < 16; i++) {
-      const ang = (i / 16) * Math.PI * 2 + 0.1;
-      const p = ovalPoint(ARENA.plazaOut - 0.8, ang);
-      this.group.add(mesh(new THREE.BoxGeometry(1.6, 0.55, 1.6), mats.conc, p.x, y0 + 0.28, p.z));
-      addBox(this.colliders, p.x, p.z, y0, 0.8, 0.8, 0.6, 'cover');
-    }
-    const kiosk = mesh(new THREE.BoxGeometry(6.4, 3.2, 4.2), mats.darkConc, 0, y0 + 1.6, ARENA.sz * ARENA.plazaOut * 0.72);
-    this.group.add(kiosk);
-    addBox(this.colliders, 0, ARENA.sz * ARENA.plazaOut * 0.72, y0, 3.2, 2.1, 3.2, 'concrete');
-    const ticket = mesh(new THREE.BoxGeometry(5.5, 1.1, 0.2), mats.marquee, 0, y0 + 3.4, ARENA.sz * ARENA.plazaOut * 0.72 + 2.2);
-    ticket.userData.noShadow = true;
-    this.group.add(ticket);
-  }
-
-  dressProps(rand) {
     this.batcher = new PropBatcher(this.models);
     withBatcher(this.batcher, () => {
-      const place = (id, x, z, yaw, scale, coverY, type) => {
-        const zone = arenaZone(x, z);
-        if (zone === 'court' || zone === 'bowl' || zone === 'facade') return null;
-        return this.batcher.place(id, x, z, yaw, scale, coverY, type, this.terrain, this.colliders);
-      };
-      for (let i = 0; i < 18; i++) {
-        const ang = (i / 18) * Math.PI * 2 + rand() * 0.1;
-        const u = ARENA.concIn + 0.25 + rand() * (ARENA.concOut - ARENA.concIn - 0.45);
-        const p = ovalPoint(u, ang);
-        if (tunnelInfo(p.x, p.z).inBand) continue;
-        place('painted_wooden_bench', p.x, p.z, ang + Math.PI * 0.5, 1, 0.7, 'cover');
-      }
-      for (let i = 0; i < 16; i++) {
-        const ang = rand() * Math.PI * 2;
-        const u = ARENA.concOut + 0.3 + rand() * (ARENA.hallOut - ARENA.concOut - 0.6);
-        const p = ovalPoint(u, ang);
-        if (arenaZone(p.x, p.z) !== 'hall') continue;
-        place(rand() < 0.5 ? 'metal_trash_can' : 'barrel_03', p.x, p.z, rand() * 6, 1, 1.1, 'cover');
-      }
-      for (let i = 0; i < 10; i++) {
-        const ang = rand() * Math.PI * 2;
-        const u = ARENA.facadeOut + 0.6 + rand() * 1.2;
-        const p = ovalPoint(u, ang);
-        place('street_lamp_01', p.x, p.z, ang, 1, 0.4, 'metal');
-        if (rand() < 0.55) place('planter_box_01', p.x + Math.cos(ang + 1) * 2.2, p.z + Math.sin(ang + 1) * 2.2, ang, 1, 0.7, 'cover');
-      }
-      for (let i = 0; i < 8; i++) {
-        const ang = (i / 8) * Math.PI * 2 + 0.4;
-        const p = ovalPoint(ARENA.plazaOut - 0.35, ang);
-        place('concrete_road_barrier', p.x, p.z, ang + Math.PI * 0.5, 1, 0.9, 'cover');
-      }
-      for (let i = 0; i < 7; i++) {
-        const ang = rand() * Math.PI * 2;
-        const u = ARENA.concIn + 0.4 + rand() * 0.5;
-        const p = ovalPoint(u, ang);
-        if (arenaZone(p.x, p.z) !== 'concourse') continue;
-        place(rand() < 0.5 ? 'wooden_crate_01' : 'utility_box_01', p.x, p.z, rand() * 6, 1, 1.0, 'cover');
+      for (let i = 0; i < 14; i++) {
+        const f = bowlFrame(mid + (rand() - 0.5) * 2, rand());
+        const id = rand() < 0.6 ? 'metal_trash_can' : 'barrel_03';
+        this.batcher.place(id, f.x, f.z, rand() * 6, 1, 1.1, 'cover', this.terrain, this.colliders);
       }
     });
     this.batcher.bake(this.group);
     this.batcher.update({ x: 0, y: 4, z: 0 });
   }
 
-  lightArena(y0) {
-    const hemi = new THREE.HemisphereLight(0xe8edf4, 0x14161c, 0.7);
-    this.group.add(hemi);
-    const wash = new THREE.DirectionalLight(0xfff3dc, 4.2);
-    wash.position.set(0, y0 + 26, 0.4);
-    wash.target.position.set(0, y0, 0);
-    wash.castShadow = false;
-    this.group.add(wash, wash.target);
-    for (let i = 0; i < 12; i++) {
-      const ang = (i / 12) * Math.PI * 2;
-      const p = ovalPoint(1.35, ang);
-      const aim = ovalPoint(0.35, ang);
-      const spot = new THREE.SpotLight(0xfff4e2, 120, 78, 0.58, 0.32, 1.25);
-      spot.position.set(p.x * 0.42, y0 + 24.5, p.z * 0.42);
-      spot.target.position.set(aim.x, y0, aim.z);
-      spot.castShadow = false;
-      this.group.add(spot, spot.target);
+  buildRoof(mats) {
+    const roofY = ARENA.roofY;
+    const rOut = ARENA.facadeOut * ARENA.RU;
+    const roof = new THREE.Mesh(new THREE.ShapeGeometry(roundedRectShape(rOut), 12), mats.roof);
+    roof.name = 'msg-roof';
+    roof.rotation.x = Math.PI / 2;
+    roof.position.y = roofY;
+    this.group.add(roof);
+
+    const hx = ARENA.courtHX + rOut, hz = ARENA.courtHZ + rOut;
+    const beam = new THREE.BoxGeometry(1, 1, 1);
+    const beams = [];
+    for (let x = -hx + 4; x < hx; x += 6) beams.push([x, roofY - 0.9, 0, 0.35, 1.6, hz * 2]);
+    for (let z = -hz + 6; z < hz; z += 9) beams.push([0, roofY - 1.8, z, hx * 2, 0.3, 0.3]);
+    const bm = new THREE.InstancedMesh(beam, mats.steel, beams.length);
+    bm.name = 'roof-truss';
+    const d = new THREE.Object3D();
+    beams.forEach(([x, y, z, sx, sy, sz], i) => {
+      d.position.set(x, y, z);
+      d.scale.set(sx, sy, sz);
+      d.updateMatrix();
+      bm.setMatrixAt(i, d.matrix);
+    });
+    bm.instanceMatrix.needsUpdate = true;
+    this.group.add(bm);
+
+    const cat = new GeoBuilder();
+    const lights = [];
+    for (const r of [8, 22, 36]) {
+      for (let sec = 0; sec < S; sec++) {
+        cat.flat(sec, r - 0.6, r + 0.6, roofY - 3.2, C_WALL);
+        cat.wall(sec, r - 0.6, roofY - 3.6, roofY - 3.2, C_WALL);
+        const L = rowLength(r, sec / S, (sec + 1) / S);
+        for (let dd = 0.6; dd < L; dd += 1.35) lights.push(bowlFrame(r, paramAt(sec, r, dd)));
+      }
     }
-    const court = new THREE.PointLight(0xfff0d8, 14, 62, 1.15);
-    court.position.set(0, y0 + 16.2, 0);
+    const catMesh = new THREE.Mesh(cat.build(), mats.steps);
+    catMesh.name = 'roof-catwalks';
+    this.group.add(catMesh);
+    const lm = new THREE.InstancedMesh(new THREE.BoxGeometry(0.42, 0.22, 0.42), mats.fixture, lights.length);
+    lm.name = 'roof-lights';
+    d.scale.set(1, 1, 1);
+    lights.forEach((p, i) => {
+      d.position.set(p.x, roofY - 3.75, p.z);
+      d.updateMatrix();
+      lm.setMatrixAt(i, d.matrix);
+    });
+    lm.instanceMatrix.needsUpdate = true;
+    this.group.add(lm);
+
+    const banners = [0x006bb6, 0xf58426, 0x006bb6, 0xf58426, 0x006bb6, 0xf58426];
+    banners.forEach((hex, i) => {
+      const f = bowlFrame(24, (13 + (i - 2.5) * 0.35) / S);
+      this.group.add(mesh(new THREE.BoxGeometry(0.05, 3.2, 1.8), makeBanner(hex), f.x, roofY - 5.6, f.z));
+    });
+    const flag = new THREE.Group();
+    const fp = bowlFrame(30, 0.5 / S);
+    flag.position.set(fp.x, roofY - 5.2, fp.z);
+    flag.rotation.y = Math.PI / 2;
+    flag.add(mesh(new THREE.BoxGeometry(3.4, 2.0, 0.03), makeBanner(0xb22234), 0, 0, 0));
+    for (let i = 0; i < 6; i++) {
+      flag.add(mesh(new THREE.BoxGeometry(3.4, 0.14, 0.035), makeBanner(0xf2f2f2), 0, -0.85 + i * 0.31, 0.005));
+    }
+    flag.add(mesh(new THREE.BoxGeometry(1.4, 1.08, 0.04), makeBanner(0x1a237e), -1.0, 0.46, 0.01));
+    this.group.add(flag);
+  }
+
+  /** The Garden's black centre-hung board: gold MADISON SQUARE GARDEN crown over grey screens. */
+  buildJumbotron(mats) {
+    const g = new THREE.Group();
+    g.name = 'msg-scoreboard';
+    const cy = ARENA.baseY + 15.4;
+    g.position.set(0, cy, 0);
+    const W = 9.2, H = 5.4;
+    g.add(mesh(new THREE.BoxGeometry(W, H, W), mats.housing, 0, 0, 0));
+    const face = new THREE.PlaneGeometry(W - 0.5, H - 0.7);
+    for (let i = 0; i < 4; i++) {
+      const ry = (i * Math.PI) / 2;
+      const off = W * 0.5 + 0.01;
+      const p = mesh(face, mats.jumbo, Math.sin(ry) * off, -0.1, Math.cos(ry) * off, 0, ry, 0);
+      g.add(p);
+    }
+    const crownShape = new THREE.Shape();
+    const cw = W * 0.5 + 0.55, cr = 1.4;
+    crownShape.moveTo(cw, -cw + cr);
+    crownShape.lineTo(cw, cw - cr);
+    crownShape.absarc(cw - cr, cw - cr, cr, 0, Math.PI / 2, false);
+    crownShape.lineTo(-cw + cr, cw);
+    crownShape.absarc(-cw + cr, cw - cr, cr, Math.PI / 2, Math.PI, false);
+    crownShape.lineTo(-cw, -cw + cr);
+    crownShape.absarc(-cw + cr, -cw + cr, cr, Math.PI, Math.PI * 1.5, false);
+    crownShape.lineTo(cw - cr, -cw);
+    crownShape.absarc(cw - cr, -cw + cr, cr, Math.PI * 1.5, Math.PI * 2, false);
+    const crownH = 1.5;
+    const crown = new THREE.Mesh(
+      new THREE.ExtrudeGeometry(crownShape, { depth: crownH, bevelEnabled: false, curveSegments: 10 }),
+      mats.housing,
+    );
+    crown.rotation.x = -Math.PI / 2;
+    crown.position.y = H * 0.5;
+    g.add(crown);
+    const signW = (cw - cr) * 2;
+    for (let i = 0; i < 4; i++) {
+      const ry = (i * Math.PI) / 2;
+      const off = cw + 0.01;
+      const s = mesh(new THREE.PlaneGeometry(signW, crownH * 0.62), mats.sign, Math.sin(ry) * off, H * 0.5 + crownH * 0.5, Math.cos(ry) * off, 0, ry, 0);
+      s.name = 'msg-sign';
+      g.add(s);
+    }
+    g.add(mesh(new THREE.BoxGeometry(W + 0.3, 0.3, W + 0.3), mats.housing, 0, -H * 0.5 - 0.15, 0));
+    for (let i = 0; i < 12; i++) {
+      const a = (i / 12) * Math.PI * 2;
+      g.add(mesh(new THREE.CylinderGeometry(0.16, 0.2, 0.3, 8), mats.fixture, Math.cos(a) * 3.2, -H * 0.5 - 0.42, Math.sin(a) * 3.2));
+    }
+    const cableLen = ARENA.roofY - (cy + H * 0.5 + crownH);
+    for (const [x, z] of [[-3.6, -3.6], [3.6, -3.6], [-3.6, 3.6], [3.6, 3.6]]) {
+      g.add(mesh(new THREE.CylinderGeometry(0.05, 0.05, cableLen, 6), mats.steel, x, H * 0.5 + crownH + cableLen * 0.5, z));
+    }
+    this.group.add(g);
+    addBox(this.colliders, 0, 0, cy - H * 0.5 - 0.5, W * 0.5 + 0.5, W * 0.5 + 0.5, H + crownH + 0.5, 'metal');
+  }
+
+  lightArena(y0) {
+    const hemi = new THREE.HemisphereLight(0xe6ebf2, 0x3a3630, 1.1);
+    this.group.add(hemi);
+    const fills = [
+      [0, 1, -0.9], [0, 1, 0.9], [-0.9, 1, 0], [0.9, 1, 0],
+    ];
+    for (const [x, y, z] of fills) {
+      const l = new THREE.DirectionalLight(0xfff4e6, 0.55);
+      l.position.set(x * 30, y0 + y * 30, z * 30);
+      l.target.position.set(-x * 30, y0, -z * 30);
+      l.castShadow = false;
+      this.group.add(l, l.target);
+    }
+    const court = new THREE.PointLight(0xfff2de, 30, 55, 1.2);
+    court.position.set(0, y0 + 11.5, 0);
     court.castShadow = false;
     this.group.add(court);
   }

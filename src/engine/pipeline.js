@@ -240,6 +240,7 @@ export class Pipeline {
       uTime: this.u.uTime,
       uExposureBias: { value: 1.0 },
       uAutoExposure: { value: 1 },
+      uScotopic: { value: 1 },
       uVignette: { value: 0.55 },
       uFlash: { value: 0 },
     });
@@ -326,21 +327,27 @@ export class Pipeline {
 
   setTimeOfDay(t, elapsed) {
     this.u.uTime.value = elapsed;
+    const cu = this.compositeMaterial.uniforms;
     if (this.indoor) {
-      this.sunDir.set(0, 1, 0);
-      this.moonDir.set(0, -1, 0);
-      this.lightDir.set(0, 1, 0);
+      this.sunDir.set(0.16, 1, 0.1).normalize();
+      this.moonDir.copy(this.sunDir).negate();
+      this.lightDir.copy(this.sunDir);
       this.sunColor.set(0, 0, 0);
-      this.lightColor.set(0.035, 0.034, 0.03);
-      this.sun.intensity = 0;
-      this.sun.visible = false;
-      this.sun.castShadow = false;
+      this.lightColor.set(0.3, 0.29, 0.27);
+      this.sun.color.setRGB(1, 0.96, 0.9, THREE.LinearSRGBColorSpace);
+      this.sun.intensity = this.indoorKey ?? 2.4;
+      this.sun.castShadow = true;
       this.night = 0;
       if (this.hemi) this.hemi.visible = false;
+      cu.uAutoExposure.value = 0;
+      cu.uExposureBias.value = this.indoorExposure ?? 1.5;
+      cu.uScotopic.value = 0;
       return;
     }
     if (this.hemi) this.hemi.visible = true;
-    this.sun.visible = true;
+    cu.uAutoExposure.value = this.mobile ? 0 : 1;
+    cu.uExposureBias.value = this.mobile ? 0.72 : 1.0;
+    cu.uScotopic.value = 1;
     const a = t * Math.PI * 2;
     this.sunDir.set(Math.cos(a), Math.sin(a), 0.38).normalize();
     this.moonDir.copy(this.sunDir).negate();

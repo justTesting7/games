@@ -103,8 +103,8 @@ uniform float uWorldSize;
 uniform float uTime;
 uniform float uUrban;
 uniform float uArena;
-uniform float uArenaSX;
-uniform float uArenaSZ;
+uniform vec2 uArenaCore;
+uniform vec2 uArenaShell;
 uniform float uStreetPitch;
 uniform float uBlockW;
 uniform float uStreetW;
@@ -190,22 +190,12 @@ float tAO = mix(tArmS.r, 1.0, 0.3);
 tNrmW = normalize(mix(tNrmW, nW, wet * 0.6 + smoothstep(60.0, 300.0, dist) * 0.5));
 
 if (uArena > 0.5) {
-  float au = length(vec2(vWPos.x / uArenaSX, vWPos.z / uArenaSZ));
-  float plank = tHash(vec2(floor(vWPos.z * 8.0), 2.2));
-  if (au < 1.08) {
-    tAlb = mix(vec3(0.4, 0.24, 0.11), vec3(0.68, 0.46, 0.24), plank);
-    tAlb *= mix(0.88, 1.1, macro);
-    tRough = 0.4;
-  } else if (au < 3.2) {
-    tAlb = mix(vec3(0.28, 0.26, 0.24), vec3(0.42, 0.4, 0.36), tNoise(vWPos.xz * 0.55));
-    tRough = 0.72;
-  } else if (au < 4.55) {
-    tAlb = mix(vec3(0.32, 0.3, 0.28), vec3(0.5, 0.46, 0.4), tNoise(vWPos.xz * 1.4));
-    tRough = 0.55;
-  } else {
-    tAlb *= 0.72;
-    tRough = mix(tRough, 0.62, 0.5);
-  }
+  vec2 aq = abs(vWPos.xz) - uArenaCore;
+  float ar = length(max(aq, 0.0)) + min(max(aq.x, aq.y), 0.0);
+  if (ar > uArenaShell.x && ar < uArenaShell.y) discard;
+  tAlb = vec3(0.018, 0.019, 0.022) * mix(0.85, 1.15, tNoise(vWPos.xz * 0.8));
+  tRough = 0.82;
+  tNrmW = nW;
 } else if (uUrban > 0.5) {
   float pr = length(vWPos.xz);
   if (pr < uPlazaLawn) {
@@ -257,13 +247,15 @@ if (uArena > 0.5) {
   }
 }
 
-diffuseColor.rgb *= tAlb;
+if (uArena > 0.5) diffuseColor.rgb = tAlb;
+else diffuseColor.rgb *= tAlb;
 `;
 
 export class Terrain {
-  constructor(data, textures, { urban = false, arena = false } = {}) {
+  constructor(data, textures, { urban = false, arena = false, heightFn = null } = {}) {
     this.urban = urban;
     this.arena = arena;
+    this.heightFn = heightFn;
     this.heights = data.heights;
     this.normalsData = data.normals;
     this.biomeData = data.biome;
@@ -297,8 +289,8 @@ export class Terrain {
       uTime: { value: 0 },
       uUrban: { value: urban ? 1 : 0 },
       uArena: { value: arena ? 1 : 0 },
-      uArenaSX: { value: ARENA.sx },
-      uArenaSZ: { value: ARENA.sz },
+      uArenaCore: { value: new THREE.Vector2(ARENA.courtHX, ARENA.courtHZ) },
+      uArenaShell: { value: new THREE.Vector2(ARENA.bowlR - 0.05, ARENA.facadeOut * ARENA.RU + 0.5) },
       uStreetPitch: { value: CITY.pitch },
       uBlockW: { value: CITY.blockW },
       uStreetW: { value: CITY.streetW },
@@ -357,7 +349,7 @@ export class Terrain {
           const m = new THREE.Mesh(g, this.material);
           m.customDepthMaterial = this.depthMaterial;
           m.receiveShadow = true;
-          m.castShadow = li < 2;
+          m.castShadow = li < 2 && !arena;
           lod.addLevel(m, d);
         });
         this.group.add(lod);
@@ -370,6 +362,7 @@ export class Terrain {
   }
 
   heightAt(x, z) {
+    if (this.heightFn) return this.heightFn(x, z);
     const N = GRID_N;
     const gx = Math.min(N - 1.001, Math.max(0, (x + HALF_WORLD) / GRID_SPACING));
     const gz = Math.min(N - 1.001, Math.max(0, (z + HALF_WORLD) / GRID_SPACING));
