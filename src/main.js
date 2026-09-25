@@ -27,6 +27,7 @@ import { modeUrl, persistMode, persistRoom, resolveMode, resolveRoom } from './g
 import { isTouchDevice, setupTouch } from './game/touch.js';
 import { DRONE } from './game/drone.js';
 import { createGameRenderer } from './engine/webgl.js';
+import { RADAR_RANGE, radarBlips, radarSubjects, drawRadar } from './game/radar.js';
 
 const $ = (id) => document.getElementById(id);
 const menu = $('menu');
@@ -904,6 +905,16 @@ async function init() {
       : rivals.filter((r) => r.fighter.alive).length;
     const leftLabel = document.querySelector('#round small');
     if (leftLabel) leftLabel.textContent = mode === 'multi' ? 'players left' : 'rivals left';
+    const radarSelf = spec || player;
+    const radarYaw = spec ? (spec.yaw ?? player.camYaw) : player.camYaw;
+    const radarOthers = radarSubjects(mode === 'multi' ? [...session.remotes.values()] : rivals)
+      .filter((o) => o.id !== radarSelf.fighter?.id);
+    drawRadar($('radarcanvas'), {
+      blips: radarBlips({ x: radarSelf.pos.x, z: radarSelf.pos.z }, radarYaw, radarOthers, mapDef.radarRange || RADAR_RANGE),
+      range: mapDef.radarRange || RADAR_RANGE,
+      time: elapsed,
+    });
+    $('radar').classList.toggle('scoped', scoped);
     $('damage').style.opacity = spec ? 0 : Math.max(hurt, alive ? Math.max(0, (45 - hp) / 45) * 0.45 : 0.7);
     if (spec && (round.state === 'fight' || (mode === 'solo' && round.state === 'over'))) {
       const who = spec.persona?.name || spec.fighter.name;

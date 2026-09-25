@@ -16,6 +16,7 @@ export const MAPS = {
     waterCamp: true,
     timeOfDay: 0.09,
     fogDensity: 0.0016,
+    radarRange: 120,
   },
   city: {
     id: 'city',
@@ -34,6 +35,7 @@ export const MAPS = {
     waterCamp: false,
     timeOfDay: 0.22,
     fogDensity: 0.0028,
+    radarRange: 100,
   },
   garden: {
     id: 'garden',
@@ -52,6 +54,7 @@ export const MAPS = {
     waterCamp: false,
     timeOfDay: 0.78,
     fogDensity: 0.0036,
+    radarRange: 80,
   },
 };
 
