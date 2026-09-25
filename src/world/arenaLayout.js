@@ -179,6 +179,102 @@ export function rowAtU(u, bank = LOWER_ROWS) {
   return null;
 }
 
+function walkRadius(r) {
+  const row = rowAtR(r, LOWER_ROWS) || rowAtR(r, UPPER_ROWS);
+  return row ? row.walkR : r;
+}
+
+function standsZone(zone) {
+  return zone === 'bowl' || zone === 'upper' || zone === 'concourse';
+}
+
+function sectionDist(a, b, S) {
+  const d = Math.abs(a - b);
+  return Math.min(d, S - d);
+}
+
+/** Perimeter parameter of the nearest stair aisle. */
+export function nearestAisleT(t, otherT = t) {
+  const S = BOWL.sections;
+  const wrap = (u) => (((u % 1) + 1) % 1) * S;
+  const a = wrap(t), b = wrap(otherT);
+  let best = 0, bestCost = Infinity;
+  for (let i = 0; i < S; i++) {
+    const cost = sectionDist(a, i, S) + sectionDist(b, i, S) * 0.4;
+    if (cost < bestCost) { bestCost = cost; best = i; }
+  }
+  return best / S;
+}
+
+/** How far a point sits from the nearest aisle, in metres along the row. */
+export function aisleClearance(x, z) {
+  const { r, t } = bowlParam(x, z);
+  const S = BOWL.sections;
+  const s = (((t % 1) + 1) % 1) * S;
+  const nearest = Math.round(s);
+  const ds = sectionDist(s, nearest, S);
+  const sec = Math.min(S - 1, Math.max(0, Math.floor(s % S)));
+  const L = Math.max(1e-3, rowLength(Math.max(r, bowlR), sec / S, (sec + 1) / S));
+  const meters = ds * L;
+  return { r, t, meters, onAisle: meters <= BOWL.aisle * 0.5 + 0.18 };
+}
+
+/**
+ * Next walk target in the Garden bowl. Long climbs use the stairs; a short
+ * cut across one or two seat rows is a hop through the chairs.
+ */
+export function bowlWaypoint(from, to) {
+  if (!from || !to) return null;
+  const az = arenaZone(from.x, from.z);
+  const bz = arenaZone(to.x, to.z);
+  const standsA = standsZone(az);
+  const standsB = standsZone(bz);
+  if (!standsA && !standsB) return null;
+
+  const a = bowlParam(from.x, from.z);
+  const b = bowlParam(to.x, to.z);
+  const here = aisleClearance(from.x, from.z);
+  const destR = standsB ? b.r : bowlR;
+  const dR = destR - a.r;
+  const rows = Math.abs(dR) / BOWL.tread;
+
+  if (!standsA && standsB) {
+    const p = bowlFrame(bowlR + 0.35, nearestAisleT(b.t, b.t));
+    return { x: p.x, z: p.z, jump: false, via: 'enter-aisle' };
+  }
+
+  if (standsA && !standsB) {
+    const aisleT = nearestAisleT(a.t, b.t);
+    if (here.onAisle) {
+      const p = bowlFrame(Math.max(bowlR - 0.35, a.r - 2.6), aisleT);
+      return { x: p.x, z: p.z, jump: false, via: 'stairs' };
+    }
+    if (rows > 1.6) {
+      const p = bowlFrame(walkRadius(a.r), aisleT);
+      return { x: p.x, z: p.z, jump: false, via: 'to-aisle' };
+    }
+    const p = bowlFrame(Math.max(bowlR - 0.2, a.r - 1.3), a.t);
+    return { x: p.x, z: p.z, jump: true, via: 'hop-seats' };
+  }
+
+  const aisleT = nearestAisleT(a.t, b.t);
+  if (here.onAisle && rows > 0.35) {
+    const nextR = a.r + Math.sign(dR) * Math.min(Math.abs(dR), 2.6);
+    const p = bowlFrame(nextR, aisleT);
+    return { x: p.x, z: p.z, jump: false, via: 'stairs' };
+  }
+  if (rows > 1.6 && !here.onAisle) {
+    const p = bowlFrame(walkRadius(a.r), aisleT);
+    return { x: p.x, z: p.z, jump: false, via: 'to-aisle' };
+  }
+  if (rows > 0.35 && !here.onAisle) {
+    const p = bowlFrame(a.r + Math.sign(dR) * Math.min(Math.abs(dR), 1.4), a.t);
+    return { x: p.x, z: p.z, jump: true, via: 'hop-seats' };
+  }
+  const p = bowlFrame(walkRadius(a.r), b.t);
+  return { x: p.x, z: p.z, jump: false, via: 'row' };
+}
+
 function rowAtR(r, bank) {
   let lo = 0, hi = bank.length - 1;
   if (r < bank[0].r0 || r >= bank[hi].r1) return null;

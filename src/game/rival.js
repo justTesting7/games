@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { Loadout, WEAPONS, Weapons } from './weapons.js';
+import { bowlWaypoint } from '../world/arenaLayout.js';
 
 const GRAVITY = 16;
 const JUMP_V = 5.0;
@@ -923,8 +924,21 @@ export class Rival {
       this.detour -= dt;
       out.dir.applyAxisAngle(UP, this.detourAngle);
       out.speed = Math.max(out.speed, 3);
+    } else if (!danger && this.world.terrain?.arena && out.speed > 0.35 && tp) {
+      this.steerBowl(out, tp);
     }
     return out;
+  }
+
+  // Garden stands: take the stairs, or hop a seat row — never walk the chairs.
+  steerBowl(out, dest) {
+    const nav = bowlWaypoint(this.pos, dest);
+    if (!nav) return;
+    const dx = nav.x - this.pos.x;
+    const dz = nav.z - this.pos.z;
+    const len = Math.hypot(dx, dz);
+    if (len > 0.16) out.dir.set(dx / len, 0, dz / len);
+    if (nav.jump) out.jump = true;
   }
 
   // Aim wanders around the target by an error that grows with range and
