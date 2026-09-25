@@ -7,15 +7,13 @@ import {
 } from './arenaLayout.js';
 import { PropBatcher, withBatcher } from './propBatcher.js';
 import {
-  makeBanner, makeConcrete, makeCourtPaint, makeEmissive, makeGlass,
+  makeBanner, makeConcrete, makeCourtPaint, makeEmissive, makeGardenSign, makeGlass,
   makeHardwood, makeJumbotron, makeMarquee, makeMetal, makeSeatFabric, makeTerrazzo,
 } from './arenaMaterials.js';
 
 const UP = new THREE.Vector3(0, 1, 0);
-const SEAT_NAVY = new THREE.Color(0x1a2347);
-const SEAT_ORANGE = new THREE.Color(0xc45a18);
-const SEAT_BLUE = new THREE.Color(0x0c3a7a);
-const SEAT_DARK = new THREE.Color(0x14161c);
+const SEAT_NAVY = new THREE.Color(0x12151c);
+const SEAT_WEAR = new THREE.Color(0x1a1e26);
 
 function shade(o) {
   o.traverse((c) => {
@@ -105,25 +103,28 @@ export class Arena {
     const mats = {
       wood: makeHardwood(),
       court: makeCourtPaint(makeHardwood()),
-      conc: makeConcrete(0x8c8880),
-      darkConc: makeConcrete(0x5a5854),
+      conc: makeConcrete(0x6a6762),
+      darkConc: makeConcrete(0x2a2c32),
       terrazzo: makeTerrazzo(),
       seat: makeSeatFabric(),
       steel: makeMetal(0x6a7078, 0.4),
       chrome: makeMetal(0xb8bec6, 0.22),
       glass: makeGlass(),
-      led: makeEmissive(0xffe6b0, 1.8),
-      amber: makeEmissive(0xff9a32, 1.6),
+      led: makeEmissive(0xc8b48a, 0.42),
+      amber: makeEmissive(0xff9a32, 0.7),
       jumbo: makeJumbotron(),
+      sign: makeGardenSign(),
       marquee: makeMarquee(),
       orange: makeBanner(0xc45a18),
       blue: makeBanner(0x0c3a7a),
-      pad: new THREE.MeshStandardMaterial({ color: 0x2a2c32, roughness: 0.7, metalness: 0.08 }),
+      housing: new THREE.MeshStandardMaterial({ color: 0x0c0d10, roughness: 0.62, metalness: 0.18 }),
+      pad: new THREE.MeshStandardMaterial({ color: 0x101214, roughness: 0.78, metalness: 0.06 }),
       rim: new THREE.MeshStandardMaterial({
         color: 0xe85a12, roughness: 0.28, metalness: 0.55, emissive: 0x5a1c04, emissiveIntensity: 0.25,
       }),
     };
     this._leds.push(mats.jumbo, mats.marquee);
+    if (this.pipeline) this.pipeline.indoor = true;
 
     this.buildCourt(mats, y0);
     this.buildCourtside(mats, y0);
@@ -144,7 +145,7 @@ export class Arena {
       }
     });
     const fog = this.pipeline.fogMaterial.uniforms;
-    if (fog.uFogDensity) fog.uFogDensity.value = 0.0036;
+    if (fog.uFogDensity) fog.uFogDensity.value = 0.0048;
   }
 
   spawnFor(slot = 0) {
@@ -154,12 +155,13 @@ export class Arena {
   buildCourt(mats, y0) {
     const { courtHX: hx, courtHZ: hz } = ARENA;
     const floor = mesh(new THREE.BoxGeometry(hx * 2 + 0.08, 0.06, hz * 2 + 0.08), mats.court, 0, y0 + 0.04, 0);
+    floor.name = 'msg-court';
     floor.receiveShadow = true;
     floor.castShadow = false;
     floor.userData.noShadow = true;
     this.group.add(floor);
 
-    const apron = mesh(new THREE.BoxGeometry(hx * 2 + 8.8, 0.04, hz * 2 + 7.4), mats.wood, 0, y0 + 0.015, 0);
+    const apron = mesh(new THREE.BoxGeometry(hx * 2 + 8.8, 0.04, hz * 2 + 7.4), mats.pad, 0, y0 + 0.015, 0);
     apron.receiveShadow = true;
     apron.castShadow = false;
     apron.userData.noShadow = true;
@@ -232,11 +234,7 @@ export class Arena {
       dummy.scale.set(1, 1, 1);
       dummy.updateMatrix();
       inst.setMatrixAt(i, dummy.matrix);
-      const end = Math.abs(s.x) > Math.abs(s.z) * 1.15;
-      let col = SEAT_NAVY;
-      if (s.tier === 'lower' && s.row <= 4) col = SEAT_DARK;
-      else if (end) col = s.sec % 2 ? SEAT_ORANGE : SEAT_BLUE;
-      else if (rand() < 0.045) col = SEAT_ORANGE;
+      const col = rand() < 0.07 ? SEAT_WEAR : SEAT_NAVY;
       inst.setColorAt(i, col);
     });
     inst.instanceMatrix.needsUpdate = true;
@@ -272,7 +270,7 @@ export class Arena {
       }
     }
     const slab = new THREE.BoxGeometry(1, 1, 1);
-    const treadMesh = new THREE.InstancedMesh(slab, mats.darkConc, treads.length);
+    const treadMesh = new THREE.InstancedMesh(slab, mats.pad, treads.length);
     treadMesh.name = 'bowl-treads';
     treadMesh.frustumCulled = false;
     treadMesh.castShadow = false;
@@ -299,7 +297,7 @@ export class Arena {
     for (let slot = 0; slot < 8; slot++) {
       const ang = slot * Math.PI / 4;
       const p = ovalPoint(ARENA.bowlIn + 0.02, ang);
-      const portal = mesh(new THREE.TorusGeometry(1.55, 0.08, 8, 18, Math.PI), mats.amber, p.x, y0 + 1.7, p.z, 0, -ang, 0);
+      const portal = mesh(new THREE.TorusGeometry(1.55, 0.08, 8, 18, Math.PI), mats.steel, p.x, y0 + 1.7, p.z, 0, -ang, 0);
       portal.userData.noShadow = true;
       this.group.add(portal);
     }
@@ -321,29 +319,32 @@ export class Arena {
 
   buildJumbotron(mats) {
     const g = new THREE.Group();
-    g.position.set(0, 20.6, 0);
-    g.add(mesh(new THREE.BoxGeometry(8.2, 5.1, 8.2), mats.steel, 0, 0, 0));
-    const face = new THREE.PlaneGeometry(7.7, 4.55);
+    g.name = 'msg-scoreboard';
+    g.position.set(0, ARENA.baseY + 14.4, 0);
+    const body = mesh(new THREE.BoxGeometry(8.8, 5.1, 8.8), mats.housing, 0, 0, 0);
+    g.add(body);
+    const face = new THREE.PlaneGeometry(8.25, 4.55);
     const faces = [
-      [0, 0, 4.12, 0],
-      [0, 0, -4.12, Math.PI],
-      [4.12, 0, 0, Math.PI / 2],
-      [-4.12, 0, 0, -Math.PI / 2],
+      [0, 0, 4.42, 0],
+      [0, 0, -4.42, Math.PI],
+      [4.42, 0, 0, Math.PI / 2],
+      [-4.42, 0, 0, -Math.PI / 2],
     ];
     for (const [x, y, z, ry] of faces) {
       const p = mesh(face, mats.jumbo, x, y, z, 0, ry, 0);
       p.userData.noShadow = true;
       g.add(p);
+      const strip = mesh(new THREE.PlaneGeometry(8.3, 0.38), mats.sign, x * 1.006, -2.42, z * 1.006, 0, ry, 0);
+      strip.userData.noShadow = true;
+      g.add(strip);
     }
-    const ring = new THREE.Mesh(new THREE.TorusGeometry(5.4, 0.42, 10, 40), mats.jumbo);
-    ring.rotation.x = Math.PI / 2;
-    ring.position.y = -2.85;
-    ring.userData.noShadow = true;
-    g.add(ring);
-    g.add(mesh(new THREE.CylinderGeometry(2.4, 2.4, 0.28, 24), mats.led, 0, -2.35, 0));
-    g.add(mesh(new THREE.BoxGeometry(0.32, 6.4, 0.32), mats.steel, 0, 5.4, 0));
+    g.add(mesh(new THREE.BoxGeometry(9.1, 0.16, 9.1), mats.housing, 0, 2.64, 0));
+    g.add(mesh(new THREE.BoxGeometry(9.1, 0.16, 9.1), mats.housing, 0, -2.64, 0));
+    for (const [x, z] of [[-3.9, -3.9], [3.9, -3.9], [-3.9, 3.9], [3.9, 3.9]]) {
+      g.add(mesh(new THREE.CylinderGeometry(0.045, 0.045, 13.4, 6), mats.steel, x, 8.6, z));
+    }
     this.group.add(g);
-    addBox(this.colliders, 0, 0, 17.4, 4.2, 4.2, 6.4, 'metal');
+    addBox(this.colliders, 0, 0, ARENA.baseY + 12.1, 4.8, 4.8, 4.6, 'metal');
   }
 
   buildRoof(mats) {
@@ -371,21 +372,24 @@ export class Arena {
       for (let i = 0; i < n; i++) {
         const ang = (i / n) * Math.PI * 2;
         const { x, z } = ovalPoint(u, ang);
-        const lamp = mesh(new THREE.CylinderGeometry(0.32, 0.32, 0.1, 10), mats.led, x, roofY - 0.55, z);
+        const lamp = mesh(new THREE.CylinderGeometry(0.28, 0.28, 0.08, 8), mats.led, x, roofY - 0.55, z);
         lamp.userData.noShadow = true;
         this.group.add(lamp);
       }
     }
 
-    const banners = [
-      0xc8102e, 0x006bb6, 0xf58426, 0xffffff, 0x0033a0, 0xc8102e, 0x1d428a, 0xf58426,
-    ];
+    const banners = [0x006bb6, 0xf58426, 0xffffff, 0x006bb6, 0xf58426, 0x0a0c12, 0xffffff, 0x006bb6];
     banners.forEach((hex, i) => {
-      const ang = (i / banners.length) * Math.PI * 2 + 0.2;
-      const p = ovalPoint(1.55, ang);
+      const ang = (i / banners.length) * Math.PI * 2 + 0.18;
+      const p = ovalPoint(1.72, ang);
       const mat = makeBanner(hex);
-      this.group.add(mesh(new THREE.BoxGeometry(1.25, 2.6, 0.05), mat, p.x, 24.8, p.z, 0, -ang, 0));
+      this.group.add(mesh(new THREE.BoxGeometry(0.95, 1.7, 0.04), mat, p.x, 26.1, p.z, 0, -ang, 0));
     });
+    const flag = new THREE.Group();
+    flag.position.set(0, roofY - 1.6, ARENA.sz * 1.35);
+    flag.add(mesh(new THREE.BoxGeometry(1.35, 0.82, 0.03), makeBanner(0xb22234), 0, 0, 0));
+    flag.add(mesh(new THREE.BoxGeometry(0.52, 0.42, 0.035), makeBanner(0x1a237e), -0.4, 0.18, 0.01));
+    this.group.add(flag);
   }
 
   buildConcourse(mats, y0, rand) {
@@ -577,10 +581,24 @@ export class Arena {
   }
 
   lightArena(y0) {
-    const hemi = new THREE.HemisphereLight(0xffe2b8, 0x1a140c, 0.62);
+    const hemi = new THREE.HemisphereLight(0x6e7c90, 0x08090c, 0.2);
     this.group.add(hemi);
-    const court = new THREE.PointLight(0xfff1d2, 2.8, 70, 1.25);
-    court.position.set(0, y0 + 14.5, 0);
+    const spots = [
+      [0, 0, 5.2],
+      [-7.5, 0, 3.8],
+      [7.5, 0, 3.8],
+      [0, -5.2, 3.4],
+      [0, 5.2, 3.4],
+    ];
+    for (const [x, z, inten] of spots) {
+      const spot = new THREE.SpotLight(0xfff2d8, inten, 48, 0.62, 0.48, 1.15);
+      spot.position.set(x * 0.15, y0 + 16.8, z * 0.15);
+      spot.target.position.set(x, y0, z);
+      spot.castShadow = false;
+      this.group.add(spot, spot.target);
+    }
+    const court = new THREE.PointLight(0xffeed4, 1.55, 36, 1.35);
+    court.position.set(0, y0 + 10.5, 0);
     court.castShadow = false;
     this.group.add(court);
   }

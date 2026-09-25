@@ -56,8 +56,8 @@ export function makeHardwood() {
   float tone = aHash(vec3(plank, 2.7, 1.1));
   float grain = aFbm(vec3(p.x * 3.4, plank * 0.15, p.y * 0.35));
   float seam = 1.0 - smoothstep(0.0, 0.018, abs(fract(p.y * 8.2) - 0.5) - 0.46);
-  vec3 light = vec3(0.72, 0.5, 0.28);
-  vec3 dark = vec3(0.42, 0.26, 0.12);
+  vec3 light = vec3(0.86, 0.72, 0.48);
+  vec3 dark = vec3(0.58, 0.44, 0.26);
   vec3 wood = mix(dark, light, tone * 0.65 + grain * 0.35);
   wood *= mix(0.9, 1.12, grain);
   wood = mix(wood, wood * vec3(0.55, 0.4, 0.22), seam * 0.7);
@@ -126,25 +126,95 @@ float courtPaint(vec2 p, out float keyMask, out float logo) {
     paint = max(paint, stroke(sdSeg(p, vec2(x, HZ), vec2(x, HZ - 0.3)), 0.04) * inCourt);
     paint = max(paint, stroke(sdSeg(p, vec2(x, -HZ), vec2(x, -HZ + 0.3)), 0.04) * inCourt);
   }
-  float ring = stroke(length(p) - 1.83, 0.16);
-  vec2 q = p * 1.15;
-  float nStem = min(sdBox2(q - vec2(-0.42, 0.0), vec2(0.07, 0.42)), sdBox2(q - vec2(-0.08, 0.0), vec2(0.07, 0.42)));
-  nStem = min(nStem, sdSeg(q, vec2(-0.42, 0.4), vec2(-0.08, -0.4)) - 0.07);
-  float yStem = min(sdBox2(q - vec2(0.42, -0.18), vec2(0.07, 0.24)), sdSeg(q, vec2(0.22, 0.4), vec2(0.42, 0.02)) - 0.07);
-  yStem = min(yStem, sdSeg(q, vec2(0.62, 0.4), vec2(0.42, 0.02)) - 0.07);
-  logo = max(fill(nStem), fill(yStem)) * fill(length(p) - 1.55);
-  paint = max(paint, ring * 0.85);
+  float ring = stroke(length(p) - 1.83, 0.18);
+  vec2 q = p * 1.2;
+  float nStem = min(sdBox2(q - vec2(-0.4, 0.0), vec2(0.08, 0.46)), sdBox2(q - vec2(-0.04, 0.0), vec2(0.08, 0.46)));
+  nStem = min(nStem, sdSeg(q, vec2(-0.4, 0.44), vec2(-0.04, -0.44)) - 0.075);
+  float yStem = min(sdBox2(q - vec2(0.44, -0.2), vec2(0.08, 0.26)), sdSeg(q, vec2(0.22, 0.44), vec2(0.44, 0.04)) - 0.075);
+  yStem = min(yStem, sdSeg(q, vec2(0.66, 0.44), vec2(0.44, 0.04)) - 0.075);
+  logo = max(fill(nStem), fill(yStem)) * fill(length(p) - 1.5);
+  paint = max(paint, ring * 0.9);
   return paint;
 }
 `;
 
+function makeCourtDecal() {
+  if (typeof document === 'undefined') return null;
+  const ppm = 96;
+  const HX = 14.325;
+  const HZ = 7.62;
+  const W = Math.round(HX * 2 * ppm);
+  const H = Math.round(HZ * 2 * ppm);
+  const c = document.createElement('canvas');
+  c.width = W;
+  c.height = H;
+  const g = c.getContext('2d');
+  const X = (x) => (x + HX) * ppm;
+  const Y = (z) => (z + HZ) * ppm;
+  const m = (v) => v * ppm;
+
+  g.clearRect(0, 0, W, H);
+  g.fillStyle = '#0a3478';
+  g.fillRect(0, 0, m(3.05), H);
+  g.fillRect(W - m(3.05), 0, m(3.05), H);
+
+  const paintWord = (word, cx, cy, rot) => {
+    g.save();
+    g.translate(X(cx), Y(cy));
+    g.rotate(rot);
+    g.fillStyle = '#f4f2ec';
+    g.font = `800 ${Math.round(m(1.02))}px Arial, "Segoe UI", sans-serif`;
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    const letters = word.split('');
+    const gap = m(0.08);
+    const widths = letters.map((ch) => g.measureText(ch).width);
+    let total = widths.reduce((a, b) => a + b, 0) + gap * (letters.length - 1);
+    let x = -total * 0.5;
+    for (let i = 0; i < letters.length; i++) {
+      g.fillText(letters[i], x + widths[i] * 0.5, 0);
+      x += widths[i] + gap;
+    }
+    g.restore();
+  };
+  paintWord('NEW YORK', -12.8, 0, -Math.PI / 2);
+  paintWord('KNICKS', 12.8, 0, Math.PI / 2);
+
+  g.save();
+  g.translate(X(0), Y(0));
+  g.beginPath();
+  g.arc(0, 0, m(1.52), 0, Math.PI * 2);
+  g.fillStyle = '#f58426';
+  g.fill();
+  g.beginPath();
+  g.arc(0, 0, m(1.28), 0, Math.PI * 2);
+  g.fillStyle = '#0a3478';
+  g.fill();
+  g.fillStyle = '#f58426';
+  g.font = `900 ${Math.round(m(1.18))}px Arial, "Segoe UI", sans-serif`;
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  g.fillText('NY', 0, m(0.05));
+  g.restore();
+
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 8;
+  tex.needsUpdate = true;
+  return tex;
+}
+
 export function makeCourtPaint(wood) {
   const mat = wood.clone();
-  mat.emissive = new THREE.Color(0x2a1c0c);
-  mat.emissiveIntensity = 0.14;
-  return patch(mat, 'msg-court', (shader) => {
+  mat.emissive = new THREE.Color(0x100c06);
+  mat.emissiveIntensity = 0.03;
+  const decal = makeCourtDecal();
+  mat.userData.courtDecal = decal;
+  return patch(mat, 'msg-court-v3', (shader) => {
+    shader.uniforms.uDecal = { value: decal || new THREE.Texture() };
+    shader.uniforms.uHasDecal = { value: decal ? 1 : 0 };
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', `#include <common>\n${courtMarkGLSL}`)
+      .replace('#include <common>', `#include <common>\nuniform sampler2D uDecal;\nuniform float uHasDecal;\n${courtMarkGLSL}`)
       .replace('#include <color_fragment>', /* glsl */ `
 #include <color_fragment>
 {
@@ -153,26 +223,39 @@ export function makeCourtPaint(wood) {
   float tone = aHash(vec3(plank, 2.7, 1.1));
   float grain = aFbm(vec3(p.x * 3.4, plank * 0.15, p.y * 0.35));
   float seam = 1.0 - smoothstep(0.0, 0.018, abs(fract(p.y * 8.2) - 0.5) - 0.46);
-  vec3 light = vec3(0.74, 0.52, 0.3);
-  vec3 dark = vec3(0.4, 0.24, 0.11);
-  vec3 wood = mix(dark, light, tone * 0.62 + grain * 0.38);
-  wood = mix(wood, wood * vec3(0.55, 0.4, 0.22), seam * 0.65);
+  vec3 light = vec3(0.94, 0.86, 0.66);
+  vec3 dark = vec3(0.78, 0.68, 0.46);
+  vec3 wood = mix(dark, light, tone * 0.55 + grain * 0.45);
+  wood = mix(wood, wood * vec3(0.72, 0.62, 0.4), seam * 0.42);
   float keyMask, logo;
   float paint = courtPaint(p, keyMask, logo);
-  vec3 keyCol = mix(vec3(0.08, 0.2, 0.42), vec3(0.72, 0.32, 0.08), step(0.0, p.x) * 0.35 + 0.15);
-  wood = mix(wood, mix(wood * 0.72, keyCol, 0.55), keyMask * 0.92);
-  vec3 line = vec3(0.93, 0.93, 0.9);
+  float endBlue = 0.0;
+  for (int s = -1; s <= 1; s += 2) {
+    endBlue = max(endBlue, fill(sdBox2(p - vec2(float(s) * 12.8, 0.0), vec2(1.52, 7.62))));
+  }
+  vec3 knicksBlue = vec3(0.04, 0.20, 0.47);
+  wood = mix(wood, knicksBlue, endBlue * 0.96);
+  if (uHasDecal < 0.5) {
+    vec3 orange = vec3(0.96, 0.52, 0.15);
+    vec3 blue = vec3(0.04, 0.20, 0.47);
+    float disc = fill(length(p) - 1.5);
+    wood = mix(wood, blue, disc);
+    wood = mix(wood, mix(blue, orange, step(0.0, p.x)), logo);
+  } else {
+    vec2 uv = (p + vec2(14.325, 7.62)) / vec2(28.65, 15.24);
+    vec4 dec = texture(uDecal, uv);
+    wood = mix(wood, dec.rgb, dec.a);
+  }
+  vec3 line = vec3(0.96, 0.96, 0.94);
   wood = mix(wood, line, paint);
-  vec3 orange = vec3(0.85, 0.34, 0.07);
-  vec3 blue = vec3(0.02, 0.22, 0.48);
-  wood = mix(wood, mix(blue, orange, step(0.0, p.x * p.y)), logo);
-  wood = mix(wood, orange, stroke(length(p) - 1.83, 0.14) * 0.85 * (1.0 - logo));
+  vec3 orangeRing = vec3(0.96, 0.52, 0.15);
+  wood = mix(wood, orangeRing, stroke(length(p) - 1.83, 0.16) * 0.95);
   diffuseColor.rgb = wood;
 }
 `)
       .replace('#include <roughnessmap_fragment>', /* glsl */ `
 #include <roughnessmap_fragment>
-roughnessFactor = mix(0.32, 0.55, aFbm(vWorldPos * 3.5));
+roughnessFactor = mix(0.16, 0.34, aFbm(vWorldPos * 3.5));
 `);
   });
 }
@@ -226,7 +309,7 @@ roughnessFactor = mix(0.28, 0.5, aFbm(vWorldPos * 5.0));
 
 export function makeSeatFabric() {
   return new THREE.MeshStandardMaterial({
-    color: 0x1a2347, roughness: 0.82, metalness: 0.02, envMapIntensity: 0.2,
+    color: 0x12151c, roughness: 0.88, metalness: 0.02, envMapIntensity: 0.12,
   });
 }
 
@@ -264,26 +347,40 @@ uniform float uTime;
 varying vec2 vUv;
 void main() {
   vec2 uv = vUv;
-  float t = uTime;
-  float row = floor(uv.y * 28.0);
-  float scan = 0.55 + 0.45 * sin(uv.y * 80.0 - t * 6.0);
-  float band = step(0.72, fract(uv.y * 6.0 - t * 0.15));
-  vec3 orange = vec3(0.95, 0.38, 0.06);
-  vec3 blue = vec3(0.04, 0.28, 0.62);
-  vec3 black = vec3(0.02, 0.03, 0.05);
-  vec3 col = mix(blue, orange, band);
-  float score = step(0.18, uv.x) * step(uv.x, 0.82) * step(0.38, uv.y) * step(uv.y, 0.7);
-  float digit = step(0.35, fract(uv.x * 8.0 + floor(t * 0.2))) * score;
-  col = mix(col, vec3(1.0, 0.95, 0.75), digit * 0.85);
-  col = mix(col, black, 1.0 - scan * 0.35);
+  float pix = step(0.82, fract(uv.x * 170.0)) * step(0.82, fract(uv.y * 96.0));
+  vec3 col = vec3(0.012, 0.013, 0.016) + vec3(0.018, 0.02, 0.024) * pix;
+  float glow = 0.012 + 0.006 * sin(uTime * 0.7 + uv.y * 6.0);
+  col += vec3(glow);
   float frame = min(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y));
-  col *= smoothstep(0.0, 0.03, frame) * 1.15;
-  col += vec3(0.08, 0.04, 0.01) * (0.5 + 0.5 * sin(t * 3.0 + row));
+  col *= smoothstep(0.0, 0.03, frame);
   gl_FragColor = vec4(col, 1.0);
 }
 `,
     toneMapped: false,
   });
+}
+
+export function makeGardenSign() {
+  if (typeof document === 'undefined') {
+    return new THREE.MeshStandardMaterial({
+      color: 0x101214, emissive: 0xe8e0d0, emissiveIntensity: 0.28, roughness: 0.55,
+    });
+  }
+  const c = document.createElement('canvas');
+  c.width = 2048;
+  c.height = 160;
+  const g = c.getContext('2d');
+  g.fillStyle = '#0a0b0e';
+  g.fillRect(0, 0, 2048, 160);
+  g.fillStyle = '#f3eee4';
+  g.font = '700 74px "Segoe UI", system-ui, sans-serif';
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  g.fillText('MADISON   SQUARE   GARDEN', 1024, 82);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 8;
+  return new THREE.MeshBasicMaterial({ map: tex, toneMapped: false });
 }
 
 export function makeMarquee() {

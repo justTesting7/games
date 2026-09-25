@@ -37,5 +37,27 @@ if (meshes < 80) {
   console.error('arena looks empty', meshes);
   process.exit(1);
 }
+if (!arena.group.getObjectByName('msg-scoreboard')) {
+  console.error('missing center-hung scoreboard');
+  process.exit(1);
+}
+if (!arena.group.getObjectByName('msg-court')) {
+  console.error('missing painted Garden court');
+  process.exit(1);
+}
+if (!pipeline.indoor) {
+  console.error('arena build should mark the pipeline indoor');
+  process.exit(1);
+}
+const cols = seatMesh.instanceColor?.array;
+if (cols) {
+  let lum = 0;
+  for (let i = 0; i < cols.length; i += 3) lum += 0.3 * cols[i] + 0.6 * cols[i + 1] + 0.1 * cols[i + 2];
+  lum /= seatCount;
+  if (lum > 0.18) {
+    console.error('seats should be dark navy like the Garden, lum=', lum);
+    process.exit(1);
+  }
+}
 
 console.log('ok: arena build', { meshes, seats: seatCount, colliders: colliders.list.length, children: arena.group.children.length });

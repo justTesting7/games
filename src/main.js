@@ -283,6 +283,7 @@ async function init() {
     progress.task('Loading terrain materials', 3, () => loadTerrainTextures(mapDef)),
   ]);
   const indoor = mapDef.id === 'garden';
+  pipeline.indoor = indoor;
   const terrain = new Terrain(data, textures, { urban: mapDef.id === 'city' || indoor, arena: indoor });
   world.terrain = terrain;
   pipeline.scene.add(terrain.group);

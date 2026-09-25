@@ -341,11 +341,12 @@ export class Pipeline {
       this.lightColor.copy(tmp).multiply(new THREE.Vector3(0.55, 0.7, 1.0)).multiplyScalar(0.12 * Math.PI * moonF);
     }
     if (this.mobile) this.lightColor.multiplyScalar(0.085);
+    if (this.indoor) this.lightColor.multiplyScalar(0.045);
     const lc = this.lightColor;
     const li = Math.max(lc.x, lc.y, lc.z);
-    this.sun.intensity = this.mobile ? Math.min(li, 1.6) : li;
+    this.sun.intensity = this.indoor ? 0.06 : this.mobile ? Math.min(li, 1.6) : li;
     if (li > 0) this.sun.color.setRGB(lc.x / li, lc.y / li, lc.z / li, THREE.LinearSRGBColorSpace);
-    this.sun.castShadow = li > 1e-3;
+    this.sun.castShadow = !this.indoor && li > 1e-3;
     this.night = smoothstep(0.08, -0.18, this.sunDir.y);
     this.u.uTime.value = elapsed;
   }
