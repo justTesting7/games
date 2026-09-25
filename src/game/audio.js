@@ -23,11 +23,11 @@ export class Audio {
     this.reverbSend.connect(this.reverb).connect(this.master);
 
     this.noise = this.noiseBuffer(2);
-    this.shots = [0, 1, 2, 3].map(() => this.renderGunshot(true));
-    this.farShots = [0, 1].map(() => this.renderGunshot(false));
+    this.shots = [0, 1, 2, 3].map(() => this.renderGunshot());
+    this.farShots = [0, 1].map(() => this.renderGunshot());
     const rifle = { blastT: 0.11, thumpF: 82, thumpT: 0.2, rumbleT: 0.9, len: 1.85, mix: { crack: 1.2, thump: 1.55, rumble: 0.58 } };
-    this.rifleShots = [0, 1, 2].map(() => this.renderGunshot(false, rifle));
-    this.boom = [0, 1].map(() => this.renderGunshot(false, { blastT: 0.16, thumpF: 70, thumpT: 0.35, rumbleT: 1.3, len: 3.2, mix: { crack: 0.6, blast: 1, thump: 1.6, rumble: 0.7 } }));
+    this.rifleShots = [0, 1, 2].map(() => this.renderGunshot(rifle));
+    this.boom = [0, 1].map(() => this.renderGunshot({ blastT: 0.16, thumpF: 70, thumpT: 0.35, rumbleT: 1.3, len: 3.2, mix: { crack: 0.6, blast: 1, thump: 1.6, rumble: 0.7 } }));
     this.startAmbience();
   }
 
@@ -110,7 +110,7 @@ export class Audio {
   // blast that dies within ~80 ms, a low thump, and a bit of rumble, all
   // saturated together. Any pitched sweep makes it sound like a laser.
   // `o` scales the layers: a rifle has a longer, deeper blast and rumble.
-  renderGunshot(click, o = {}) {
+  renderGunshot(o = {}) {
     const { blastT = 0.045, thumpF = 160, thumpT = 0.07, rumbleT = 0.22, len = 0.7, mix: mixO = {} } = o;
     const ctx = this.ctx;
     const sr = ctx.sampleRate;
@@ -141,18 +141,6 @@ export class Audio {
       const g = mix[key] / norm(parts[key]);
       const a = parts[key];
       for (let i = 0; i < n; i++) out[i] += a[i] * g;
-    }
-    if (click) {
-      // The slide going back and slamming forward after the shot.
-      for (const [at, gain] of [[0.038, 0.2], [0.07, 0.14]]) {
-        let lp = 0;
-        const i0 = Math.floor(sr * at);
-        for (let i = i0; i < Math.min(n, i0 + sr * 0.02); i++) {
-          const x = Math.random() * 2 - 1;
-          lp += k(3000) * (x - lp);
-          out[i] += (x - lp) * gain * Math.exp(-(i - i0) / sr / 0.003);
-        }
-      }
     }
     let peak = 0;
     for (let i = 0; i < n; i++) { out[i] = Math.tanh(out[i] * 1.8); peak = Math.max(peak, Math.abs(out[i])); }
@@ -336,13 +324,6 @@ export class Audio {
     o.connect(g).connect(this.master);
     o.start(t);
     o.stop(t + dur + 0.05);
-  }
-
-  casing() {
-    if (!this.ctx) return;
-    const f = 3800 + Math.random() * 1800;
-    this.tone(f, 0.08, 0.03);
-    this.tone(f * 1.52, 0.05, 0.015);
   }
 
   footstep(surface, speed) {

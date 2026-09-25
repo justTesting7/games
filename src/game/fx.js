@@ -489,7 +489,6 @@ export class Effects {
         if (c.p.y < h) {
           c.p.y = h;
           if (c.p.y < 0) { c.rest = true; c.age = 11.5; }
-          if (c.v.y < -0.6 && c.bounces < 4) this.audio.casing();
           c.bounces++;
           c.v.y = Math.abs(c.v.y) * 0.35;
           c.v.x *= 0.5; c.v.z *= 0.5;
