@@ -453,7 +453,34 @@ async function init() {
     $('bannertitle').textContent = title;
     $('bannersub').textContent = sub;
   };
+  let spectate = null;
+  const othersLive = () => {
+    const list = mode === 'multi' ? [...session.remotes.values()] : rivals;
+    return list.filter((r) => r.fighter?.alive);
+  };
+  const attachSpectate = (sub) => {
+    if (!sub) { spectate = null; return null; }
+    if (spectate !== sub) {
+      spectate = sub;
+      player.camYaw = sub.yaw ?? 0;
+      player.camPitch = -0.1;
+      player.smoothPivot = undefined;
+      player.smoothDist = undefined;
+    }
+    return spectate;
+  };
+  const refreshSpectate = () => {
+    if (player.fighter.alive) { spectate = null; return null; }
+    if (spectate?.fighter?.alive) return spectate;
+    const live = othersLive();
+    if (!live.length) { spectate = null; return null; }
+    const from = spectate?.pos || player.pos;
+    live.sort((a, b) => a.pos.distanceToSquared(from) - b.pos.distanceToSquared(from));
+    return attachSpectate(live[0]);
+  };
+
   const resetLocalKit = () => {
+    spectate = null;
     combat.reset(player.fighter);
     player.fighter.loadout.reset();
     character.setWeapon('pistols');
@@ -744,8 +771,9 @@ async function init() {
     const alive = player.fighter.alive;
     const flying = weapons.drone.flying;
     const dying = weapons.drone.dying;
+    const spec = refreshSpectate();
     touchPad.setDrone(flying);
-    const state = player.update(dt, alive && !flying ? input : NO_INPUT);
+    const state = player.update(dt, alive && !flying ? input : NO_INPUT, spec);
     const canShoot = alive && round.state !== 'countdown' && !(mode === 'multi' && round.state === 'waiting');
     if (canShoot) weapons.update(dt, input);
     else weapons.tick(player.fighter, dt);
@@ -779,10 +807,11 @@ async function init() {
     fx.update(dt);
     if (draw) {
       terrain.update(elapsed);
-      if (grass) grass.update(elapsed, camera.position, player.pos);
+      const viewPos = spec?.pos || player.pos;
+      if (grass) grass.update(elapsed, camera.position, viewPos);
       if (mapDef.vegetation) veg.update(elapsed, camera.position);
       if (city) city.update(dt, fx, camera);
-      const coast = THREE.MathUtils.clamp(1 - (terrain.heightAt(player.pos.x, player.pos.z) - 1) / 25, 0, 1);
+      const coast = THREE.MathUtils.clamp(1 - (terrain.heightAt(viewPos.x, viewPos.z) - 1) / 25, 0, 1);
       audio.updateAmbience(dt, { altitude: player.pos.y, coast, underwater: player.underwater });
     }
 
@@ -806,7 +835,9 @@ async function init() {
     const wdef = WEAPONS[L.current];
     $('ammo').textContent = L.current === 'grenade' ? `${L.grenades}`
       : L.current === 'drone' ? `${L.drones}` : `${L.mag[L.current]} / ${L.reserve[L.current]}`;
-    $('weaponname').textContent = dying ? 'drone shot down — returning'
+    $('weaponname').textContent = spec
+      ? `Spectating ${spec.persona?.name || spec.fighter.name}`
+      : dying ? 'drone shot down — returning'
       : flying ? 'space to explode · you are exposed'
       : weapons.chargingGrenade ? 'pull back… release to throw'
       : L.reloading ? 'reloading…' : wdef.name;
@@ -840,7 +871,7 @@ async function init() {
     $('dronesplit').classList.toggle('far', flying && !dying && far);
     const near = weapons.live.some((g) => g.pos.distanceTo(player.pos) < WEAPONS.grenade.radius && g.owner !== player.fighter);
     $('grenadewarn').classList.toggle('show', alive && near);
-    const hp = player.fighter.health;
+    const hp = spec ? spec.fighter.health : player.fighter.health;
     $('hpbar').style.width = `${(hp / MAX_HEALTH) * 100}%`;
     $('hpbar').classList.toggle('low', hp <= 35);
     $('hpnum').textContent = Math.ceil(hp);
@@ -849,7 +880,11 @@ async function init() {
       : rivals.filter((r) => r.fighter.alive).length;
     const leftLabel = document.querySelector('#round small');
     if (leftLabel) leftLabel.textContent = mode === 'multi' ? 'players left' : 'rivals left';
-    $('damage').style.opacity = Math.max(hurt, alive ? Math.max(0, (45 - hp) / 45) * 0.45 : 0.7);
+    $('damage').style.opacity = spec ? 0 : Math.max(hurt, alive ? Math.max(0, (45 - hp) / 45) * 0.45 : 0.7);
+    if (spec && (round.state === 'fight' || (mode === 'solo' && round.state === 'over'))) {
+      const who = spec.persona?.name || spec.fighter.name;
+      banner('Spectating', mode === 'solo' ? `${who} · Press R to fight again` : who, 'show lost');
+    }
     const js = jev.stats;
     if (mode === 'solo') {
       $('jevstat').textContent = js.online === null ? 'Jev · waiting' : js.online ? `Jev online · ${Math.round(js.latency)} ms` : `Jev offline (${js.error}) · local AI`;
@@ -873,7 +908,7 @@ async function init() {
         if (character.root) character.root.visible = true;
         pipeline.renderSplit(weapons.drone.cam, weapons.drone.opCam, dt, { underwater: false, shadowCenter: player.pos });
       } else {
-        pipeline.render(camera, dt, { underwater: player.underwater, shadowCenter: player.pos });
+        pipeline.render(camera, dt, { underwater: player.underwater, shadowCenter: spec?.pos || player.pos });
       }
 
       frames++;

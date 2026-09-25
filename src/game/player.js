@@ -70,7 +70,7 @@ export class Player {
     this.camPitch = THREE.MathUtils.clamp(this.camPitch - dy, -1.25, 0.95);
   }
 
-  update(dt, input) {
+  update(dt, input, follow = null) {
     const { terrain } = this.world;
     const weapon = this.fighter?.loadout.current;
     const sniping = weapon === 'rifle';
@@ -187,8 +187,15 @@ export class Player {
     ch.root.position.copy(this.pos);
     ch.root.rotation.y = this.yaw;
 
-    this.updateCamera(dt, aiming, input.sprint && speed > 4.5 && !this.scoped && !this.crouching, speed);
-    this.updateAim();
+    if (follow) {
+      this.scoped = false;
+      this.scopeT = 0;
+      this.holdingBreath = false;
+      this.updateCamera(dt, false, false, 0, follow);
+    } else {
+      this.updateCamera(dt, aiming, input.sprint && speed > 4.5 && !this.scoped && !this.crouching, speed);
+      this.updateAim();
+    }
 
     ch.update(dt, {
       speed, onGround: this.onGround, airTime: this.airTime, strafe: aiming, localDir: this.localDir,
@@ -198,21 +205,25 @@ export class Player {
     return { speed, aiming };
   }
 
-  updateCamera(dt, aiming, sprinting, speed = 0) {
+  updateCamera(dt, aiming, sprinting, speed = 0, follow = null) {
     const cam = this.camera;
     const { terrain, veg } = this.world;
     const k = Math.min(1, dt * 10);
-    const scoped = this.scoped;
-    const reloading = this.character.action?.type === 'reload' || this.character.action?.type === 'pistolReload';
-    const through = this.scopeT > 0.55 && !reloading;
+    const scoped = follow ? false : this.scoped;
+    const body = follow?.pos || this.pos;
+    const crouch = follow
+      ? (follow.crouchT ?? follow.crouch ?? follow.character?.crouchT ?? 0)
+      : this.crouchT;
+    const reloading = !follow && (this.character.action?.type === 'reload' || this.character.action?.type === 'pistolReload');
+    const through = !follow && this.scopeT > 0.55 && !reloading;
     this.reloadLook = (this.reloadLook || 0) + ((reloading ? 1 : 0) - (this.reloadLook || 0)) * Math.min(1, dt * 8);
     this.camDist += ((through ? 0.04 : reloading ? 1.18 : aiming ? 1.55 : 3.1) - this.camDist) * k;
     this.shoulder += ((through ? 0.02 : reloading ? 0.4 : aiming ? 0.6 : 0.5) - this.shoulder) * k;
     const fovGoal = through ? 7.5 : aiming ? 48 : sprinting ? 66 : 60;
     this.fov += (fovGoal - this.fov) * Math.min(1, dt * (through ? 11 : 6));
     if (Math.abs(cam.fov - this.fov) > 0.01) { cam.fov = this.fov; cam.updateProjectionMatrix(); }
-    if (this.character.root) this.character.root.visible = !through;
-    if (this.character.rifle) this.character.rifle.visible = !through;
+    if (this.character.root) this.character.root.visible = follow ? true : !through;
+    if (this.character.rifle) this.character.rifle.visible = follow ? true : !through;
 
     this.recoilPitch *= Math.exp(-dt * (scoped ? 4.5 : 10));
     // Breathing and heartbeat sway the scope, more when moving or hurt.
@@ -230,8 +241,8 @@ export class Player {
     const yaw = this.camYaw + swayYaw;
     const dir = new THREE.Vector3(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch));
     const right = new THREE.Vector3(-Math.cos(this.camYaw), 0, Math.sin(this.camYaw));
-    const eye = (through ? 1.64 : aiming ? 1.58 : 1.55) - this.crouchT * 0.52;
-    const pivot = this.pos.clone().add(new THREE.Vector3(0, eye, 0));
+    const eye = (through ? 1.64 : aiming ? 1.58 : 1.55) - crouch * 0.52;
+    const pivot = body.clone().add(new THREE.Vector3(0, eye, 0));
     const smoothPivot = this.smoothPivot || pivot.clone();
     smoothPivot.x = pivot.x;
     smoothPivot.z = pivot.z;
