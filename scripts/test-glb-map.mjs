@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import * as THREE from 'three';
 import {
-  fitScale, colliderKind, isHollowBatch, studioSlotSpawn, studioRivalSpots, buildStudioHeightmap,
+  fitScale, colliderKind, isHollowBatch, spawnFromMarker, studioSlotSpawn, studioRivalSpots, buildStudioHeightmap,
 } from '../src/world/studioLayout.js';
 import { findSpawn, fitStudio, prepareStudio, blockedAt, isOutdoorStudio, hideOffstage } from '../src/world/glbMap.js';
 
@@ -56,6 +56,16 @@ if (colliderKind('BasinRim', basin, 190) !== 'skip') fail('fountain rim AABB mus
 if (colliderKind('AgamSlats_0', { min: { x: -2.5, y: 0, z: -2.5 }, max: { x: 2.6, y: 1.2, z: 2.4 } }, 190) !== 'concrete') {
   fail('fountain slats should still collide');
 }
+if (colliderKind('CinemaGlass', { min: { x: -7.5, y: -65, z: -50 }, max: { x: -7.5, y: 66, z: 55 } }, 190) !== 'skip') {
+  fail('degenerate cinema glass must not be a wall');
+}
+if (colliderKind('BauhausBody', { min: { x: -25, y: 0, z: -76 }, max: { x: 6, y: 16, z: -54 } }, 190) !== 'concrete') {
+  fail('bauhaus body should collide');
+}
+const roofCam = spawnFromMarker({ x: 45, y: 10, z: -28, yaw: 0 }, true);
+if (Math.hypot(roofCam.x, roofCam.z + 8) > 0.2) fail('rooftop CamTarget should not be the floor spawn');
+const floorCam = spawnFromMarker({ x: 0, y: 1.2, z: -4, yaw: 0 }, true);
+if (Math.abs(floorCam.z + 4) > 0.2) fail('ground CamTarget should still be the spawn');
 
 const a = studioSlotSpawn({ x: 0, z: 5 }, 0);
 const b = studioSlotSpawn({ x: 0, z: 5 }, 1);

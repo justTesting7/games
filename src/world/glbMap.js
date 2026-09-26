@@ -2,12 +2,12 @@ import * as THREE from 'three';
 import { loadGLTF } from '../engine/assets.js';
 import {
   STUDIO_GLB, STUDIO_TARGET_SPAN, SPAWN_NAME, colliderKind, fitScale, isOffstage,
-  studioRivalSpots, studioSlotSpawn,
+  spawnFromMarker, studioRivalSpots, studioSlotSpawn,
 } from './studioLayout.js';
 
 export {
   STUDIO_GLB, STUDIO_TARGET_SPAN, SPAWN_NAME, colliderKind, fitScale, isOffstage,
-  studioRivalSpots, studioSlotSpawn,
+  spawnFromMarker, studioRivalSpots, studioSlotSpawn,
 };
 
 const _box = new THREE.Box3();
@@ -187,10 +187,8 @@ export function prepareStudio(root) {
   if (!outdoor) addFillLights(group, fit.box);
   const heightAt = makeHeightAt(root, fit.box);
   const marked = findSpawn(root);
-  const spawn = marked
-    ? { x: marked.x, z: marked.z, y: marked.y, yaw: marked.yaw }
-    : { x: 0, z: outdoor ? -4 : 5, y: heightAt(0, outdoor ? -4 : 5), yaw: outdoor ? 0 : Math.PI };
-  if (spawn.y == null) spawn.y = heightAt(spawn.x, spawn.z);
+  const spawn = spawnFromMarker(marked, outdoor);
+  spawn.y = heightAt(spawn.x, spawn.z);
   return {
     group,
     root,

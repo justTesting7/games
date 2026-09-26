@@ -26,11 +26,23 @@ export function isOffstage(name, x = 0, z = 0) {
 export function isHollowBatch(name, box) {
   const n = String(name || '').toLowerCase();
   const hx = box.max.x - box.min.x;
+  const hy = box.max.y - box.min.y;
   const hz = box.max.z - box.min.z;
-  if (/block|tower|building|wall|car|crate|cover|pillar/.test(n)) return false;
+  if (/glass|shaft/.test(n) && (hy > 40 || hx < 0.08 || hz < 0.08)) return true;
+  if (/block|tower|building|wall|car|crate|cover|pillar|bauhaus/.test(n)) return false;
   if (hx > 8 && hz > 8) return true;
-  if (/lamp|bench|basin|rim/.test(n) && hx > 4 && hz > 4) return true;
+  if (/lamp|bench|basin|rim|cafe|umbrella|awning|string/.test(n) && hx > 4 && hz > 4) return true;
   return false;
+}
+
+/** CamTarget is often a Blender look-at (rooftop / cinema), not a floor spawn. */
+export function spawnFromMarker(marked, outdoor = false) {
+  if (marked && marked.y <= 3.5 && Math.hypot(marked.x, marked.z) < 40) {
+    return { x: marked.x, z: marked.z, y: marked.y, yaw: marked.yaw };
+  }
+  return outdoor
+    ? { x: 0, z: -8, y: 0, yaw: 0 }
+    : { x: 0, z: 5, y: 0, yaw: Math.PI };
 }
 
 export function colliderKind(name, box, span) {
