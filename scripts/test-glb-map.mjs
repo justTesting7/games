@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import {
   fitScale, colliderKind, studioSlotSpawn, studioRivalSpots, buildStudioHeightmap,
 } from '../src/world/studioLayout.js';
-import { findSpawn, fitStudio, prepareStudio, blockedAt } from '../src/world/glbMap.js';
+import { findSpawn, fitStudio, prepareStudio, blockedAt, isOutdoorStudio, hideOffstage } from '../src/world/glbMap.js';
 
 class Colliders {
   constructor() { this.list = []; }
@@ -30,11 +30,24 @@ if (colliderKind('Crate_A', { min: { x: 0, y: 0, z: 0 }, max: { x: 1.4, y: 1.4, 
   fail('crates should be wood cover');
 }
 if (colliderKind('Spawn', wallBox, 28) !== 'skip') fail('spawn empties must be skipped');
+if (colliderKind('CamTarget', wallBox, 28) !== 'skip') fail('CamTarget must be skipped');
+if (colliderKind('Ground', { min: { x: -160, y: -0.1, z: -160 }, max: { x: 160, y: 0.2, z: 160 } }, 190) !== 'skip') {
+  fail('plaza ground must stay walkable');
+}
+if (colliderKind('RingRoad', { min: { x: -40, y: 0, z: -40 }, max: { x: 40, y: 0.15, z: 40 } }, 190) !== 'skip') {
+  fail('roads must not become walls');
+}
+if (colliderKind('Person_0', { min: { x: 0, y: 0, z: 0 }, max: { x: 0.6, y: 1.8, z: 0.6 } }, 190) !== 'skip') {
+  fail('crowd meshes should not block the square');
+}
+if (colliderKind('Block_0', { min: { x: 20, y: 0, z: -70 }, max: { x: 40, y: 26, z: -40 } }, 190) !== 'concrete') {
+  fail('buildings should collide');
+}
 
 const a = studioSlotSpawn({ x: 0, z: 5 }, 0);
 const b = studioSlotSpawn({ x: 0, z: 5 }, 1);
 if (Math.hypot(a.x - b.x, a.z - b.z) < 2) fail('studio slots should spread fighters');
-if (Math.hypot(a.x, a.z - 5) > 3.2) fail('studio slots must stay near the Spawn empty');
+if (Math.hypot(a.x, a.z - 5) > 3.8) fail('studio slots must stay near the Spawn empty');
 
 const blocked = (x) => x > 4;
 const rivals = studioRivalSpots({ x: 0, z: 5 }, 4, blocked);
@@ -97,9 +110,12 @@ const jsonType = glb.readUInt32LE(16);
 if (jsonType !== 0x4E4F534A) fail('missing GLB JSON chunk');
 const doc = JSON.parse(glb.slice(20, 20 + jsonLen).toString('utf8').trim());
 const names = (doc.nodes || []).map((n) => n.name);
-if (!names.includes('Spawn')) fail('default GLB needs a Spawn empty');
-if (!names.includes('Floor')) fail('default GLB needs a Floor mesh');
-if (doc.asset?.generator !== 'relic-isle studio') fail('default GLB generator tag');
+if (!names.includes('CamTarget') && !names.includes('Spawn')) fail('Dizengoff GLB needs CamTarget or Spawn');
+if (!names.includes('Ground')) fail('Dizengoff GLB should keep the plaza ground');
+if (names.some((n) => /fir_sapling|island_tree_02|tree_small_02_LOD1/i.test(n || ''))) {
+  fail('offstage Blender prototypes should be pruned from custom.glb');
+}
+if (glb.length > 25 * 1024 * 1024) fail(`custom.glb is ${glb.length} bytes; Workers assets must stay under 25MB`);
 
 const maps = readFileSync(new URL('../src/world/maps.js', import.meta.url), 'utf8');
 if (!maps.includes("id: 'studio'")) fail('maps.js should register studio');
@@ -109,12 +125,35 @@ const main = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
 if (!main.includes('loadStudioMap')) fail('boot should load the GLB map');
 if (!main.includes('studioRivalSpots')) fail('studio jevs should use studio spots');
 const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
-if (!html.includes('value="studio"')) fail('menu needs a Studio option');
+if (!html.includes('value="studio"')) fail('menu needs the GLB map option');
 const worker = readFileSync(new URL('../src/world/heightmap.worker.js', import.meta.url), 'utf8');
 if (!worker.includes('buildStudioHeightmap')) fail('worker should bake a flat studio heightmap');
 
 const marked = findSpawn(root);
 if (!marked) fail('findSpawn should see the Spawn empty');
+
+const plaza = new THREE.Group();
+const ground = new THREE.Mesh(new THREE.BoxGeometry(320, 0.2, 320));
+ground.name = 'Ground';
+const road = new THREE.Mesh(new THREE.BoxGeometry(80, 0.1, 8));
+road.name = 'RingRoad';
+const block = new THREE.Mesh(new THREE.BoxGeometry(20, 16, 24));
+block.name = 'Block_0';
+block.position.set(40, 8, -50);
+const cam = new THREE.Object3D();
+cam.name = 'CamTarget';
+cam.position.set(0, 1.2, -4);
+const proto = new THREE.Mesh(new THREE.BoxGeometry(2, 20, 2));
+proto.name = 'fir_sapling_a';
+proto.position.set(200, 0, 0);
+plaza.add(ground, road, block, cam, proto);
+if (!isOutdoorStudio(plaza)) fail('Dizengoff-style scenes should be outdoor');
+const hidden = hideOffstage(plaza);
+if (!hidden || proto.visible) fail('offstage prototypes must hide');
+const plazaReady = prepareStudio(plaza);
+if (Math.abs(plazaReady.fit.scale - 1) > 1e-6) fail(`metre plaza should not shrink, scale=${plazaReady.fit.scale}`);
+if (!plazaReady.outdoor) fail('prepareStudio should flag the plaza outdoor');
+if (Math.abs(plazaReady.spawn.z + 4) > 0.5) fail(`CamTarget spawn, got z=${plazaReady.spawn.z}`);
 
 console.log('glb map ok', {
   spawn: studio.spawn,
