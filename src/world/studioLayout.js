@@ -23,6 +23,16 @@ export function isOffstage(name, x = 0, z = 0) {
   return Math.hypot(x, z) > 180;
 }
 
+export function isHollowBatch(name, box) {
+  const n = String(name || '').toLowerCase();
+  const hx = box.max.x - box.min.x;
+  const hz = box.max.z - box.min.z;
+  if (/block|tower|building|wall|car|crate|cover|pillar/.test(n)) return false;
+  if (hx > 8 && hz > 8) return true;
+  if (/lamp|bench|basin|rim/.test(n) && hx > 4 && hz > 4) return true;
+  return false;
+}
+
 export function colliderKind(name, box, span) {
   const n = String(name || '').toLowerCase();
   if (/spawn|playerstart|camera|camtarget|light|empty|person|head/.test(n)) return 'skip';
@@ -31,6 +41,7 @@ export function colliderKind(name, box, span) {
   const hx = box.max.x - box.min.x;
   const hz = box.max.z - box.min.z;
   if (hy < 0.18) return 'skip';
+  if (isHollowBatch(name, box)) return 'skip';
   if (hy < 1.15 && hx > span * 0.35 && hz > span * 0.35) return 'skip';
   if (/floor|ground|ceiling|roof|slab|road|street|sidewalk|promenade|lawn|pave|crosswalk|curb|water|pool|apron|star|mulch|grass|soil/.test(n) && hy < 2.4) {
     return 'skip';

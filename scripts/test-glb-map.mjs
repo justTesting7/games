@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import * as THREE from 'three';
 import {
-  fitScale, colliderKind, studioSlotSpawn, studioRivalSpots, buildStudioHeightmap,
+  fitScale, colliderKind, isHollowBatch, studioSlotSpawn, studioRivalSpots, buildStudioHeightmap,
 } from '../src/world/studioLayout.js';
 import { findSpawn, fitStudio, prepareStudio, blockedAt, isOutdoorStudio, hideOffstage } from '../src/world/glbMap.js';
 
@@ -42,6 +42,19 @@ if (colliderKind('Person_0', { min: { x: 0, y: 0, z: 0 }, max: { x: 0.6, y: 1.8,
 }
 if (colliderKind('Block_0', { min: { x: 20, y: 0, z: -70 }, max: { x: 40, y: 26, z: -40 } }, 190) !== 'concrete') {
   fail('buildings should collide');
+}
+const benches = { min: { x: -24, y: 0, z: -24 }, max: { x: 24, y: 0.4, z: 24 } };
+const lamps = { min: { x: -40, y: 0, z: -40 }, max: { x: 40, y: 8.6, z: 40 } };
+const basin = { min: { x: -8.5, y: 0, z: -8.5 }, max: { x: 8.5, y: 0.6, z: 8.5 } };
+if (!isHollowBatch('Benches', benches) || colliderKind('Benches', benches, 190) !== 'skip') {
+  fail('batched benches must not fill the plaza');
+}
+if (!isHollowBatch('Lamps', lamps) || colliderKind('Lamps', lamps, 190) !== 'skip') {
+  fail('batched lamps must not wall off the square');
+}
+if (colliderKind('BasinRim', basin, 190) !== 'skip') fail('fountain rim AABB must not be a solid disk');
+if (colliderKind('AgamSlats_0', { min: { x: -2.5, y: 0, z: -2.5 }, max: { x: 2.6, y: 1.2, z: 2.4 } }, 190) !== 'concrete') {
+  fail('fountain slats should still collide');
 }
 
 const a = studioSlotSpawn({ x: 0, z: 5 }, 0);
