@@ -8,6 +8,8 @@ if (Math.abs(AD_SIZE - 0.6) > 1e-9) fail(`ads should be 60% size, got ${AD_SIZE}
 if (Math.abs(AD_WRAP - 1 / 0.6) > 1e-9) fail(`wrap should be ${1 / 0.6}, got ${AD_WRAP}`);
 const shader = readFileSync(new URL('../src/world/arenaMaterials.js', import.meta.url), 'utf8');
 if (!shader.includes('const float WRAP = 1.6666667')) fail('ribbon shader should wrap ads at 60% size');
+if (shader.includes('fract(-ang * WRAP')) fail('ads must not be mirrored for the stand-side view');
+if (!shader.includes('fract(ang * WRAP + ticker(uTime))')) fail('ads should read left-to-right from the stands');
 
 const hold = adScroll(AD_MOVE + 0.2);
 const next = adScroll(AD_MOVE + AD_HOLD + 0.01);

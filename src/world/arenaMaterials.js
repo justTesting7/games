@@ -569,7 +569,8 @@ float ticker(float t) {
 void main() {
   float ang = atan(vWorldPos.z, vWorldPos.x) / 6.2831853;
   const float WRAP = 1.6666667;
-  float u = fract(-ang * WRAP + ticker(uTime));
+  // +ang so letters read left-to-right from the stands (looking in at the bowl).
+  float u = fract(ang * WRAP + ticker(uTime));
   float v = clamp(vUv.y, 0.02, 0.98);
   vec3 col = texture2D(uAtlas, vec2(u, v)).rgb;
   vec2 g = fract(vec2(u * 220.0, v * 18.0));
