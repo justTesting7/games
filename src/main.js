@@ -293,9 +293,8 @@ async function init() {
   ]);
   const garden = mapDef.id === 'garden';
   const studioMap = mapDef.id === 'studio';
-  const indoor = garden || studioMap;
   const urban = mapDef.id === 'city' || mapDef.id === 'manhattan' || garden;
-  pipeline.indoor = indoor;
+  pipeline.indoor = garden;
   let studioHeight = (x, z) => 0;
   const terrain = new Terrain(data, textures, {
     urban, arena: garden, heightFn: studioMap ? (x, z) => studioHeight(x, z) : garden ? arenaHeightAt : null,
@@ -343,6 +342,7 @@ async function init() {
       studio.addColliders(veg.colliders);
       pipeline.scene.add(studio.group);
       terrain.group.visible = false;
+      pipeline.indoor = !studio.outdoor;
     }) : Promise.resolve(),
   ]);
   character.load(charAssets, looks[0]);

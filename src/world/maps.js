@@ -80,10 +80,10 @@ export const MAPS = {
   },
   studio: {
     id: 'studio',
-    label: 'Studio',
-    subtitle: 'Blender GLB · drop custom.glb on public/assets/maps',
-    loadLabel: 'Loading the studio',
-    plantLabel: 'Placing the set',
+    label: 'Dizengoff Square',
+    subtitle: 'Kikar Dizengoff · Blender plaza, fountain and ring road',
+    loadLabel: 'Loading Dizengoff',
+    plantLabel: 'Placing the square',
     textures: {
       sand: 'asphalt_01',
       grass: 'brushed_concrete_2',
@@ -93,10 +93,9 @@ export const MAPS = {
     grass: false,
     vegetation: false,
     waterCamp: false,
-    timeOfDay: 0.22,
-    fogDensity: 0.0012,
-    radarRange: 60,
-    fixedTime: true,
+    timeOfDay: 0.18,
+    fogDensity: 0.0014,
+    radarRange: 90,
     glb: true,
   },
 };

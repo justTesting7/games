@@ -15,20 +15,42 @@ export function fitScale(span, target = STUDIO_TARGET_SPAN) {
   return 1;
 }
 
+export const OFFSTAGE = /proto$|fir_sapling|island_tree_02|tree_small_02_lod1/i;
+export const SPAWN_NAME = /^(spawn|playerstart|start|spawn_point|camtarget)$/i;
+
+export function isOffstage(name, x = 0, z = 0) {
+  if (OFFSTAGE.test(String(name || ''))) return true;
+  return Math.hypot(x, z) > 180;
+}
+
+export function isHollowBatch(name, box) {
+  const n = String(name || '').toLowerCase();
+  const hx = box.max.x - box.min.x;
+  const hz = box.max.z - box.min.z;
+  if (/block|tower|building|wall|car|crate|cover|pillar/.test(n)) return false;
+  if (hx > 8 && hz > 8) return true;
+  if (/lamp|bench|basin|rim/.test(n) && hx > 4 && hz > 4) return true;
+  return false;
+}
+
 export function colliderKind(name, box, span) {
   const n = String(name || '').toLowerCase();
-  if (/spawn|playerstart|camera|light|empty/.test(n)) return 'skip';
+  if (/spawn|playerstart|camera|camtarget|light|empty|person|head/.test(n)) return 'skip';
+  if (/cypress|young|tree|leaf|sapling/.test(n)) return 'skip';
   const hy = box.max.y - box.min.y;
   const hx = box.max.x - box.min.x;
   const hz = box.max.z - box.min.z;
   if (hy < 0.18) return 'skip';
+  if (isHollowBatch(name, box)) return 'skip';
   if (hy < 1.15 && hx > span * 0.35 && hz > span * 0.35) return 'skip';
-  if (/floor|ground|ceiling|roof|slab/.test(n) && hy < 1.6) return 'skip';
-  if (/crate|box|wood|cover/.test(n)) return 'wood';
+  if (/floor|ground|ceiling|roof|slab|road|street|sidewalk|promenade|lawn|pave|crosswalk|curb|water|pool|apron|star|mulch|grass|soil/.test(n) && hy < 2.4) {
+    return 'skip';
+  }
+  if (/crate|box|wood|cover|bench/.test(n)) return 'wood';
   return 'concrete';
 }
 
-export function studioSlotSpawn(origin, slot = 0, radius = 2.6) {
+export function studioSlotSpawn(origin, slot = 0, radius = 3.2) {
   const ang = slot * 2.15;
   return {
     x: origin.x + Math.sin(ang) * radius,
@@ -43,7 +65,7 @@ export function studioRivalSpots(origin, count, blocked) {
     let at = null;
     for (let k = 0; k < 36 && !at; k++) {
       const ang = (i + 0.5) * (Math.PI * 2 / Math.max(count, 1)) + k * 0.19;
-      const dist = 6.4 + (k % 4) * 1.1;
+      const dist = 8.4 + (k % 4) * 1.4;
       const x = origin.x + Math.sin(ang) * dist;
       const z = origin.z + Math.cos(ang) * dist;
       if (blocked?.(x, z)) continue;
