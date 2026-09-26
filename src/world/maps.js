@@ -78,6 +78,27 @@ export const MAPS = {
     radarRange: 80,
     fixedTime: true,
   },
+  studio: {
+    id: 'studio',
+    label: 'Studio',
+    subtitle: 'Blender GLB · drop custom.glb on public/assets/maps',
+    loadLabel: 'Loading the studio',
+    plantLabel: 'Placing the set',
+    textures: {
+      sand: 'asphalt_01',
+      grass: 'brushed_concrete_2',
+      forest: 'burned_ground_01',
+      rock: 'broken_brick_wall',
+    },
+    grass: false,
+    vegetation: false,
+    waterCamp: false,
+    timeOfDay: 0.22,
+    fogDensity: 0.0012,
+    radarRange: 60,
+    fixedTime: true,
+    glb: true,
+  },
 };
 
 export function getMap(id) {
