@@ -102,10 +102,10 @@ function newMatch() {
   for (const v of world.views) pipeline.scene.remove(v.root);
   world.views = [];
   match = new Match({
-    home: HOME, away: AWAY, humanTeam: 0,
+    home: HOME, away: AWAY, humanTeam: null,
     halfSeconds: +$('halfLen').value, difficulty: +$('difficulty').value,
   });
-  brain = new Brain(match, jev);
+  brain = new Brain(match, jev, { teams: match.teams });
   for (const p of match.players) {
     const f = new Footballer();
     f.load(world.avatar, {
@@ -127,15 +127,12 @@ function newMatch() {
 // ---------------------------------------------------------------- input
 
 const keys = new Set();
-const pressed = new Set();
 let charge = null;
 let paused = false;
 addEventListener('keydown', (e) => {
   if (e.repeat) return;
   const k = e.code;
   keys.add(k);
-  pressed.add(k);
-  if (k === 'KeyD' && match && !(match.owner && match.owner.team !== match.humanTeam)) charge = performance.now();
   if (k === 'KeyC') {
     const v = Object.keys(VIEWS);
     broadcast.setView(v[(v.indexOf(broadcast.view) + 1) % v.length]);
@@ -144,45 +141,8 @@ addEventListener('keydown', (e) => {
   if (k === 'Escape' && started) paused = !paused;
   if (k.startsWith('Arrow') || k === 'Space') e.preventDefault();
 });
-addEventListener('keyup', (e) => {
-  keys.delete(e.code);
-  if (e.code === 'KeyD' && charge !== null) {
-    pressed.add('shootRelease');
-    releasedPower = Math.min(1, (performance.now() - charge) / 900);
-    charge = null;
-  }
-});
+addEventListener('keyup', (e) => keys.delete(e.code));
 addEventListener('blur', () => keys.clear());
-let releasedPower = 0;
-
-function readInput() {
-  const k = (c) => keys.has(c);
-  const x = (k('ArrowRight') ? 1 : 0) - (k('ArrowLeft') ? 1 : 0);
-  const z = (k('ArrowDown') ? 1 : 0) - (k('ArrowUp') ? 1 : 0);
-  const pro = broadcast.view === 'pro';
-  const dir = match.humanTeam?.dir ?? 1;
-  // Broadcast views: screen right is +X and screen up is -Z.
-  const move = pro ? { x: -z * dir, z: -x * dir } : { x, z };
-  const defending = match.owner && match.owner.team !== match.humanTeam;
-  const p = (c) => pressed.has(c);
-  // With a loose ball S is a first-time pass when close, otherwise a switch.
-  const h = match.human;
-  const nearLoose = !match.owner && h && h.pos.distanceTo(match.ball.pos) < 2.5;
-  const input = {
-    move,
-    sprint: k('KeyW'),
-    pass: p('KeyS') && !defending && (match.owner?.team === match.humanTeam || nearLoose || match.state !== 'play'),
-    through: p('KeyQ') && !defending,
-    lob: p('KeyA') && !defending,
-    shootRelease: p('shootRelease'),
-    shootPower: releasedPower,
-    tackle: defending && p('KeyD'),
-    slide: defending && p('KeyA'),
-    switch: p('KeyS') && (defending || !match.owner && !nearLoose && match.state === 'play'),
-  };
-  pressed.clear();
-  return input;
-}
 
 // ---------------------------------------------------------------- views
 
@@ -248,12 +208,15 @@ function updateHud(dt) {
   $('homeScore').textContent = match.teams[0].score;
   $('awayScore').textContent = match.teams[1].score;
   $('clock').textContent = paused ? 'PAUSED' : match.clockText();
-  const rival = match.teams[1];
   const s = jev.stats;
   const status = s.online === null ? 'connecting…' : s.online ? `online · ${Math.round(s.latency)} ms` : `offline (${s.error}) · local AI`;
-  const last = brain.lastDecision(rival);
-  $('jev').innerHTML = `<b>Jev</b> ${status}<br><b>${rival.club.name}</b> ${MENTALITY[rival.mentality].label} <span style="opacity:.6">(${rival.mentalitySource})</span>`
-    + (last ? `<br><b>${last.player.name}</b>: ${last.text} <span style="opacity:.6">(${last.source}${last.source === 'jev' ? ` ${Math.round(last.confidence * 100)}%` : ''})</span>` : '');
+  const line = (t) => {
+    const last = brain.lastDecision(t);
+    return `<b>${t.club.name}</b> ${MENTALITY[t.mentality].label} <span style="opacity:.6">(${t.mentalitySource})</span>`
+      + (last ? `<br>${last.player.name}: ${last.text} <span style="opacity:.6">(${last.source}${last.source === 'jev' ? ` ${Math.round(last.confidence * 100)}%` : ''})</span>` : '');
+  };
+  $('jev').innerHTML = `<b>Jev</b> ${status}<br>${line(match.teams[0])}<br>${line(match.teams[1])}`;
+  const rival = match.teams[1];
   world.stadium.drawScreen({
     home: match.teams[0].club.short, away: rival.club.short, hs: match.teams[0].score, as: rival.score,
     homeColor: match.teams[0].club.color, awayColor: rival.club.color, clock: match.clockText(),
@@ -290,13 +253,11 @@ function step(dt, draw) {
   time += dt;
   if (started && !paused) {
     let left = dt;
-    let input = readInput();
     while (left > 1e-6) {
       const h = Math.min(SUB, left);
       left -= h;
-      onEvents(match.update(h, input));
+      onEvents(match.update(h, null));
       brain.update(h);
-      input = { ...input, pass: false, through: false, lob: false, shootRelease: false, tackle: false, slide: false, switch: false };
     }
   }
   excite = Math.max(0, excite - dt * 0.15);
