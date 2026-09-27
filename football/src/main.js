@@ -183,6 +183,7 @@ function banner(title, sub = '', dur = 2.5) {
 
 const RESTART = { corner: 'Corner', freekick: 'Free kick', penalty: 'PENALTY', goalkick: 'Goal kick', throw: '' };
 function onEvents(evs) {
+  let offside = null;
   for (const e of evs) {
     audio.play(e, match.ball);
     if (e.type === 'net') world.goals[e.side]?.hit(e.point, e.speed);
@@ -191,6 +192,7 @@ function onEvents(evs) {
       broadcast.setMode('goal', e.scorer);
       excite = 1;
     }
+    if (e.type === 'offside') offside = e;
     if (e.type === 'restart' && RESTART[e.kind]) banner(RESTART[e.kind], e.team.club.name, 1.8);
     if (e.type === 'whistle' && e.kind === 'half') banner('HALF TIME', score(), 3.4);
     if (e.type === 'whistle' && e.kind === 'full') {
@@ -200,6 +202,7 @@ function onEvents(evs) {
     if (e.type === 'shot' || e.type === 'save' || e.type === 'post' || e.type === 'bar') excite = Math.max(excite, 0.7);
     if (e.type === 'reset') broadcast.setMode('play');
   }
+  if (offside) banner('OFFSIDE', offside.player.name, 2.2);
 }
 const score = () => `${match.teams[0].club.name} ${match.teams[0].score} - ${match.teams[1].score} ${match.teams[1].club.name}`;
 

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { PITCH } from '../world/dims.js';
-import { carrierOptions, passWindow, throughWindow, doubleReturnWindow, callWindow, ballCalls } from './ai.js';
+import { carrierOptions, passWindow, throughWindow, doubleReturnWindow, callWindow, ballCalls, playerOffside } from './ai.js';
 import { MENTALITY } from './match.js';
 
 const HL = PITCH.halfLength, HW = PITCH.halfWidth;
@@ -24,6 +24,7 @@ function zone(team, pos) {
 // because the ball is played before a reply gets back. The team scores by
 // getting a man into the penalty area and finishing, not by keeping the ball.
 const CARRIER_INSTRUCTIONS = `You have the ball. Attack together and get a shot on goal.
+A teammate is offside when he is in the opponent's half and nearer their goal than both the ball and the second-last defender. Never pass to him. A pass into the space beyond that line is allowed when he is still level with it.
 If a double-pass return is listed, play it first time into the runner's path.
 If a shot from inside the penalty area is listed, shoot. Do not pass a chance in the box away.
 If a clear sight of goal from inside 22 m is listed, shoot.
@@ -83,7 +84,7 @@ export class Brain {
   // Offline reading of CARRIER_INSTRUCTIONS. Jev replaces this if its answer arrives.
   pick(list) {
     if (!list.length) return null;
-    const live = list.filter((o) => o.value > 0.15);
+    const live = list.filter((o) => o.value > 0.15 && !o.offside);
     const src = live.length ? live : [list.find((o) => o.kind === 'dribble') || list[0]];
     const ret = src.find((o) => o.combo === 'return');
     if (ret) return ret;
@@ -169,6 +170,7 @@ export class Brain {
     if (!choice) return null;
     if (choice.kind === 'pass' || choice.kind === 'through' || choice.kind === 'lob') {
       if (!choice.receiver || choice.receiver.busy) return null;
+      if (playerOffside(this.match, choice.receiver)) return null;
       if (p.holding && choice.kind === 'pass') return { kind: 'gkThrow', receiver: choice.receiver };
       // The window may have closed while he shaped to pass.
       if (choice.call && choice.spot) {

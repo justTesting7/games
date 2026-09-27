@@ -4,7 +4,7 @@ import { PITCH, GOAL, BALL_RADIUS } from '../world/dims.js';
 import { KICKOFF, KICKOFF_DEFEND, squad, CLUBS } from './teams.js';
 import { groundPass, loftedPass, shotVelocity, leadTarget, gauss } from './kicks.js';
 import { ACTION_DUR, KICK } from './actions.js';
-import { teamShape, chooseChasers, defendTargets, supportTargets, keeperTarget, carrierOptions, laneOpen, passWindow, throughWindow, doubleReturnWindow, callWindow, openCorner } from './ai.js';
+import { teamShape, chooseChasers, defendTargets, supportTargets, keeperTarget, carrierOptions, laneOpen, passWindow, throughWindow, doubleReturnWindow, callWindow, openCorner, onsideMax } from './ai.js';
 
 const HL = PITCH.halfLength, HW = PITCH.halfWidth, R = BALL_RADIUS;
 const GOAL_LINE = HL - PITCH.line * 0.5;
@@ -116,6 +116,8 @@ export class Match {
     this.lastKick = null;
     this.pass = null;
     this.doublePass = null;
+    this.offsidePhase = null;
+    this.indirectBy = null;
     this.restart = null;
     this.events = [];
     this.later = [];
@@ -157,6 +159,8 @@ export class Match {
     this.owner = null;
     this.pass = null;
     this.doublePass = null;
+    this.offsidePhase = null;
+    this.indirectBy = null;
     this.restart = { type: 'kickoff', team, pos: new THREE.Vector3(0, R, 0) };
     this.ball.place(0, 0);
     for (const t of this.teams) {
@@ -185,6 +189,8 @@ export class Match {
     this.owner = null;
     this.pass = null;
     this.doublePass = null;
+    this.offsidePhase = null;
+    this.indirectBy = null;
     const p = pos.clone();
     if (type === 'throw') {
       p.x = THREE.MathUtils.clamp(p.x, -HL + 0.5, HL - 0.5);
@@ -569,13 +575,16 @@ export class Match {
       return;
     }
     const dp = this.doublePass;
-    if (dp && dp.runner === p && dp.team === T && this.time < dp.until) {
+    if (dp && dp.runner === p && dp.team === T && this.time < dp.until && !dp.returned) {
+      const limit = onsideMax(this, T);
       p.target.set(
         THREE.MathUtils.clamp(p.pos.x + T.dir * 12, -HL + 2, HL - 2),
         0,
         THREE.MathUtils.clamp(p.pos.z, -HW + 2, HW - 2),
       );
-      p.targetSpeed = p.maxSpeed;
+      if (p.target.x * T.dir > limit) p.target.x = limit * T.dir;
+      const past = p.pos.x * T.dir > limit + 0.15;
+      p.targetSpeed = past ? p.maxSpeed : p.pos.x * T.dir > limit - 2.2 ? 3.4 : p.maxSpeed;
       p.run = { t: this.time };
       return;
     }
@@ -806,6 +815,13 @@ export class Match {
   }
 
   gainBall(p, how = 'control') {
+    if (this.punishOffside(p)) return;
+    if (this.indirectBy && p !== this.indirectBy) this.indirectBy = null;
+    if (this.offsidePhase && p.role !== 'GK') {
+      for (const q of this.offsidePhase) {
+        if (q.team !== p.team) { this.offsidePhase = null; break; }
+      }
+    }
     const prev = this.lastTouch?.player;
     this.owner = p;
     p.plan = null;
@@ -1179,6 +1195,7 @@ export class Match {
   }
 
   headBall(p, spec) {
+    if (this.punishOffside(p)) return;
     const ball = this.ball;
     const v = spec.velocity();
     ball.kick(v, new THREE.Vector3());
@@ -1196,6 +1213,7 @@ export class Match {
       const reach = _v.subVectors(ball.pos, p.pos).setY(0).length();
       if (reach > 1.35 && !p.restartKick) continue;
       if (this.owner && this.owner !== p) continue;
+      if (this.punishOffside(p)) { p.pendingKick = null; continue; }
       if (k.spec.kind === 'throw') ball.pos.copy(p.pos).addScaledVector(p.forward(_w), 0.3).setY(2.0);
       if (k.spec.kind === 'gkThrow') ball.pos.copy(p.pos).addScaledVector(p.forward(_w), 0.6).setY(0.4);
       const v = k.spec.velocity();
@@ -1205,6 +1223,9 @@ export class Match {
   }
 
   afterKick(p, spec) {
+    if (this.indirectBy && p !== this.indirectBy) this.indirectBy = null;
+    const restartType = p.restartKick ? this.restart?.type : null;
+    const indirect = !!(p.restartKick && this.restart?.indirect);
     if (this.owner === p) this.owner = null;
     p.holding = false;
     p.kickLock = 0.32;
@@ -1239,6 +1260,51 @@ export class Match {
         this.restart = null;
       }
     }
+    if (indirect) this.indirectBy = p;
+    this.markOffside(p, restartType);
+  }
+
+  // Offside is judged when a teammate plays the ball. The flagged players are
+  // the ones nearer the goal than both the ball and the second-last defender.
+  // Throw-ins, goal kicks and corners do not count. The flag is given only
+  // when one of them then touches the ball.
+  markOffside(p, restartType) {
+    if (restartType === 'throw' || restartType === 'goalkick' || restartType === 'corner') {
+      this.offsidePhase = null;
+      return;
+    }
+    const dir = p.team.dir;
+    const xs = p.team.opp.players.map((o) => o.pos.x * dir).sort((a, b) => b - a);
+    const second = xs[1] ?? xs[0] ?? 0;
+    const ball = this.ball.pos.x * dir;
+    const line = Math.max(second, ball) + 0.12;
+    const flagged = new Set();
+    for (const q of p.team.players) {
+      if (q === p || q.role === 'GK') continue;
+      const x = q.pos.x * dir;
+      if (x > 0.05 && x > line) flagged.add(q);
+    }
+    this.offsidePhase = flagged;
+  }
+
+  punishOffside(p) {
+    if (this.state !== 'play' || !this.offsidePhase || !this.offsidePhase.has(p)) return false;
+    this.offsidePhase = null;
+    this.owner = null;
+    this.pass = null;
+    this.doublePass = null;
+    this.shot = null;
+    p.pendingKick = null;
+    p.holding = false;
+    this.ball.vel.set(0, 0, 0);
+    this.ball.spin.set(0, 0, 0);
+    const at = p.pos.clone();
+    at.x = THREE.MathUtils.clamp(at.x, -HL + 1, HL - 1);
+    at.z = THREE.MathUtils.clamp(at.z, -HW + 1, HW - 1);
+    this.awardRestart('freekick', p.team.opp, at);
+    if (this.restart) this.restart.indirect = true;
+    this.emit({ type: 'offside', player: p, team: p.team });
+    return true;
   }
 
   // ---------------------------------------------------------------- AI hooks
@@ -1527,6 +1593,7 @@ export class Match {
       const dx = ball.pos.x - p.pos.x, dz = ball.pos.z - p.pos.z;
       const d = Math.hypot(dx, dz);
       if (d > 0.36) continue;
+      if (this.punishOffside(p)) return;
       const n = new THREE.Vector3(dx, 0, dz).normalize();
       const vn = ball.vel.dot(n);
       if (vn >= 0) continue;
@@ -1590,6 +1657,11 @@ export class Match {
     if (this.ball.inGoal && Math.abs(b.x) > GOAL_LINE + R) {
       const side = this.ball.inGoal;
       const team = this.teams.find((t) => t.dir === side);
+      if (this.indirectBy && last === this.indirectBy) {
+        this.shot = null;
+        this.awardRestart('goalkick', team.opp, b);
+        return;
+      }
       this.scoreGoal(team, side);
       return;
     }
@@ -1626,6 +1698,8 @@ export class Match {
     this.pass = null;
     this.doublePass = null;
     this.shot = null;
+    this.offsidePhase = null;
+    this.indirectBy = null;
     this.players.forEach((p) => { p.celebrated = false; });
     this.kickoffTeam = team.opp;
   }

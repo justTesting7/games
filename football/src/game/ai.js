@@ -59,11 +59,45 @@ export function teamShape(match, team) {
   });
 }
 
-// Second-last opponent in the team frame (normalised), for staying onside.
+// Second-last opponent in the team frame (normalised). Level with him, or
+// with the ball, is onside. Own half is always onside.
 export function offsideLine(match, team) {
   const xs = team.opp.players.map((o) => o.pos.x * team.dir / HL).sort((a, b) => b - a);
   const ball = match.ball.pos.x * team.dir / HL;
   return Math.max(0, xs[1] ?? 0, ball);
+}
+
+// Furthest team-frame metres a player can stand and still be onside.
+export function onsideMax(match, team) {
+  const dir = team.dir;
+  const xs = team.opp.players.map((o) => o.pos.x * dir).sort((a, b) => b - a);
+  const second = xs[1] ?? xs[0] ?? 0;
+  const ball = match.ball.pos.x * dir;
+  return Math.max(second, ball) - 0.55;
+}
+
+export function playerOffside(match, p) {
+  if (!p || p.role === 'GK') return false;
+  const dir = p.team.dir;
+  const x = p.pos.x * dir;
+  if (x <= 0.05) return false;
+  const xs = p.team.opp.players.map((o) => o.pos.x * dir).sort((a, b) => b - a);
+  const second = xs[1] ?? xs[0] ?? -HL;
+  const ball = match.ball.pos.x * dir;
+  return x > second + 0.12 && x > ball + 0.12;
+}
+
+// Pull a run back onto the line. Returns the speed to use so he does not
+// sprint through it and get flagged.
+function holdOnside(match, team, p, pt, speed) {
+  const dir = team.dir;
+  const max = onsideMax(match, team);
+  if (pt.x * dir > max) pt.x = max * dir;
+  const x = p.pos.x * dir;
+  if (x > max + 0.15) return p.maxSpeed;
+  // Arrive on the shoulder at pace. Only check the stride that would cross the line.
+  if (x > max - 0.85) return Math.min(speed, 4.2);
+  return speed;
 }
 
 // For each team, who gets to the loose/passed ball first, and where.
@@ -191,26 +225,34 @@ export function supportTargets(match, team, shape) {
       const px = p.pos.x * dir;
       const base = home.x * dir;
       const dp = match.doublePass;
-      if (dp && dp.runner === p && dp.team === team && match.time < dp.until) {
-        // He has already played the first ball. The run is the rest of the drill.
+      if (dp && dp.runner === p && dp.team === team && match.time < dp.until && !dp.returned) {
+        // He has already played the first ball. The run stops on the offside line
+        // until the return is struck, then he can go past it.
         pt.x = clamp(p.pos.x + dir * 12, -HL + 2, HL - 2);
         pt.z = clamp(p.pos.z, -HW + 2, HW - 2);
         p.call = null;
         p.run = { t: match.time };
-        out.set(p, { point: pt, speed: p.maxSpeed });
+        const speed = holdOnside(match, team, p, pt, p.maxSpeed);
+        out.set(p, { point: pt, speed });
         continue;
       }
       if (leaders.has(p)) {
         const step = advantageSpot(p);
+        const max = onsideMax(match, team);
+        // On the shoulder: ask for the space in behind, where a timed run is onside.
+        if (px > max - 8) {
+          step.x = clamp((max + 12) * dir, -HL + 2, HL - 6);
+          step.z = clamp(step.z, -14, 14);
+        }
         const arrived = p.call?.spot && p.pos.distanceTo(p.call.spot) < 2.2;
         const live = p.call && match.time < p.call.until && p.call.spot && !arrived;
         if (!live) p.call = { spot: step, until: match.time + 2.2 };
-        // Keep going to the attacking station after the called spot, so the
-        // run does not die ten metres ahead of a midfield ball.
+        // Feet stay onside. The call itself can be into the space beyond the line.
         const further = home.x * dir > p.call.spot.x * dir ? home : p.call.spot;
         pt.copy(further);
         p.run = { t: match.time };
-        out.set(p, { point: pt, speed: p.maxSpeed });
+        const speed = holdOnside(match, team, p, pt, p.maxSpeed);
+        out.set(p, { point: pt, speed });
         continue;
       }
       p.call = null;
@@ -225,9 +267,10 @@ export function supportTargets(match, team, shape) {
       const short = pt.x * dir - px;
       const gap = pt.distanceTo(p.pos);
       // Sprint only while a long way short of the line, then jog onto the pass.
-      const speed = short > 8 || gap > 14
+      let speed = short > 8 || gap > 14
         ? p.maxSpeed * 0.92
         : gap > 4 ? 4.8 : 3.2;
+      speed = holdOnside(match, team, p, pt, speed);
       out.set(p, { point: pt, speed });
     }
     return out;
@@ -320,9 +363,10 @@ export function carrierOptions(match, p) {
     const kind = w.margin < 0.12 && open > 0.6 && d > 16 && gain > 2 && !spinning ? 'lob' : 'pass';
     if (kind === 'lob') v = open * 0.55 + clamp(gain / 32, 0, 0.3) + (attThird ? 0.1 : 0) - 0.2;
     const passBox = spotInBox(goal, w.spot) && gain > 2 && v > 0.45;
+    const off = playerOffside(match, q);
     passes.push({
-      id: `pass_${q.number}`, kind, receiver: q, dist: Math.round(d), gain, value: v, intoBox: passBox,
-      text: `${kind === 'lob' ? 'chip a lofted ball' : 'pass'} to ${q.name} (#${q.number}, ${q.slot}), ${Math.round(d)} m ${gain > 4 ? 'forward' : gain < -4 ? 'back' : 'square'}, ${open > 0.6 ? 'unmarked' : open > 0.25 ? 'loosely marked' : 'tightly marked'}${passBox ? '. This puts him in the penalty area' : ''}`,
+      id: `pass_${q.number}`, kind, receiver: q, dist: Math.round(d), gain, value: off ? -1 : v, intoBox: passBox && !off, offside: off,
+      text: `${kind === 'lob' ? 'chip a lofted ball' : 'pass'} to ${q.name} (#${q.number}, ${q.slot}), ${Math.round(d)} m ${gain > 4 ? 'forward' : gain < -4 ? 'back' : 'square'}, ${open > 0.6 ? 'unmarked' : open > 0.25 ? 'loosely marked' : 'tightly marked'}${passBox ? '. This puts him in the penalty area' : ''}${off ? '. He is offside. Do not pass to him' : ''}`,
     });
     const goingOn = q.vel.x * T.dir > 2.2;
     if ((q.run || goingOn) && gain > 2) {
@@ -333,9 +377,10 @@ export function carrierOptions(match, p) {
         if (Math.abs(tw.spot.x - goal.x) < 20) tv += 0.25;
       }
       const throughBox = spotInBox(goal, tw.spot) && tv > 0.45;
+      const offRun = playerOffside(match, q);
       passes.push({
-        id: `through_${q.number}`, kind: 'through', receiver: q, dist: Math.round(tw.dist), gain, value: tv, intoBox: throughBox,
-        text: `through ball into the path of ${q.name} (#${q.number}) running in behind${throughBox ? '. This puts him in the penalty area' : ''}`,
+        id: `through_${q.number}`, kind: 'through', receiver: q, dist: Math.round(tw.dist), gain, value: offRun ? -1 : tv, intoBox: throughBox && !offRun, offside: offRun,
+        text: `through ball into the path of ${q.name} (#${q.number}) running in behind${throughBox ? '. This puts him in the penalty area' : ''}${offRun ? '. He is offside. Do not pass to him' : ''}`,
       });
     }
   }
@@ -364,6 +409,7 @@ export function carrierOptions(match, p) {
       if (score > wallScore) { wallScore = score; wall = q; wallGain = gain; }
     }
     if (wall) {
+      const off = playerOffside(match, wall);
       opts.push({
         id: `double_${wall.number}`,
         kind: 'pass',
@@ -371,14 +417,16 @@ export function carrierOptions(match, p) {
         receiver: wall,
         dist: Math.round(wall.pos.distanceTo(p.pos)),
         gain: wallGain,
-        value: 1.4,
-        text: `double pass with ${wall.name} (#${wall.number}, ${wall.slot}): play it to his feet and sprint past him. He returns it first time into the space you are running into`,
+        value: off ? -1 : 1.4,
+        offside: off,
+        text: `double pass with ${wall.name} (#${wall.number}, ${wall.slot}): play it to his feet and sprint past him. He returns it first time into the space you are running into${off ? '. He is offside. Do not pass to him' : ''}`,
       });
     }
   }
   if (dp && dp.wall === p && match.time < dp.until && dp.runner && !dp.runner.busy) {
     const w = doubleReturnWindow(match, p.pos, dp.runner);
     if (w.margin >= -0.04 && w.recvLate < 0.45 && Number.isFinite(w.flight)) {
+      const off = playerOffside(match, dp.runner);
       opts.push({
         id: 'double_return',
         kind: 'through',
@@ -386,8 +434,9 @@ export function carrierOptions(match, p) {
         receiver: dp.runner,
         dist: Math.round(w.dist),
         gain: (w.spot.x - p.pos.x) * T.dir,
-        value: 1.85,
-        text: `double pass return: first-time ball into the space ${dp.runner.name} (#${dp.runner.number}) is sprinting into, about ${Math.round(w.dist)} m`,
+        value: off ? -1 : 1.85,
+        offside: off,
+        text: `double pass return: first-time ball into the space ${dp.runner.name} (#${dp.runner.number}) is sprinting into, about ${Math.round(w.dist)} m${off ? '. He is offside. Do not pass to him' : ''}`,
       });
     }
   }
@@ -398,7 +447,8 @@ export function carrierOptions(match, p) {
     const gain = (call.spot.x - p.pos.x) * T.dir;
     const gap = q.pos.distanceTo(call.spot);
     if (!Number.isFinite(w.flight) || w.recvLate > 0.45 || w.margin < -0.08 || gain < 0) continue;
-    const sensible = w.margin >= 0.1 && w.recvLate < 0.35 && gain > 1;
+    const off = playerOffside(match, q);
+    const sensible = !off && w.margin >= 0.1 && w.recvLate < 0.35 && gain > 1;
     const where = describeSpot(T, call.spot);
     const inArea = spotInBox(goal, call.spot);
     const verdict = sensible
@@ -409,12 +459,13 @@ export function carrierOptions(match, p) {
       kind: 'through',
       call: true,
       sensible,
+      offside: off,
       receiver: q,
       spot: call.spot.clone(),
       dist: Math.round(w.dist),
       gain,
-      value: sensible ? 1.45 + clamp(w.margin, 0, 0.4) + (inArea ? 0.2 : 0) : 0.05,
-      text: `${q.name} (#${q.number}) is running into the penalty area and wants the ball ${where}. He is ${Math.round(gap)} m from that spot. ${verdict}. Pass into that call only if he wins the race.`,
+      value: off ? -1 : sensible ? 1.45 + clamp(w.margin, 0, 0.4) + (inArea ? 0.2 : 0) : 0.05,
+      text: `${q.name} (#${q.number}) is running into the penalty area and wants the ball ${where}. He is ${Math.round(gap)} m from that spot. ${off ? 'He is offside. Do not pass to him' : `${verdict}. Pass into that call only if he wins the race.`}`,
     });
   }
   passes.sort((a, b) => b.value - a.value);
