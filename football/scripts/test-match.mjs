@@ -93,4 +93,46 @@ assert.ok((agg.turnover || 0) > 10, 'possession changes hands');
   assert.ok(taken, 'penalty is struck');
 }
 
+// A keeper with the ball in his hands cannot be tackled or pickpocketed.
+{
+  const m = new Match({ humanTeam: null, halfSeconds: 600, rnd: seeded(3) });
+  new Brain(m, null, { rnd: seeded(3), teams: m.teams });
+  m.start();
+  m.state = 'play';
+  const gk = m.teams[0].keeper;
+  const thief = m.teams[1].players[9];
+  const put = () => {
+    gk.pos.set(m.teams[0].ownGoal.x + m.teams[0].dir * 4, 0, 1);
+    gk.vel.set(0, 0, 0);
+    gk.holding = true;
+    gk.holdT = 0;
+    m.owner = gk;
+    m.state = 'play';
+    m.ball.pos.copy(gk.pos).setY(1.05);
+    m.ball.vel.set(0, 0, 0);
+    thief.pos.copy(gk.pos);
+    thief.vel.set(0, 0, 0);
+    thief.slide = null;
+  };
+  put();
+  for (let i = 0; i < 90; i++) {
+    gk.holdT = 0;
+    thief.pos.copy(gk.pos);
+    m.startTackle(thief, false);
+    m.gainBall(thief, 'tackle');
+    m.update(1 / 60);
+    assert.equal(m.owner, gk, 'a poke does not take the ball out of the keeper\'s hands');
+    assert.equal(gk.holding, true, 'keeper keeps hold of the ball');
+  }
+  put();
+  m.startTackle(thief, true);
+  for (let i = 0; i < 40; i++) {
+    const held = gk.holding && m.owner === gk;
+    thief.pos.copy(gk.pos);
+    gk.holdT = 0;
+    m.update(1 / 60);
+    if (held) assert.ok(!m.owner || m.owner.team === gk.team, 'a slide does not give the ball to the attacker');
+  }
+}
+
 console.log('match tests passed');

@@ -161,6 +161,7 @@ export class Match {
     this.doublePass = null;
     this.offsidePhase = null;
     this.indirectBy = null;
+    this.clearHands();
     this.restart = { type: 'kickoff', team, pos: new THREE.Vector3(0, R, 0) };
     this.ball.place(0, 0);
     for (const t of this.teams) {
@@ -191,6 +192,7 @@ export class Match {
     this.doublePass = null;
     this.offsidePhase = null;
     this.indirectBy = null;
+    this.clearHands();
     const p = pos.clone();
     if (type === 'throw') {
       p.x = THREE.MathUtils.clamp(p.x, -HL + 0.5, HL - 0.5);
@@ -284,6 +286,7 @@ export class Match {
       this.state = this.half === 1 ? 'halftime' : 'fulltime';
       this.stateT = 0;
       this.owner = null;
+      this.clearHands();
       if (this.half === 1) this.stoppage = 60 * (1 + Math.floor(this.rnd() * 3));
       return this.events;
     }
@@ -584,7 +587,8 @@ export class Match {
       );
       if (p.target.x * T.dir > limit) p.target.x = limit * T.dir;
       const past = p.pos.x * T.dir > limit + 0.15;
-      p.targetSpeed = past ? p.maxSpeed : p.pos.x * T.dir > limit - 2.2 ? 3.4 : p.maxSpeed;
+      const x = p.pos.x * T.dir;
+      p.targetSpeed = past || x < limit - 0.85 ? p.maxSpeed : 4.2;
       p.run = { t: this.time };
       return;
     }
@@ -814,7 +818,13 @@ export class Match {
     }
   }
 
+  clearHands() {
+    for (const q of this.players) q.holding = false;
+  }
+
   gainBall(p, how = 'control') {
+    // The ball in someone's hands is not a loose ball. Nothing takes it off him.
+    if (this.owner && this.owner !== p && this.owner.holding) return;
     if (this.punishOffside(p)) return;
     if (this.indirectBy && p !== this.indirectBy) this.indirectBy = null;
     if (this.offsidePhase && p.role !== 'GK') {
@@ -823,6 +833,7 @@ export class Match {
       }
     }
     const prev = this.lastTouch?.player;
+    if (this.owner && this.owner !== p) this.owner.holding = false;
     this.owner = p;
     p.plan = null;
     p.localAt = null;
@@ -934,7 +945,6 @@ export class Match {
       ball.pos.copy(p.pos).addScaledVector(f, 0.32).setY(1.05);
       ball.vel.copy(p.vel);
       ball.spin.set(0, 0, 0);
-      if (!this.inOwnBox(p, p.pos)) { p.holding = false; ball.pos.y = R; }
       return;
     }
     const f = p.forward(_v);
@@ -1314,9 +1324,11 @@ export class Match {
     if (p.role === 'GK' && p.holding) {
       p.target.copy(p.pos);
       p.targetSpeed = 0;
-      if (p.holdT > 1.4 && !p.pendingKick) {
+      // In his hands until he throws it. Outside the box he releases at once.
+      const wait = this.inOwnBox(p, p.pos) ? 1.2 : 0.2;
+      if (p.holdT > wait && !p.pendingKick) {
         const plan = this.brain?.planFor(p) || this.localKeeperPlan(p);
-        if (plan && p.holdT > 1.4) this.executePlan(p, plan);
+        if (plan && p.holdT > wait) this.executePlan(p, plan);
       }
       return;
     }
@@ -1455,6 +1467,8 @@ export class Match {
 
   startTackle(p, slide) {
     if (p.busy || p.action && p.action.type !== 'touch' || p.kickLock > 0) return;
+    // The ball in the keeper's hands is not there to be won.
+    if (this.owner?.holding && this.owner.team !== p.team) { p.stun = 0.15; return; }
     if (slide) {
       let dir = p.speed > 1 ? p.vel.clone().setY(0).normalize() : p.forward(new THREE.Vector3());
       // Assisted slide: aim at where the ball will be when the boot arrives.
@@ -1503,7 +1517,7 @@ export class Match {
     if (s.t < 0.08 || s.t > 0.75) return;
     const ball = this.ball;
     const foot = p.pos.clone().addScaledVector(s.dir, 0.85);
-    if (!s.touched && ball.pos.y < 0.5 && foot.distanceTo(ball.pos) < 0.75) {
+    if (!s.touched && !this.owner?.holding && ball.pos.y < 0.5 && foot.distanceTo(ball.pos) < 0.75) {
       s.touched = true;
       const o = this.owner;
       if (o) { this.loseBall(o); o.kickLock = 0.5; }
@@ -1518,7 +1532,7 @@ export class Match {
         s.fouled = true;
         o.anim('fall', { back: this.rnd() < 0.4 });
         o.stun = ACTION_DUR.fall;
-        if (this.owner === o) this.loseBall(o);
+        if (this.owner === o && !o.holding) this.loseBall(o);
         if (!s.touched && (o === this.lastTouch?.player || o.pos.distanceTo(ball.pos) < 2.5)) this.foul(p, o);
       }
     }
@@ -1568,6 +1582,8 @@ export class Match {
   // ---------------------------------------------------------------- ball + rules
 
   stepBall(dt) {
+    // In his hands: the frame that placed it there is where it stays.
+    if (this.owner?.holding) return;
     const ball = this.ball;
     const evs = ball.step(dt);
     for (const e of evs) this.emit({ ...e });
@@ -1700,6 +1716,7 @@ export class Match {
     this.shot = null;
     this.offsidePhase = null;
     this.indirectBy = null;
+    this.clearHands();
     this.players.forEach((p) => { p.celebrated = false; });
     this.kickoffTeam = team.opp;
   }

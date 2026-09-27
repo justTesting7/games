@@ -28,10 +28,12 @@ A teammate is offside when he is in the opponent's half and nearer their goal th
 If a double-pass return is listed, play it first time into the runner's path.
 If a shot from inside the penalty area is listed, shoot. Do not pass a chance in the box away.
 If a clear sight of goal from inside 22 m is listed, shoot.
-The two teammates nearest the opponent's goal are running into the penalty area and calling for the ball. If a call is listed and he reaches that spot before a defender, pass into the call. Ignore the call when a defender gets there first.
+Teammates without the ball run into space only when they reach it before a defender, and they call when that run is on.
+If a teammate is calling for a run and a through pass to that call is listed, play the through pass. He gets there first.
+If any other through pass is listed, play that too. A through pass is on whenever it is listed. Do not pass to feet, cross, or dribble when a through ball is possible.
 If you are wide and a cross is listed with a teammate in the box, cross it.
-If a pass or through ball is listed that puts a teammate in the penalty area, play that.
-Otherwise, if a double pass is listed, take it: give the short pass and sprint past the receiver so he can play you in. Do not start a double pass when a shot or a ball into the box is on.
+If a pass is listed that puts a teammate in the penalty area, play that.
+Otherwise, if a double pass is listed, take it: give the short pass and sprint past the receiver so he can play you in. Do not start a double pass when a shot or a through pass is on.
 If none of those is on, pass forward as soon as a teammate has a direct line. Do not wait on the ball.
 Carry toward goal only when no shot and no forward pass is on and there is space.
 Pass backward only when every forward pass is closed and you cannot carry the ball forward.`;
@@ -94,6 +96,8 @@ export class Brain {
     if (sight.length) return this.among(sight);
     const calls = src.filter((o) => o.call && o.sensible);
     if (calls.length) return this.among(calls);
+    const thr = src.filter((o) => o.kind === 'through' && !o.call);
+    if (thr.length) return this.among(thr);
     const cross = src.find((o) => o.kind === 'cross' && o.boxMates > 0);
     if (cross) return cross;
     const into = src.filter((o) => o.intoBox);
@@ -235,7 +239,7 @@ export class Brain {
     const m = this.match;
     const T = p.team;
     const criteria = {};
-    const head = list.filter((o) => o.combo || o.call || o.finish || o.intoBox || (o.kind === 'cross' && o.boxMates > 0));
+    const head = list.filter((o) => o.combo || o.call || o.kind === 'through' || o.finish || o.intoBox || (o.kind === 'cross' && o.boxMates > 0));
     const rest = list.filter((o) => !head.includes(o));
     for (const o of [...head, ...rest].slice(0, 7)) criteria[o.id] = o.text;
     const state = this.carrierState(p);
