@@ -4,7 +4,7 @@ import { PITCH, GOAL, BALL_RADIUS } from '../world/dims.js';
 import { KICKOFF, KICKOFF_DEFEND, squad, CLUBS } from './teams.js';
 import { groundPass, loftedPass, shotVelocity, leadTarget, gauss } from './kicks.js';
 import { ACTION_DUR, KICK } from './actions.js';
-import { teamShape, chooseChasers, defendTargets, supportTargets, keeperTarget, carrierOptions } from './ai.js';
+import { teamShape, chooseChasers, defendTargets, supportTargets, keeperTarget, carrierOptions, laneOpen } from './ai.js';
 
 const HL = PITCH.halfLength, HW = PITCH.halfWidth, R = BALL_RADIUS;
 const GOAL_LINE = HL - PITCH.line * 0.5;
@@ -391,10 +391,33 @@ export class Match {
         if (best && this.human.pos.distanceTo(ball) > best.pos.distanceTo(ball) + 5) this.human = best;
       }
     } else if (mine) this.lostAt = null;
+    // Loose ball or an opponent's pass: hand control to whoever gets there first.
+    if (!this.owner && !(this.pass && this.pass.team === T) && !this.human.lunge && !this.human.busy
+      && this.time > (this.switchAt || 0) && !input?.switch) {
+      const best = T.players.filter((q) => q.role !== 'GK' && !q.busy).sort((a, b) => this.interceptScore(a) - this.interceptScore(b))[0];
+      if (best && best !== this.human && this.interceptScore(this.human) - this.interceptScore(best) > 0.5) {
+        this.human = best;
+        this.switchAt = this.time + 0.8;
+      }
+    }
+    if (input?.switch) this.switchAt = this.time + 1.2;
     if (this.human.role === 'GK' && !(this.owner === this.human)) {
       const best = T.players.filter((q) => q.role !== 'GK').sort((a, b) => this.interceptScore(a) - this.interceptScore(b))[0];
       this.human = best;
     }
+  }
+
+  // Where the human's player should be heading for the ball: the meeting
+  // point for a loose ball or pass, or the carrier's feet when defending.
+  assistTarget(p) {
+    if (this.state !== 'play') return null;
+    const o = this.owner;
+    if (o && o.team !== p.team) {
+      return this.ball.pos.clone().setY(0).addScaledVector(o.vel, 0.35);
+    }
+    if (o) return null;
+    const c = this.chasers.get(p);
+    return c ? c.point.clone().setY(0) : this.ball.pos.clone().setY(0);
   }
 
   interceptScore(p) {
@@ -542,16 +565,54 @@ export class Match {
     const mag = Math.min(1, Math.hypot(mv.x, mv.z));
     const sprint = input?.sprint;
     const top = sprint ? p.maxSpeed : Math.min(p.maxSpeed, 5.6);
+    const owner = this.owner === p;
+    // Tackle lunge: close the last metres onto the ball, then poke it.
+    if (p.lunge) {
+      const o = this.owner;
+      p.lunge.t -= dt;
+      if (!o || o.team === p.team) { p.lunge = null; }
+      else {
+        p.target.copy(this.ball.pos).setY(0).addScaledVector(o.vel, 0.12);
+        p.targetSpeed = p.maxSpeed * 1.05;
+        p.face = this.ball.pos;
+        if (p.touchPoint(_v).distanceTo(this.ball.pos) < 1.25 || p.lunge.t <= 0) {
+          p.lunge = null;
+          this.startTackle(p, false);
+        }
+        return;
+      }
+    }
+    const assist = owner ? null : this.assistTarget(p);
     if (mag > 0.05) {
-      p.target.set(p.pos.x + mv.x / mag * 4, 0, p.pos.z + mv.z / mag * 4);
+      let dx = mv.x / mag, dz = mv.z / mag;
+      // Stick roughly toward the ball: bend the run onto the meeting point.
+      if (assist) {
+        const tx = assist.x - p.pos.x, tz = assist.z - p.pos.z;
+        const tl = Math.hypot(tx, tz);
+        if (tl > 0.3) {
+          const cos = (dx * tx + dz * tz) / tl;
+          if (cos > 0.35) {
+            const k = THREE.MathUtils.clamp((cos - 0.35) / 0.4, 0, 1) * 0.85;
+            dx = dx * (1 - k) + tx / tl * k;
+            dz = dz * (1 - k) + tz / tl * k;
+            const l = Math.hypot(dx, dz);
+            dx /= l; dz /= l;
+          }
+        }
+      }
+      p.target.set(p.pos.x + dx * 4, 0, p.pos.z + dz * 4);
       p.targetSpeed = top * mag;
+    } else if (assist && (this.pass?.to === p || !this.owner && assist.distanceTo(p.pos) < 12)) {
+      // No stick: run onto a pass meant for him, or a loose ball nearby.
+      p.target.copy(assist).setY(0);
+      p.targetSpeed = Math.max(5.2, top);
+      p.face = this.ball.pos;
     } else {
       p.target.copy(p.pos);
       p.targetSpeed = 0;
-      if (!this.owner || this.owner !== p) p.face = this.ball.pos;
+      if (!owner) p.face = this.ball.pos;
     }
     if (!input) return;
-    const owner = this.owner === p;
     if (owner) {
       if (p.pendingKick) return;
       if (input.pass) this.executePlan(p, { kind: 'pass', receiver: this.pickReceiver(p, mv, false) });
@@ -563,8 +624,11 @@ export class Match {
     } else {
       const ballNear = p.pos.distanceTo(this.ball.pos) < 2.2;
       if (this.owner && this.owner.team !== p.team) {
-        if (input.tackle) this.startTackle(p, false);
-        else if (input.slide) this.startTackle(p, true);
+        const reach = p.pos.distanceTo(this.ball.pos);
+        if (input.tackle) {
+          if (reach < 4 && !p.busy) p.lunge = { t: 0.45 };
+          else this.startTackle(p, false);
+        } else if (input.slide) this.startTackle(p, true);
       } else if (!this.owner) {
         // First-time finish or header on a loose/aerial ball.
         if ((input.shootRelease || input.pass || input.lob) && ballNear) {
@@ -706,7 +770,7 @@ export class Match {
       const tp = p.touchPoint(_v);
       const dx = ball.pos.x - tp.x, dz = ball.pos.z - tp.z;
       const d = Math.sqrt(dx * dx + dz * dz);
-      const reach = keeperHands ? 1.15 : 0.62 + Math.min(0.25, p.speed * 0.03);
+      const reach = keeperHands ? 1.15 : 0.62 + Math.min(0.25, p.speed * 0.03) + (p === this.human ? 0.35 : 0);
       if (d < reach && d < bd) { bd = d; best = p; }
     }
     if (!best) return;
@@ -826,7 +890,9 @@ export class Match {
       const align = d.dot(dir);
       if (align < 0.2) continue;
       const open = this.openness(q);
-      let s = align * 3 - Math.abs(dist - (lofted ? 30 : 16)) * 0.06 + open * 0.5;
+      // Prefer teammates the ball can actually reach.
+      const lane = lofted ? 0.5 : laneOpen(this, p.pos, q.pos);
+      let s = align * 3 - Math.abs(dist - (lofted ? 30 : 16)) * 0.04 + open * 0.6 + lane * 1.6;
       if (through) s += (q.pos.x - p.pos.x) * p.team.dir * 0.05 + q.vel.dot(p.team.attackGoal.clone().sub(q.pos).normalize()) * 0.15;
       if (q.role === 'GK') s -= 2;
       if (s > bs) { bs = s; best = q; }
@@ -864,7 +930,7 @@ export class Match {
     const T = p.team;
     const pr = this.pressureOn(p);
     const pressure = THREE.MathUtils.clamp(1.6 - pr.dist / 2, 0, 1);
-    const errScale = (this.humanTeam === T ? 0.85 : 1 / this.difficultyScale()) * (1 + pressure * 0.8);
+    const errScale = this.humanTeam === T ? 0.45 * (1 + pressure * 0.3) : (1 / this.difficultyScale()) * (1 + pressure * 0.8);
     const kind = plan.kind;
     if (kind === 'dribble' || kind === 'shield') {
       p.plan = plan;
@@ -1158,7 +1224,12 @@ export class Match {
   startTackle(p, slide) {
     if (p.busy || p.action && p.action.type !== 'touch' || p.kickLock > 0) return;
     if (slide) {
-      const dir = p.speed > 1 ? p.vel.clone().setY(0).normalize() : p.forward(new THREE.Vector3());
+      let dir = p.speed > 1 ? p.vel.clone().setY(0).normalize() : p.forward(new THREE.Vector3());
+      // Assisted slide: aim at where the ball will be when the boot arrives.
+      if (p === this.human) {
+        const aim = this.ball.predict(0.3, new THREE.Vector3()).sub(p.pos).setY(0);
+        if (aim.length() < 7 && aim.length() > 0.2) dir = aim.normalize();
+      }
       p.slide = { t: 0, dir, speed: Math.max(p.speed, 5.5) + 1.5, touched: false, fouled: false };
       p.anim('slide');
       this.emit({ type: 'slide', player: p });
@@ -1169,9 +1240,12 @@ export class Match {
     const o = this.owner;
     const tp = p.touchPoint(new THREE.Vector3());
     const d = tp.distanceTo(this.ball.pos);
-    if (!o || o.team === p.team || d > 1.3) { p.stun = 0.25; return; }
+    const human = p === this.human;
+    if (!o || o.team === p.team || d > (human ? 1.7 : 1.3)) { p.stun = human ? 0.15 : 0.25; return; }
     const behind = o.forward(_v).dot(_w.subVectors(p.pos, o.pos).setY(0).normalize()) < -0.2;
-    const chance = (0.28 + p.def.tackling * 0.45) * (behind ? 0.5 : 1) * (o.speed > 5 ? 0.75 : 1) * (this.humanTeam === p.team ? 1.15 : this.difficultyScale());
+    const chance = human
+      ? (0.55 + p.def.tackling * 0.35) * (behind ? 0.7 : 1) / Math.sqrt(this.difficultyScale())
+      : (0.28 + p.def.tackling * 0.45) * (behind ? 0.5 : 1) * (o.speed > 5 ? 0.75 : 1) * (this.humanTeam === p.team ? 1.15 : this.difficultyScale());
     if (this.rnd() < chance) {
       this.loseBall(o);
       o.kickLock = 0.45;
