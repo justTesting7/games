@@ -28,10 +28,10 @@ If you are the goalkeeper, kick the ball long into midfield. Do not pass it shor
 A teammate is offside when he is in the opponent's half and nearer their goal than both the ball and the second-last defender. Never pass to him. A pass into the space beyond that line is allowed when he is still level with it.
 If you are ahead of every defender, keep running at goal. Do not pass. Shoot when a shot on that run is listed. Until then, take another touch toward goal.
 If you just received a double pass and the return is listed, play it first time into the runner's path.
-Forwards without the ball are always running ahead and calling for a long through pass. If that through pass is listed and he reaches the space before a defender, play it.
-If a double pass is listed, start it. He returns the ball into your run.
 If a shot from inside the penalty area is listed, shoot. Do not pass a chance in the box away.
 If a clear sight of goal from inside 22 m is listed, shoot.
+If a double pass is listed, start it. He gives it straight back into your run. Do this before a long through pass.
+Forwards without the ball are always running ahead and calling for a long through pass. If no double pass is listed and that through pass is listed and he reaches the space before a defender, play it.
 If a through pass is listed that puts a teammate in the penalty area, play that.
 If you are wide and a cross is listed with a teammate in the box, cross it.
 If a pass to feet is listed that puts a teammate in the penalty area, play that.
@@ -130,10 +130,10 @@ export class Brain {
     if (box.length) return this.among(box);
     const sight = src.filter((o) => o.finish === 'sight');
     if (sight.length) return this.among(sight);
-    const calls = src.filter((o) => o.call && o.sensible);
-    if (calls.length) return this.among(calls);
     const dbl = src.filter((o) => o.combo === 'double');
     if (dbl.length) return this.among(dbl);
+    const calls = src.filter((o) => o.call && o.sensible);
+    if (calls.length) return this.among(calls);
     const thr = src.filter((o) => o.kind === 'through' && !o.call && o.intoBox);
     if (thr.length) return this.among(thr);
     const cross = src.find((o) => o.kind === 'cross' && o.boxMates > 0);

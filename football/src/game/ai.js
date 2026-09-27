@@ -557,22 +557,23 @@ export function carrierOptions(match, p) {
   for (const o of passes) if (o.gain > 1 && o.value > bestForward) bestForward = o.value;
   const space = spaceAhead(match, p, fwdDir);
   const inOwnThird = p.pos.x * T.dir < -HL * 0.45;
-  // A double pass needs a teammate close enough to play off, and room to run past him.
+  // A double pass needs a teammate close enough to play off, and a return
+  // the runner can reach before a defender. Inside the area the touch is a finish.
   const dp = match.doublePass;
-  // A one-two is for breaking a line. Inside the area the touch is a finish.
-  if (!(dp && dp.wall === p) && p.role !== 'GK' && space >= 4 && distGoal >= 16.5) {
+  if (!(dp && dp.wall === p) && p.role !== 'GK' && space >= 3 && distGoal >= 16.5) {
     let wall = null, wallScore = -1, wallGain = 0;
     for (const q of mates) {
       if (q.role === 'GK') continue;
       const d = q.pos.distanceTo(p.pos);
       if (d < 6 || d > 16) continue;
       const gain = (q.pos.x - p.pos.x) * T.dir;
-      if (gain < -8) continue;
+      if (gain < -6) continue;
       const w = passWindow(match, p.pos, q);
       const toward = _v.subVectors(p.pos, q.pos).setY(0);
       const coming = q.vel.dot(toward) / (toward.length() || 1);
       const spinning = q.speed > 6.2 && coming < 0.2;
-      if (spinning || w.margin < 0.1 || w.recvLate > 0.25 || !Number.isFinite(w.flight)) continue;
+      if (spinning || w.margin < 0.18 || w.recvLate > 0.22 || !Number.isFinite(w.flight)) continue;
+      if (!doubleLayoffOn(match, p, q, w.flight)) continue;
       const score = w.margin + match.openness(q) * 0.35;
       if (score > wallScore) { wallScore = score; wall = q; wallGain = gain; }
     }
@@ -593,7 +594,7 @@ export function carrierOptions(match, p) {
   }
   if (dp && dp.wall === p && match.time < dp.until && dp.runner && !dp.runner.busy) {
     const w = doubleReturnWindow(match, p.pos, dp.runner);
-    if (w.margin >= -0.04 && w.recvLate < 0.45 && Number.isFinite(w.flight)) {
+    if (w.margin >= -0.02 && w.recvLate < 0.32 && Number.isFinite(w.flight)) {
       const off = playerOffside(match, dp.runner);
       opts.push({
         id: 'double_return',
@@ -796,16 +797,57 @@ export function callWindow(match, from, runner, spot) {
   return marginAlong(match, from, spot.clone().setY(0), arrive, runner.team, runner);
 }
 
+// Lay the return into the runner's next strides. A ball 15 m past him is a
+// through pass the defender wins, and he has usually checked on the line.
 export function doubleReturnWindow(match, from, runner) {
   const team = runner.team;
-  const speed = Math.max(runner.speed, 5.5);
-  const lead = clamp(6.5 + speed * 0.7, 8, 15);
-  const spot = _a.copy(runner.pos).setY(0);
-  spot.x = clamp(spot.x + team.dir * lead, -HL + 1.2, HL - 1.2);
-  spot.z = clamp(spot.z, -HW + 1.2, HW - 1.2);
-  const dist = Math.max(4, spot.distanceTo(from));
-  const arrive = clamp(10 + dist * 0.06, 10.5, 13.5);
-  return marginAlong(match, from, spot.clone(), arrive, team, runner);
+  const dir = team.dir;
+  let best = null;
+  for (const lead of [3.2, 4.5, 6, 7.5, 9]) {
+    const spot = new THREE.Vector3(
+      clamp(runner.pos.x + dir * lead, -HL + 1.2, HL - 1.2),
+      0,
+      clamp(runner.pos.z, -HW + 1.2, HW - 1.2),
+    );
+    const dist = Math.max(3, spot.distanceTo(from));
+    const arrive = clamp(11 + dist * 0.03, 11, 13);
+    const w = marginAlong(match, from, spot, arrive, team, runner);
+    if (!Number.isFinite(w.flight) || w.recvLate > 0.32) continue;
+    const score = w.margin - Math.max(0, w.recvLate) * 0.5;
+    if (!best || score > best.score) best = { ...w, score };
+  }
+  if (best) return best;
+  const spot = new THREE.Vector3(
+    clamp(runner.pos.x + dir * 4, -HL + 1.2, HL - 1.2),
+    0,
+    clamp(runner.pos.z, -HW + 1.2, HW - 1.2),
+  );
+  const dist = Math.max(3, spot.distanceTo(from));
+  return marginAlong(match, from, spot, 11, team, runner);
+}
+
+// True when the passer, sprinting as soon as he releases, can take the
+// return before a defender. `flight` is how long the first ball takes.
+function doubleLayoffOn(match, passer, wall, flight) {
+  const dir = passer.team.dir;
+  const vmax = passer.maxSpeed;
+  const v0 = Math.max(0, passer.vel.x * dir);
+  const t = Math.min(1.5, flight + 0.2);
+  const tAcc = Math.max(0, (vmax - v0) / 6.2);
+  const run = t <= tAcc
+    ? v0 * t + 0.5 * 6.2 * t * t
+    : v0 * tAcc + 0.5 * 6.2 * tAcc * tAcc + vmax * (t - tAcc);
+  const line = onsideMax(match, passer.team) - 0.3;
+  const x = Math.min(passer.pos.x * dir + run, line);
+  const ghost = {
+    pos: new THREE.Vector3(x * dir, 0, passer.pos.z),
+    vel: new THREE.Vector3(vmax * dir, 0, 0),
+    speed: vmax,
+    maxSpeed: vmax,
+    team: passer.team,
+  };
+  const ret = doubleReturnWindow(match, wall.pos, ghost);
+  return ret.margin >= 0 && ret.recvLate < 0.28 && Number.isFinite(ret.flight);
 }
 
 // 1 when no defender can reach the ground-pass lane before the ball does.

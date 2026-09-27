@@ -474,6 +474,7 @@ export class Match {
           this.aiMove(p, shape, dt);
         }
         this.integrate(p, dt, isHuman && playing ? input : null);
+        this.holdDoubleRunner(p);
       }
     }
     this.separate();
@@ -573,6 +574,16 @@ export class Match {
     }
   }
 
+  // The one-two runner leans on the offside line at full speed. Stopping
+  // there is why the return was played into space he could not reach.
+  holdDoubleRunner(p) {
+    const dp = this.doublePass;
+    if (!dp || dp.returned || dp.runner !== p || this.time > dp.until) return;
+    const dir = p.team.dir;
+    const limit = onsideMax(this, p.team) - 0.35;
+    if (p.pos.x * dir > limit) p.pos.x = limit * dir;
+  }
+
   aiMove(p, shape, dt) {
     const T = p.team;
     const ball = this.ball;
@@ -615,14 +626,15 @@ export class Match {
     }
     const dp = this.doublePass;
     if (dp && dp.runner === p && dp.team === T && this.time < dp.until && !dp.returned) {
-      const limit = onsideMax(this, T);
+      // Sprint through the line. His position is held onside until the return
+      // is struck, but his speed stays up so he can run onto it.
       p.target.set(
-        THREE.MathUtils.clamp(p.pos.x + T.dir * 12, -HL + 2, HL - 2),
+        THREE.MathUtils.clamp(p.pos.x + T.dir * 18, -HL + 2, HL - 2),
         0,
         THREE.MathUtils.clamp(p.pos.z, -HW + 2, HW - 2),
       );
-      if (p.target.x * T.dir > limit) p.target.x = limit * T.dir;
       p.targetSpeed = p.maxSpeed;
+      p.sprintThrough = true;
       p.run = { t: this.time };
       return;
     }
@@ -1361,7 +1373,7 @@ export class Match {
       spec.receiver.incoming = this.pass;
       T.stats.passes++;
       if (spec.combo === 'double') {
-        this.doublePass = { runner: p, wall: spec.receiver, team: T, t: this.time, until: this.time + 3.4, returned: false };
+        this.doublePass = { runner: p, wall: spec.receiver, team: T, t: this.time, until: this.time + 4.2, returned: false };
       } else if (spec.combo === 'return' && this.doublePass) {
         this.doublePass.returned = true;
       } else if (this.doublePass && (p === this.doublePass.wall || (p.team === this.doublePass.team && p !== this.doublePass.runner))) {
