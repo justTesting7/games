@@ -702,7 +702,7 @@ export class Match {
     if (faceYaw !== null) {
       let d = faceYaw - p.yaw;
       d = Math.atan2(Math.sin(d), Math.cos(d));
-      const rate = (this.owner === p ? 7 : 10) * dt;
+      const rate = (this.owner === p && p === this.human ? 14 : 10) * dt;
       p.yaw += THREE.MathUtils.clamp(d, -rate, rate);
     }
     let dy = p.yaw - prevYaw;
@@ -742,7 +742,7 @@ export class Match {
     if (o) {
       const d = _v.subVectors(ball.pos, o.pos).setY(0).length();
       // A change of direction keeps the ball; it is only lost once it is gone.
-      const limit = o.turning ? 3.2 : 1.9;
+      const limit = o === this.human ? 2.6 : o.turning ? 3.2 : 1.9;
       if (!o.holding && (d > limit || o.busy || ball.pos.y > 1.2 && o.role !== 'GK')) this.loseBall(o);
     }
     if (!this.owner) this.tryControl();
@@ -854,8 +854,7 @@ export class Match {
     return x > HL - PITCH.penaltyDepth - 0.3 && Math.abs(at.z) < PITCH.penaltyHalfWidth + 0.3;
   }
 
-  // Close control with visible touches: the ball is pushed ahead and the
-  // player runs onto it. Sprinting pushes it further (easier to nick).
+  // Close control. The human's ball stays at his feet; a touch only steers it.
   dribble(p, dt) {
     const ball = this.ball;
     if (p.holding) {
@@ -876,41 +875,50 @@ export class Match {
     }
     const sp = p.speed;
     const rel = new THREE.Vector3().subVectors(ball.pos, p.pos).setY(0);
-    const ahead = rel.dot(f);
+    const intent = p.intent.lengthSq() > 0.04 ? p.intent : (sp > 0.4 ? p.vel : f);
+    const dir = intent.clone().setY(0);
+    if (dir.lengthSq() < 1e-6) dir.copy(f);
+    dir.normalize();
+    const pv = Math.hypot(p.vel.x, p.vel.z);
+    p.turning = pv > 1.2 && p.vel.dot(dir) / pv < 0.72;
+
+    // The human keeps the ball at his feet. A touch only nudges it into the
+    // direction he is heading; it never gets kicked clear of him.
+    if (p === this.human) {
+      const lead = p.targetSpeed > 6.2 ? 0.62 : 0.46;
+      const cx = p.pos.x + dir.x * lead - ball.pos.x;
+      const cz = p.pos.z + dir.z * lead - ball.pos.z;
+      let cvx = cx * 14, cvz = cz * 14;
+      const cv = Math.hypot(cvx, cvz);
+      if (cv > 9) { cvx *= 9 / cv; cvz *= 9 / cv; }
+      ball.vel.x = p.vel.x + cvx;
+      ball.vel.z = p.vel.z + cvz;
+      ball.vel.y = Math.min(0, ball.vel.y);
+      if (p.touchCd <= 0 && sp > 1.4) {
+        p.touchCd = p.targetSpeed > 6.2 ? 0.2 : 0.28;
+        p.touchFoot = p.touchFoot === 'Left' ? 'Right' : 'Left';
+        if (!p.action) p.anim('touch', { foot: p.touchFoot, power: 0.12, style: 'pass' });
+      }
+      return;
+    }
+
+    const ahead = rel.dot(dir);
     const lat = rel.dot(p.left(_w));
-    if (sp < 1.2) {
-      const spot = new THREE.Vector3().copy(p.pos).addScaledVector(f, 0.45).setY(R);
-      const pull = new THREE.Vector3().subVectors(spot, ball.pos).setY(0).multiplyScalar(3.5);
+    if (sp < 1.2 || p.turning || rel.length() > 1.15) {
+      const spot = new THREE.Vector3().copy(p.pos).addScaledVector(dir, 0.6);
+      const pull = new THREE.Vector3().subVectors(spot, ball.pos).setY(0).multiplyScalar(p.turning ? 8 : 4);
       ball.vel.x = p.vel.x + pull.x;
       ball.vel.z = p.vel.z + pull.z;
       return;
     }
-    const moveDir = new THREE.Vector3().copy(p.vel).setY(0);
-    // The direction he means to go (the stick, or where he is actually running).
-    const intent = p.intent.lengthSq() > 0.04 ? p.intent : moveDir;
-    const dir = intent.lengthSq() > 0.04 ? intent.clone().setY(0).normalize() : p.forward(new THREE.Vector3());
-    // He has asked to go a different way but his run has not caught up yet.
-    // Keep the ball at his feet, set just ahead in the new direction, until
-    // he is actually running that way. The next touch then plays it on.
-    const pv = Math.hypot(p.vel.x, p.vel.z);
-    p.turning = pv > 1.2 && p.vel.dot(dir) / pv < 0.72;
-    if (p.turning) {
-      const spot = dir.clone().multiplyScalar(0.5);
-      ball.vel.x = p.vel.x + (p.pos.x + spot.x - ball.pos.x) * 8;
-      ball.vel.z = p.vel.z + (p.pos.z + spot.z - ball.pos.z) * 8;
-      ball.vel.y = Math.min(0, ball.vel.y);
-      return;
-    }
     const ballSpeedAlong = ball.vel.dot(dir);
-    const needTouch = p.touchCd <= 0 && (p.turning || ahead < 0.5 || Math.abs(lat) > 0.32 || ballSpeedAlong < sp * 0.92 && ahead < 1.0);
+    const needTouch = p.touchCd <= 0 && (ahead < 0.45 || Math.abs(lat) > 0.28 || ballSpeedAlong < sp * 0.95 && ahead < 0.9);
     if (needTouch) {
-      const sprinting = sp > 6.5 && !p.turning;
-      const push = p.turning
-        ? Math.max(3.4, sp * 1.02)
-        : sp * (sprinting ? 1.42 : 1.22) + (sprinting ? 1.4 : 0.55) + (this.rnd() - 0.5) * (sprinting ? 1.2 : 0.3);
+      const sprinting = sp > 6.5;
+      const push = sp * (sprinting ? 1.12 : 1.05) + 0.2;
       const corr = p.left(_w).multiplyScalar(-lat * 2.2);
       ball.vel.copy(dir).multiplyScalar(push).add(corr).setY(0);
-      p.touchCd = sprinting ? 0.34 : 0.24;
+      p.touchCd = sprinting ? 0.26 : 0.2;
       p.touchFoot = p.touchFoot === 'Left' ? 'Right' : 'Left';
       if (!p.action) p.anim('touch', { foot: p.touchFoot, power: 0.2, style: 'pass' });
       this.emit({ type: 'touch', player: p, speed: push });
