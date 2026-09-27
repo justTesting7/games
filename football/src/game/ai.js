@@ -367,7 +367,7 @@ export function carrierOptions(match, p) {
     // the shot CARRIER_INSTRUCTIONS tells him to take.
     const inBox = distGoal < 16.5 && ang < 1.1 && corner.open;
     const clearSight = distGoal < 22 && ang < 0.8 && corner.open;
-    const breakaway = alone && distGoal < 18 && ang < 1.1;
+    const breakaway = alone && distGoal < 15 && ang < 1.05;
     let finish = null;
     let text = `shoot at goal from ${Math.round(distGoal)} m${blockers ? `, ${blockers} defender${blockers > 1 ? 's' : ''} in the way` : corner.covered ? ', keeper is covering the near corner' : ', clear sight of goal'}`;
     if (breakaway) {
@@ -446,10 +446,13 @@ export function carrierOptions(match, p) {
       }
       const throughBox = spotInBox(goal, tw.spot) && tv > 0.45;
       const offRun = playerOffside(match, q);
-      passes.push({
-        id: `through_${q.number}`, kind: 'through', receiver: q, dist: Math.round(tw.dist), gain, value: offRun ? -1 : tv, intoBox: throughBox && !offRun, offside: offRun,
-        text: `through pass into the path of ${q.name} (#${q.number}), who is running in behind. The through pass is on${throughBox ? ' and puts him in the penalty area' : ''}. Play it${offRun ? '. He is offside. Do not pass to him' : ''}`,
-      });
+      // A through ball from midfield is cut out. Only list one that puts him in the area.
+      if (throughBox) {
+        passes.push({
+          id: `through_${q.number}`, kind: 'through', receiver: q, dist: Math.round(tw.dist), gain, value: offRun ? -1 : tv, intoBox: !offRun, offside: offRun,
+          text: `through pass into the penalty area, into the path of ${q.name} (#${q.number}). Play it${offRun ? '. He is offside. Do not pass to him' : ''}`,
+        });
+      }
     }
   }
   let bestForward = -1;
@@ -486,7 +489,7 @@ export function carrierOptions(match, p) {
         gain: wallGain,
         value: off ? -1 : 1.4,
         offside: off,
-        text: `double pass with ${wall.name} (#${wall.number}, ${wall.slot}): play it to his feet and sprint past him. He returns it first time into the space you are running into${off ? '. He is offside. Do not pass to him' : ''}`,
+        text: `double pass with ${wall.name} (#${wall.number}, ${wall.slot}): only if no forward pass is on. The return often does not come back${off ? '. He is offside. Do not pass to him' : ''}`,
       });
     }
   }
@@ -515,7 +518,7 @@ export function carrierOptions(match, p) {
     const gap = q.pos.distanceTo(call.spot);
     if (!Number.isFinite(w.flight) || w.recvLate > 0.45 || w.margin < -0.08 || gain < 0) continue;
     const off = playerOffside(match, q);
-    const sensible = !off && w.margin >= 0.1 && w.recvLate < 0.35 && gain > 1;
+    const sensible = !off && w.margin >= 0.22 && w.recvLate < 0.28 && gain > 1;
     const where = describeSpot(T, call.spot);
     const inArea = spotInBox(goal, call.spot);
     const verdict = sensible

@@ -25,18 +25,18 @@ function zone(team, pos) {
 // getting a man into the penalty area and finishing, not by keeping the ball.
 const CARRIER_INSTRUCTIONS = `You have the ball. Attack together and get a shot on goal.
 A teammate is offside when he is in the opponent's half and nearer their goal than both the ball and the second-last defender. Never pass to him. A pass into the space beyond that line is allowed when he is still level with it.
-If you are ahead of every defender, run straight at goal and score. Do not pass. If a shot from that run is listed, shoot.
-If a double-pass return is listed, play it first time into the runner's path.
+If you are ahead of every defender, keep running at goal. Do not pass. Shoot only when a shot from inside the penalty area on that run is listed. Until then, take another touch toward goal.
+If you just received a double pass and the return is listed, play it first time into the runner's path.
 If a shot from inside the penalty area is listed, shoot. Do not pass a chance in the box away.
 If a clear sight of goal from inside 22 m is listed, shoot.
-Teammates without the ball run into space only when they reach it before a defender, and they call when that run is on.
-If a teammate is calling for a run and a through pass to that call is listed, play the through pass. He gets there first.
-If any other through pass is listed, play that too. A through pass is on whenever it is listed. Do not pass to feet, cross, or dribble when a through ball is possible.
+Teammates without the ball call only when they reach the space before a defender.
+If a teammate is calling and the through pass to that call is listed, play it. He gets there first.
+If a through pass is listed that puts a teammate in the penalty area, play that.
+Do not play any other through ball. From midfield those passes are cut out.
 If you are wide and a cross is listed with a teammate in the box, cross it.
-If a pass is listed that puts a teammate in the penalty area, play that.
-Otherwise, if a double pass is listed, take it: give the short pass and sprint past the receiver so he can play you in. Do not start a double pass when a shot or a through pass is on.
-If none of those is on, pass forward as soon as a teammate has a direct line. Do not wait on the ball.
-Carry toward goal only when no shot and no forward pass is on and there is space.
+If a pass to feet is listed that puts a teammate in the penalty area, play that.
+If a forward pass to feet is listed, play it. A square pass is not forward. Do not start a double pass when a forward pass is on. The return does not come back.
+Carry toward goal when no shot and no forward pass is on and there is space.
 Pass backward only when every forward pass is closed and you cannot carry the ball forward.`;
 
 // Carrier decisions: a local choice is made instantly and executed after a
@@ -101,19 +101,18 @@ export class Brain {
     if (sight.length) return this.among(sight);
     const calls = src.filter((o) => o.call && o.sensible);
     if (calls.length) return this.among(calls);
-    const thr = src.filter((o) => o.kind === 'through' && !o.call);
+    const thr = src.filter((o) => o.kind === 'through' && !o.call && o.intoBox);
     if (thr.length) return this.among(thr);
     const cross = src.find((o) => o.kind === 'cross' && o.boxMates > 0);
     if (cross) return cross;
-    const into = src.filter((o) => o.intoBox);
+    const into = src.filter((o) => o.intoBox && o.kind !== 'through');
     if (into.length) return this.among(into);
-    const dbl = src.find((o) => o.combo === 'double');
-    if (dbl) return dbl;
-    const fwd = src.filter((o) => (o.kind === 'pass' || o.kind === 'through' || o.kind === 'lob') && (o.gain ?? 0) > 1);
+    const fwd = src.filter((o) => (o.kind === 'pass' || o.kind === 'lob') && (o.gain ?? 0) > 1);
     if (fwd.length) return this.among(fwd);
     const carry = src.find((o) => o.kind === 'dribble' && o.value >= 0.45);
     if (carry) return carry;
-    return this.among(src);
+    const rest = src.filter((o) => o.kind !== 'through' || o.call || o.intoBox || o.combo === 'return');
+    return this.among(rest.length ? rest : src);
   }
 
   among(pool) {
