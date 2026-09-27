@@ -4,7 +4,7 @@ import { PITCH, GOAL, BALL_RADIUS } from '../world/dims.js';
 import { KICKOFF, KICKOFF_DEFEND, squad, CLUBS } from './teams.js';
 import { groundPass, loftedPass, shotVelocity, leadTarget, gauss } from './kicks.js';
 import { ACTION_DUR, KICK } from './actions.js';
-import { teamShape, chooseChasers, defendTargets, supportTargets, keeperTarget, carrierOptions, laneOpen, passWindow, throughWindow } from './ai.js';
+import { teamShape, chooseChasers, defendTargets, supportTargets, keeperTarget, carrierOptions, laneOpen, passWindow, throughWindow, doubleReturnWindow } from './ai.js';
 
 const HL = PITCH.halfLength, HW = PITCH.halfWidth, R = BALL_RADIUS;
 const GOAL_LINE = HL - PITCH.line * 0.5;
@@ -115,6 +115,7 @@ export class Match {
     this.lastTouch = null;
     this.lastKick = null;
     this.pass = null;
+    this.doublePass = null;
     this.restart = null;
     this.events = [];
     this.later = [];
@@ -155,6 +156,7 @@ export class Match {
     this.kickoffTeam = team;
     this.owner = null;
     this.pass = null;
+    this.doublePass = null;
     this.restart = { type: 'kickoff', team, pos: new THREE.Vector3(0, R, 0) };
     this.ball.place(0, 0);
     for (const t of this.teams) {
@@ -182,6 +184,7 @@ export class Match {
     this.stateT = 0;
     this.owner = null;
     this.pass = null;
+    this.doublePass = null;
     const p = pos.clone();
     if (type === 'throw') {
       p.x = THREE.MathUtils.clamp(p.x, -HL + 0.5, HL - 0.5);
@@ -565,6 +568,17 @@ export class Match {
       this.tryHeader(p);
       return;
     }
+    const dp = this.doublePass;
+    if (dp && dp.runner === p && dp.team === T && this.time < dp.until) {
+      p.target.set(
+        THREE.MathUtils.clamp(p.pos.x + T.dir * 12, -HL + 2, HL - 2),
+        0,
+        THREE.MathUtils.clamp(p.pos.z, -HW + 2, HW - 2),
+      );
+      p.targetSpeed = p.maxSpeed;
+      p.run = { t: this.time };
+      return;
+    }
     if (p.role === 'GK') { this.keeperAI(p, dt); return; }
     const chase = this.chasers.get(p);
     const mine = this.owner?.team === T;
@@ -803,6 +817,9 @@ export class Match {
       if (this.pass.to) this.pass.to.incoming = null;
       this.pass = null;
     }
+    const dp = this.doublePass;
+    if (dp && (this.time > dp.until || p.team !== dp.team || (p !== dp.wall && p !== dp.runner))) this.doublePass = null;
+    else if (dp && p === dp.runner && dp.returned) this.doublePass = null;
     if (prev && prev.team !== p.team) this.emit({ type: 'turnover', team: p.team, player: p });
     this.emit({ type: 'control', player: p, how });
     this.brain?.onPossession(p);
@@ -1048,7 +1065,7 @@ export class Match {
       let target;
       let arrive;
       if (kind === 'through') {
-        const w = throughWindow(this, from, q);
+        const w = plan.combo === 'return' ? doubleReturnWindow(this, from, q) : throughWindow(this, from, q);
         target = w.spot;
         arrive = w.arrive;
       } else {
@@ -1064,6 +1081,7 @@ export class Match {
       spec.receiver = q;
       spec.target = target;
       spec.style = 'pass';
+      spec.combo = plan.combo || null;
       spec.power = Math.min(1, from.distanceTo(target) / 40);
     } else if (kind === 'lob' || kind === 'cross' || kind === 'clear' || kind === 'throw') {
       let q = plan.receiver;
@@ -1142,8 +1160,9 @@ export class Match {
     const aimAt = spec.target || ball.pos.clone().add(p.forward(_v));
     const yaw = Math.atan2(aimAt.x - p.pos.x, aimAt.z - p.pos.z);
     const kickAnim = kind === 'throw' ? 'throw' : kind === 'gkThrow' ? 'throw' : spec.style === 'pass' && spec.power < 0.5 ? 'pass' : 'kick';
-    const dur = plan.firstTime ? ACTION_DUR[kickAnim] * 0.75 : ACTION_DUR[kickAnim];
-    const contact = kickAnim === 'throw' ? 0.62 : KICK.contact;
+    const quick = kind === 'pass' || kind === 'through' || kind === 'lob';
+    const dur = quick ? 0.32 : plan.firstTime ? ACTION_DUR[kickAnim] * 0.75 : ACTION_DUR[kickAnim];
+    const contact = kickAnim === 'throw' ? 0.62 : quick ? 0.24 : KICK.contact;
     p.pendingKick = { spec, at: this.time + dur * contact, yaw, foot: this.rnd() < 0.82 ? 'Right' : 'Left' };
     p.anim(kickAnim === 'pass' ? 'kick' : kickAnim, { foot: p.pendingKick.foot, power: spec.power ?? 0.5, loft: spec.loft || 0, style: spec.style, dur });
     p.plan = null;
@@ -1189,6 +1208,13 @@ export class Match {
       this.pass = { from: p, to: spec.receiver, team: T, t: this.time, fresh: true, kind: spec.kind, target: spec.target ? spec.target.clone() : null };
       spec.receiver.incoming = this.pass;
       T.stats.passes++;
+      if (spec.combo === 'double') {
+        this.doublePass = { runner: p, wall: spec.receiver, team: T, t: this.time, until: this.time + 3.4, returned: false };
+      } else if (spec.combo === 'return' && this.doublePass) {
+        this.doublePass.returned = true;
+      } else if (this.doublePass && (p === this.doublePass.wall || (p.team === this.doublePass.team && p !== this.doublePass.runner))) {
+        this.doublePass = null;
+      }
     } else this.pass = null;
     if (spec.shot) {
       T.stats.shots++;
@@ -1590,6 +1616,7 @@ export class Match {
     this.stateT = 0;
     this.owner = null;
     this.pass = null;
+    this.doublePass = null;
     this.shot = null;
     this.players.forEach((p) => { p.celebrated = false; });
     this.kickoffTeam = team.opp;

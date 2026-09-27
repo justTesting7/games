@@ -13,6 +13,7 @@ export class MatchAudio {
     this.touchAt = 0;
     this.bounceAt = 0;
     this.netAt = 0;
+    this.cutUntil = 0;
   }
 
   start() {
@@ -31,6 +32,10 @@ export class MatchAudio {
     comp.attack.value = 0.003;
     comp.release.value = 0.25;
     this.master.connect(comp).connect(ctx.destination);
+    // Boot sounds skip the compressor, or the crowd bed flattens them.
+    this.dry = ctx.createGain();
+    this.dry.gain.value = 1;
+    this.dry.connect(ctx.destination);
 
     this.noise = noiseBuffer(ctx, 2);
 
@@ -88,8 +93,9 @@ export class MatchAudio {
   update(dt, { excite = 0, paused = false } = {}) {
     if (!this.ctx) return;
     const t = this.ctx.currentTime;
-    const duck = paused ? 0.15 : 1;
-    this.crowdBus.gain.setTargetAtTime(duck, t, 0.15);
+    const cutting = t < this.cutUntil;
+    const duck = paused ? 0.15 : cutting ? 0.18 : 1;
+    this.crowdBus.gain.setTargetAtTime(duck, t, cutting ? 0.02 : 0.15);
     const bed = (0.05 + excite * 0.14 + this.roar * 0.28) * duck;
     this.bed.gain.setTargetAtTime(bed, t, 0.12);
     this.roarGain.gain.setTargetAtTime(this.roar * 0.42 * duck, t, 0.18);
@@ -187,17 +193,26 @@ export class MatchAudio {
     const p = clamp(power, 0.15, 1);
     const shot = kind === 'shoot' || kind === 'clear';
     const loft = kind === 'lob' || kind === 'cross' || kind === 'throw' || kind === 'gkThrow';
-    const through = kind === 'through';
-    const gain = (shot ? 0.5 : loft ? 0.16 : 0.26) * (0.55 + p * 0.6);
-    const thudF = shot ? 78 : through ? 130 : loft ? 160 : 110;
-    this.thud(thudF, shot ? 0.22 : 0.1, gain, pan);
+    const pass = kind === 'pass' || kind === 'through' || kind === 'lob' || kind === 'gkThrow';
+    // A pass has to cut the crowd. The old thud sat under the murmur.
+    this.cutUntil = this.ctx.currentTime + (pass ? 0.22 : 0.1);
+    if (pass) {
+      const dry = this.dry || this.master;
+      this.thud(340, 0.07, 0.9, pan, dry);
+      this.thud(140, 0.09, 0.55, pan, dry);
+      this.noiseHit({ freq: 3600, q: 2.2, type: 'bandpass', gain: 0.85, attack: 0.001, release: 0.04, pan, dest: dry });
+      this.noiseHit({ freq: 680, q: 0.7, type: 'bandpass', gain: 0.4, attack: 0.001, release: 0.05, pan, dest: dry });
+      return;
+    }
+    const gain = (shot ? 0.62 : 0.28) * (0.7 + p * 0.45);
+    this.thud(shot ? 78 : 150, shot ? 0.24 : 0.14, gain, pan);
     this.noiseHit({
-      freq: loft ? 1800 : shot ? 700 : 1100,
+      freq: loft ? 1800 : shot ? 700 : 1200,
       q: loft ? 0.5 : 0.8,
       type: loft ? 'highpass' : 'bandpass',
-      gain: gain * (loft ? 0.45 : 0.7),
+      gain: gain * (loft ? 0.7 : 0.85),
       attack: 0.002,
-      release: shot ? 0.09 : 0.045,
+      release: shot ? 0.1 : 0.06,
       pan,
     });
   }
@@ -346,7 +361,7 @@ export class MatchAudio {
     f.frequency.exponentialRampToValueAtTime(280, t + 0.5);
   }
 
-  thud(freq, release, gain, pan) {
+  thud(freq, release, gain, pan, dest) {
     if (!this.ctx || gain < 0.01) return;
     const ctx = this.ctx;
     const t = ctx.currentTime;
@@ -359,7 +374,7 @@ export class MatchAudio {
     g.gain.exponentialRampToValueAtTime(0.0001, t + release);
     const p = ctx.createStereoPanner();
     p.pan.value = pan || 0;
-    o.connect(g).connect(p).connect(this.master);
+    o.connect(g).connect(p).connect(dest || this.master);
     o.start(t);
     o.stop(t + release + 0.02);
   }

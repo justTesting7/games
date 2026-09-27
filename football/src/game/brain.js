@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { PITCH } from '../world/dims.js';
-import { carrierOptions, passWindow, throughWindow } from './ai.js';
+import { carrierOptions, passWindow, throughWindow, doubleReturnWindow } from './ai.js';
 import { MENTALITY } from './match.js';
 
 const HL = PITCH.halfLength, HW = PITCH.halfWidth;
@@ -19,6 +19,16 @@ function zone(team, pos) {
   const side = Math.abs(pos.z) < HW / 3 ? 'central' : (pos.z * team.dir > 0 ? 'right' : 'left') + ' flank';
   return `${third}, ${side}`;
 }
+
+// The touch Jev is asked to choose. The offline pick follows this same order,
+// because the ball is played before a reply gets back.
+const CARRIER_INSTRUCTIONS = `You have the ball. Choose the next touch.
+If a double-pass return is listed, play that first time into the runner's path.
+If you have a clear sight of goal, shoot.
+Otherwise, if a double pass is listed, take it: give the short pass and sprint past the receiver so he can play you in.
+If there is no double pass, pass forward as soon as a teammate has a direct line. Do not wait on the ball.
+Carry it forward when no forward pass is on and there is space.
+Pass backward only when every forward pass is closed and you cannot carry the ball forward.`;
 
 // Carrier decisions: a local choice is made instantly and executed after a
 // short, pressure-dependent hold. If Jev's answer arrives first it replaces
@@ -65,17 +75,33 @@ export class Brain {
     return { list, best: this.pick(list) };
   }
 
-  // Softmax-ish local pick so AI isn't perfectly predictable.
+  // Offline reading of CARRIER_INSTRUCTIONS. Jev replaces this if its answer arrives.
   pick(list) {
     if (!list.length) return null;
-    let src = list.filter((o) => o.value > 0.15);
-    if (!src.length) src = [list.find((o) => o.kind === 'dribble') || list[0]];
-    const top = src[0].value;
-    const pool = src.filter((o) => o.value > top - 0.08);
-    const w = pool.map((o) => Math.exp((o.value - top) * 6));
+    const live = list.filter((o) => o.value > 0.15);
+    const src = live.length ? live : [list.find((o) => o.kind === 'dribble') || list[0]];
+    const ret = src.find((o) => o.combo === 'return');
+    if (ret) return ret;
+    const shots = src.filter((o) => o.kind === 'shoot' && o.value >= 1.7);
+    if (shots.length) return this.among(shots);
+    const dbl = src.find((o) => o.combo === 'double');
+    if (dbl) return dbl;
+    const fwd = src.filter((o) => (o.kind === 'pass' || o.kind === 'through' || o.kind === 'lob') && (o.gain ?? 0) > 1);
+    if (fwd.length) return this.among(fwd);
+    const carry = src.find((o) => o.kind === 'dribble' && o.value >= 0.45);
+    if (carry) return carry;
+    return this.among(src);
+  }
+
+  among(pool) {
+    if (!pool.length) return null;
+    if (pool.length === 1) return pool[0];
+    const top = pool.reduce((m, o) => Math.max(m, o.value), -Infinity);
+    const near = pool.filter((o) => o.value > top - 0.08);
+    const w = near.map((o) => Math.exp((o.value - top) * 6));
     let r = this.rnd() * w.reduce((a, b) => a + b, 0);
-    for (let i = 0; i < pool.length; i++) { r -= w[i]; if (r <= 0) return pool[i]; }
-    return pool[0];
+    for (let i = 0; i < near.length; i++) { r -= w[i]; if (r <= 0) return near[i]; }
+    return near[0];
   }
 
   decide(p, filter = null) {
@@ -86,12 +112,12 @@ export class Brain {
       best = this.pick(list);
     }
     const pr = m.pressureOn(p).dist;
-    // A tackle on top of him is released at once. A simple pass is one touch.
-    // Anything else gets a look up so a teammate can arrive.
-    let hold = p.holding ? 1.2 + this.rnd() * 0.6 : pr < 1.15 ? 0.08 : pr < 3.5 ? 0.42 + this.rnd() * 0.2 : 0.6 + this.rnd() * 0.3;
-    if (!p.holding && best?.kind === 'shoot') hold = pr < 2.5 ? 0.1 : 0.2;
-    else if (!p.holding && best?.kind === 'pass' && best.dist < 17 && pr > 2) hold = 0.16 + this.rnd() * 0.1;
-    else if (!p.holding && best?.kind === 'through') hold = 0.26 + this.rnd() * 0.1;
+    // Play it at once. A forward pass is a single touch; nothing waits around.
+    const passing = best?.kind === 'pass' || best?.kind === 'through' || best?.kind === 'lob';
+    let hold = p.holding ? 0.28 : pr < 1.15 ? 0.05 : 0.1;
+    if (!p.holding && best?.kind === 'shoot') hold = 0.06;
+    else if (!p.holding && (best?.combo || (passing && best.gain > 1))) hold = 0.04;
+    else if (!p.holding && passing) hold = 0.08;
     const d = { at: m.time + hold, choice: best, list, source: 'local', confidence: 0, epoch: m.time, player: p };
     this.decisions.set(p, d);
     this.ask(p, d, list);
@@ -106,8 +132,7 @@ export class Brain {
     // Dribbling: re-evaluate every so often, faster when pressed.
     if (d.choice?.kind === 'dribble' || d.choice?.kind === 'shield') {
       if (m.time >= d.at) {
-        const pr = m.pressureOn(p).dist;
-        const until = d.dribbleUntil ?? (d.dribbleUntil = m.time + (pr < 2.4 ? 0.28 : 0.85 + this.rnd() * 0.35));
+        const until = d.dribbleUntil ?? (d.dribbleUntil = m.time + 0.1);
         if (m.time >= until) { this.decisions.delete(p); d = this.decide(p); }
       }
       return this.resolve(p, d.choice) || { kind: 'dribble' };
@@ -139,10 +164,12 @@ export class Brain {
         const w = passWindow(this.match, p.pos, q);
         if (w.margin < 0.06 || w.recvLate > 0.3) return null;
       } else if (choice.kind === 'through') {
-        const w = throughWindow(this.match, p.pos, choice.receiver);
-        if (w.margin < 0.08 || w.recvLate > 0.35) return null;
+        const w = choice.combo === 'return'
+          ? doubleReturnWindow(this.match, p.pos, choice.receiver)
+          : throughWindow(this.match, p.pos, choice.receiver);
+        if (w.margin < (choice.combo === 'return' ? -0.02 : 0.08) || w.recvLate > (choice.combo === 'return' ? 0.45 : 0.35)) return null;
       }
-      return { kind: choice.kind, receiver: choice.receiver };
+      return { kind: choice.kind, receiver: choice.receiver, combo: choice.combo || null };
     }
     if (p.holding && choice.kind !== 'lob' && choice.kind !== 'pass') {
       const fwd = p.team.players.filter((q) => q.role !== 'GK').sort((a, b) => b.pos.x * p.team.dir - a.pos.x * p.team.dir)[3];
@@ -170,7 +197,7 @@ export class Brain {
     if (!d || d.restart !== r) {
       d = this.decide(p, (o) => o.kind === 'pass' || o.kind === 'lob' || r.type === 'freekick' && (o.kind === 'shoot' || o.kind === 'through'));
       d.restart = r;
-      d.at = m.time + 0.9;
+      d.at = m.time + 0.28;
     }
     if (m.time < d.at) return { wait: true };
     this.consume(p);
@@ -185,12 +212,14 @@ export class Brain {
     const m = this.match;
     const T = p.team;
     const criteria = {};
-    for (const o of list.slice(0, 7)) criteria[o.id] = o.text;
+    const head = list.filter((o) => o.combo || (o.kind === 'shoot' && o.value >= 1.7));
+    const rest = list.filter((o) => !head.includes(o));
+    for (const o of [...head, ...rest].slice(0, 7)) criteria[o.id] = o.text;
     const state = this.carrierState(p);
     const questions = {
       action: {
         type: 'choice',
-        instructions: `You are ${p.name} (#${p.number}, ${p.slot}) of ${T.club.name}, ${p.def.personality}. Team instruction: ${MENTALITY_TEXT[T.mentality]}. You have the ball right now. Pick the one action to take in the next second, in character.`,
+        instructions: `You are ${p.name} (#${p.number}, ${p.slot}) of ${T.club.name}, ${p.def.personality}. Team instruction: ${MENTALITY_TEXT[T.mentality]}. ${CARRIER_INSTRUCTIONS}`,
         criteria,
       },
     };
@@ -242,6 +271,11 @@ export class Brain {
       },
       teammates: mates,
       team_mentality: MENTALITY[T.mentality].label,
+      double_pass: m.doublePass?.wall === p
+        ? `${m.doublePass.runner.name} gave you the first ball and is sprinting on. Return it first time into his run.`
+        : m.doublePass?.runner === p
+          ? `You played the first ball and you are sprinting. ${m.doublePass.wall.name} should return it into your path.`
+          : null,
     };
   }
 
