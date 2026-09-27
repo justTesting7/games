@@ -761,17 +761,19 @@ export class Match {
   tryControl() {
     const ball = this.ball;
     if (ball.pos.y > 2.6) return;
-    let best = null, bd = Infinity;
+    let best = null, bd = Infinity, bestClean = false;
     for (const p of this.players) {
       if (p.kickLock > 0 || p.busy && !(p.dive && p.role === 'GK')) continue;
       const keeperHands = p.role === 'GK' && this.inOwnBox(p, ball.pos);
-      const maxY = keeperHands ? 2.5 : 0.75;
+      // Feet, thigh or chest: anything up to 1.6 m can be trapped.
+      const maxY = keeperHands ? 2.5 : 1.6;
       if (ball.pos.y > maxY) continue;
       const tp = p.touchPoint(_v);
-      const dx = ball.pos.x - tp.x, dz = ball.pos.z - tp.z;
-      const d = Math.sqrt(dx * dx + dz * dz);
-      const reach = keeperHands ? 1.15 : 0.62 + Math.min(0.25, p.speed * 0.03) + (p === this.human ? 0.35 : 0);
-      if (d < reach && d < bd) { bd = d; best = p; }
+      const dTouch = Math.hypot(ball.pos.x - tp.x, ball.pos.z - tp.z);
+      const dBody = Math.hypot(ball.pos.x - p.pos.x, ball.pos.z - p.pos.z);
+      const d = Math.min(dTouch, dBody);
+      const reach = keeperHands ? 1.15 : ball.pos.y > 0.75 ? 0.55 : 0.62 + Math.min(0.25, p.speed * 0.03) + (p === this.human ? 0.35 : 0);
+      if (d < reach && d < bd) { bd = d; best = p; bestClean = dBody < 0.55 || dTouch < 0.45; }
     }
     if (!best) return;
     const rel = _w.subVectors(ball.vel, best.vel);
@@ -782,18 +784,18 @@ export class Match {
       this.keeperCollect(best);
       return;
     }
-    // Cutting out a driven pass takes anticipation: one chance per player.
+    // Stretching to cut out a driven pass takes anticipation: one chance per
+    // player. A defender standing in the lane just takes it.
     const pass = this.pass;
-    if (pass && pass.team !== best.team && relSpeed > 6) {
+    if (pass && pass.team !== best.team && relSpeed > 6 && !bestClean) {
       pass.tried ??= new Set();
       if (pass.tried.has(best)) return;
       pass.tried.add(best);
       const chance = THREE.MathUtils.clamp(0.85 - (relSpeed - 6) * 0.07, 0.15, 0.85) * (0.6 + best.def.tackling * 0.5);
       if (this.rnd() >= chance) return;
     }
-    // First touch: a hard ball can bounce off the shin.
-    const skill = best.def.passing;
-    if (relSpeed > 14 + skill * 8 && this.rnd() < 0.5) {
+    // Only a genuinely hard strike can bounce off a player.
+    if (this.shot && relSpeed > 24 && this.rnd() < 0.5) {
       ball.vel.multiplyScalar(-0.25).add(best.vel);
       ball.vel.y = Math.abs(ball.vel.y) * 0.3 + 0.8;
       this.lastTouch = { player: best, t: this.time };
@@ -804,6 +806,12 @@ export class Match {
     ball.vel.lerp(best.vel, 0.82);
     ball.vel.y = Math.min(0, ball.vel.y) * 0.2;
     ball.spin.multiplyScalar(0.2);
+    if (ball.pos.y > 0.75) {
+      // Chest/thigh trap: kill it and drop it at his feet.
+      best.touchPoint(ball.pos);
+      ball.vel.copy(best.vel).setY(0);
+      best.anim('touch', { foot: 'Right', power: 0.15, style: 'pass' });
+    }
     this.gainBall(best);
     if (best.buffered) {
       const b = best.buffered;
@@ -1353,6 +1361,11 @@ export class Match {
       if (this.lastTouch?.player === p && this.time - this.lastTouch.t < 0.3) continue;
       if (p.role === 'GK') { this.keeperContact(p); continue; }
       if (ball.pos.y > 1.85 || p.slide) continue;
+      // Anyone free to take the ball traps it in tryControl; only shots and
+      // players caught mid-action deflect it. A missed stretch lets it by.
+      const free = !p.busy && p.kickLock <= 0 && !p.pendingKick;
+      if (free && !this.shot) continue;
+      if (this.pass?.tried?.has(p)) continue;
       const dx = ball.pos.x - p.pos.x, dz = ball.pos.z - p.pos.z;
       const d = Math.hypot(dx, dz);
       if (d > 0.36) continue;
