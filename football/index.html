@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Jev Football</title>
+  <link rel="stylesheet" href="/src/style.css" />
+</head>
+<body>
+  <canvas id="game"></canvas>
+
+  <div id="scorebug" class="hidden">
+    <div class="brand">JEV</div>
+    <div class="team"><i id="homeBar"></i><span id="homeName">KNG</span></div>
+    <div class="score"><span id="homeScore">0</span>-<span id="awayScore">0</span></div>
+    <div class="team"><span id="awayName">RDM</span><i id="awayBar"></i></div>
+    <div class="clock" id="clock">00:00</div>
+  </div>
+  <div id="jev" class="hidden"></div>
+  <div id="banner" class="hidden"></div>
+  <div id="power" class="hidden"><i></i></div>
+  <div id="help" class="hidden">
+    <b>Move</b> WASD / arrows &nbsp; <b>Sprint</b> Shift &nbsp;
+    <b>Pass</b> J &nbsp; <b>Through</b> I &nbsp; <b>Lob/Cross</b> U &nbsp; <b>Shoot</b> hold K &nbsp;
+    <b>Defend:</b> J tackle, K slide, Q switch &nbsp; <b>Camera</b> C &nbsp; <b>Pause</b> Esc
+  </div>
+
+  <div id="menu">
+    <div class="panel">
+      <h1>JEV FOOTBALL</h1>
+      <p class="sub">You are Kingsbridge (blue). Redmoor is coached by Jev.</p>
+      <div id="loading"><div class="bar"><i id="loadbar"></i></div><span id="loadlabel">Loading…</span></div>
+      <label>Half length
+        <select id="halfLen"><option value="120">2 min</option><option value="240" selected>4 min</option><option value="420">7 min</option></select>
+      </label>
+      <label>Difficulty
+        <select id="difficulty"><option value="0">Amateur</option><option value="1" selected>Professional</option><option value="2">World class</option></select>
+      </label>
+      <label>Quality
+        <select id="quality"><option value="low">Low</option><option value="medium" selected>Medium</option><option value="high">High</option><option value="ultra">Ultra</option></select>
+      </label>
+      <button id="play" disabled>Kick off</button>
+    </div>
+  </div>
+  <pre id="error" class="hidden"></pre>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
