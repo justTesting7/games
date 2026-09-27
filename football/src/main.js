@@ -135,7 +135,7 @@ addEventListener('keydown', (e) => {
   const k = e.code;
   keys.add(k);
   pressed.add(k);
-  if (k === 'KeyK' && match && !(match.owner && match.owner.team !== match.humanTeam)) charge = performance.now();
+  if (k === 'KeyD' && match && !(match.owner && match.owner.team !== match.humanTeam)) charge = performance.now();
   if (k === 'KeyC') {
     const v = Object.keys(VIEWS);
     broadcast.setView(v[(v.indexOf(broadcast.view) + 1) % v.length]);
@@ -146,7 +146,7 @@ addEventListener('keydown', (e) => {
 });
 addEventListener('keyup', (e) => {
   keys.delete(e.code);
-  if (e.code === 'KeyK' && charge !== null) {
+  if (e.code === 'KeyD' && charge !== null) {
     pressed.add('shootRelease');
     releasedPower = Math.min(1, (performance.now() - charge) / 900);
     charge = null;
@@ -157,27 +157,29 @@ let releasedPower = 0;
 
 function readInput() {
   const k = (c) => keys.has(c);
-  const x = (k('KeyD') || k('ArrowRight') ? 1 : 0) - (k('KeyA') || k('ArrowLeft') ? 1 : 0);
-  const z = (k('KeyS') || k('ArrowDown') ? 1 : 0) - (k('KeyW') || k('ArrowUp') ? 1 : 0);
+  const x = (k('ArrowRight') ? 1 : 0) - (k('ArrowLeft') ? 1 : 0);
+  const z = (k('ArrowDown') ? 1 : 0) - (k('ArrowUp') ? 1 : 0);
   const pro = broadcast.view === 'pro';
   const dir = match.humanTeam?.dir ?? 1;
   // Broadcast views: screen right is +X and screen up is -Z.
   const move = pro ? { x: -z * dir, z: -x * dir } : { x, z };
   const defending = match.owner && match.owner.team !== match.humanTeam;
   const p = (c) => pressed.has(c);
+  // With a loose ball S is a first-time pass when close, otherwise a switch.
+  const h = match.human;
+  const nearLoose = !match.owner && h && h.pos.distanceTo(match.ball.pos) < 2.5;
   const input = {
     move,
     sprint: k('ShiftLeft') || k('ShiftRight'),
-    pass: p('KeyJ') || p('Space'),
-    through: p('KeyI'),
-    lob: p('KeyU'),
+    pass: p('KeyS') && !defending && (match.owner?.team === match.humanTeam || nearLoose || match.state !== 'play'),
+    through: p('KeyQ') && !defending,
+    lob: p('KeyA') && !defending,
     shootRelease: p('shootRelease'),
     shootPower: releasedPower,
-    tackle: defending && (p('KeyJ') || p('Space')),
-    slide: defending && p('KeyK'),
-    switch: p('KeyQ'),
+    tackle: defending && p('KeyD'),
+    slide: defending && p('KeyA'),
+    switch: p('KeyS') && (defending || !match.owner && !nearLoose && match.state === 'play'),
   };
-  if (defending) input.pass = false;
   pressed.clear();
   return input;
 }
