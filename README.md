@@ -1,6 +1,9 @@
-# Relic Isle
+# Games
 
-A third-person adventure on a photoreal island, running in the browser with Three.js and WebGL 2.
+The repo is a folder of browser games. **Shootout** (Relic Isle) is the third-person fight
+in `shootout/`. The site root is a hub; more titles can sit next to it.
+
+Shootout is a photoreal third-person fight on Three.js and WebGL 2.
 Single player is a free-for-all against rivals whose tactics are chosen by [Jev](https://docs.typesafe.ai/introduction) (TypeSafe System One). Multiplayer is a separate last-player-standing match against other humans.
 
 ## Running
@@ -11,15 +14,17 @@ cp .env.example .env   # then set JEV_API_KEY=...
 npm run dev
 ```
 
+Open `/` for the hub and `/shootout/` for the fight.
+
 The rivals ask Jev for decisions through the Vite dev server, which proxies `/api/jev` to
 `https://api.typesafe.ai/v1/systemone` and adds `JEV_API_KEY` from `.env` on the server side. The key
 never reaches the browser, and `.env` is gitignored. Without a key, or in a static `npm run build`,
 the rivals fall back to a local heuristic, and the HUD shows "Jev offline".
 
-Pick **Relic Isle** or **Dead District** (urban ruins) from the menu before you fight; the choice is saved in `localStorage`.
+Pick **Relic Isle**, **Dead District**, **Midtown**, **Madison Square Garden**, or **Dizengoff Square** from the menu before you fight; the choice is saved in `localStorage`.
 
 The first `npm run dev` (or `npm run build`) downloads about 100 MB of third-party assets into
-`public/assets/vendor`, which is gitignored. Open the URL Vite prints and click **Fight**.
+`shootout/public/assets/vendor`, which is gitignored.
 
 ## Hosting (Cloudflare)
 
@@ -33,7 +38,7 @@ npx wrangler secret put JEV_API_KEY   # optional; rivals work without it
 
 `npm run cf:dev` serves the same Worker locally on port 8787. Vite (`npm run dev`) stays single-player; it has no `/ws`.
 
-Live: https://relic-isle.noam-berman7.workers.dev
+Live: https://relic-isle.noam-berman7.workers.dev (hub) · https://relic-isle.noam-berman7.workers.dev/shootout/
 
 The menu splits the two games:
 
@@ -85,4 +90,4 @@ Poses, shots, grenades, drones, and the round clock stay on the Durable Object.
 
 - Poly Haven textures and models: CC0.
 - ez-tree (bark and leaf textures): MIT.
-- Ready Player Me avatar and animation library: use is allowed with Ready Player Me avatars, but redistribution is not. The files are therefore downloaded by `scripts/fetch-assets.mjs` instead of being committed.
+- Ready Player Me avatar and animation library: use is allowed with Ready Player Me avatars, but redistribution is not. The files are therefore downloaded by `shootout/scripts/fetch-assets.mjs` instead of being committed.

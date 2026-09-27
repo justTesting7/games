@@ -2,214 +2,47 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
-    <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <title>Relic Isle</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Games</title>
     <link rel="icon" href="data:," />
-    <link rel="stylesheet" href="/src/style.css" />
+    <style>
+      * { box-sizing: border-box; }
+      html, body {
+        margin: 0; min-height: 100%;
+        background: radial-gradient(ellipse at 50% 30%, #1b2a33, #05080b 70%);
+        color: #e8eef2;
+        font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      }
+      main {
+        max-width: 720px; margin: 0 auto; padding: 72px 24px 80px;
+      }
+      p.kicker {
+        letter-spacing: 0.22em; text-transform: uppercase; font-size: 11px;
+        opacity: 0.55; margin: 0 0 10px;
+      }
+      h1 { font-weight: 600; font-size: 42px; margin: 0 0 8px; }
+      .sub { opacity: 0.7; margin: 0 0 36px; }
+      a.game {
+        display: block; text-decoration: none; color: inherit;
+        border: 1px solid rgba(255,255,255,0.12);
+        background: rgba(8, 14, 18, 0.55);
+        padding: 22px 24px; border-radius: 10px;
+        transition: border-color 0.15s, background 0.15s;
+      }
+      a.game:hover { border-color: rgba(255,210,130,0.55); background: rgba(20, 28, 34, 0.8); }
+      a.game strong { display: block; font-size: 22px; margin-bottom: 6px; }
+      a.game span { opacity: 0.7; font-size: 14px; }
+    </style>
   </head>
   <body>
-    <canvas id="game"></canvas>
-
-    <div id="hud" class="hidden">
-      <div id="damage"></div>
-      <div id="tags"></div>
-      <div id="dmgdir"><i></i></div>
-      <div id="crosshair"><i></i><i></i><i></i><i></i><b></b></div>
-      <div id="grenadecharge"><i></i><small>hold to throw farther</small></div>
-      <div id="hitmarker"></div>
-      <div id="radar"><canvas id="radarcanvas" width="148" height="148"></canvas><small>radar</small></div>
-      <div id="round"><span id="rivalsleft">3</span><small>rivals left</small><em id="jevstat">Jev · waiting</em><em id="netstat">net · local</em></div>
-      <div id="feed"></div>
-      <div id="health"><span id="hpnum">100</span><div class="bar"><div id="hpbar"></div></div><small>health</small></div>
-      <div id="weapon"><div id="slots"><b>1 pistols</b><b>2 sniper</b><b>3 grenades</b><b>4 drone</b></div><span id="ammo">16 / 96</span><small id="weaponname">Dual pistols</small></div>
-      <div id="dronesplit">
-        <div class="pane left"><small>drone</small><b>wasd fly · f up · space explode</b></div>
-        <div class="pane right"><small>you</small><b>exposed</b></div>
-        <div class="static" aria-hidden="true"></div>
-        <div class="scan" aria-hidden="true"></div>
-        <div class="shotlost"><em>SHOT DOWN</em><small>link lost · returning to operator</small></div>
-      </div>
-      <div id="scope">
-        <div class="scope-shade"></div>
-        <svg class="scope-reticle" viewBox="0 0 200 200" aria-hidden="true">
-          <g fill="none" stroke="rgba(8,10,8,0.88)" stroke-width="0.7">
-            <line x1="100" y1="18" x2="100" y2="88" />
-            <line x1="100" y1="112" x2="100" y2="182" />
-            <line x1="18" y1="100" x2="88" y2="100" />
-            <line x1="112" y1="100" x2="182" y2="100" />
-          </g>
-          <g fill="#d8261a">
-            <circle cx="100" cy="100" r="1.15" />
-            <circle cx="100" cy="76" r="1.05" />
-            <circle cx="100" cy="52" r="1.05" />
-            <circle cx="100" cy="124" r="1.05" />
-            <circle cx="100" cy="148" r="1.05" />
-            <circle cx="76" cy="100" r="1.05" />
-            <circle cx="52" cy="100" r="1.05" />
-            <circle cx="124" cy="100" r="1.05" />
-            <circle cx="148" cy="100" r="1.05" />
-          </g>
-          <g fill="none" stroke="rgba(8,10,8,0.7)" stroke-width="0.55">
-            <line x1="96" y1="76" x2="104" y2="76" />
-            <line x1="96" y1="52" x2="104" y2="52" />
-            <line x1="96" y1="124" x2="104" y2="124" />
-            <line x1="96" y1="148" x2="104" y2="148" />
-            <line x1="76" y1="96" x2="76" y2="104" />
-            <line x1="52" y1="96" x2="52" y2="104" />
-            <line x1="124" y1="96" x2="124" y2="104" />
-            <line x1="148" y1="96" x2="148" y2="104" />
-          </g>
-        </svg>
-        <div class="scope-meta">
-          <b id="scopedist">— m</b>
-          <small id="scopehint">shift · hold breath</small>
-          <i id="breathbar"></i>
-        </div>
-      </div>
-      <div id="swimhint">F surface · Ctrl dive</div>
-      <div id="carhint">E enter car</div>
-      <div id="grenadewarn">grenade!</div>
-      <div id="banner"><div id="bannertitle"></div><div id="bannersub"></div></div>
-      <div id="debug" class="hidden"></div>
-    </div>
-
-    <div id="touch" class="hidden">
-      <button type="button" id="touch-menu">Menu</button>
-      <div id="touch-look"></div>
-      <div id="stick" class="stick">
-        <i class="stick-base"></i>
-        <b class="stick-knob"></b>
-      </div>
-      <div id="touch-actions">
-        <button type="button" id="touch-reload">R</button>
-        <button type="button" id="touch-aim">Aim</button>
-        <button type="button" id="touch-crouch">Crouch</button>
-        <button type="button" id="touch-up" class="hidden">Up</button>
-        <button type="button" id="touch-jump">Jump</button>
-        <button type="button" id="touch-fire">Fire</button>
-      </div>
-    </div>
-
-    <div id="menu">
-      <div class="panel">
-        <h1 id="maptitle">Relic Isle</h1>
-        <p class="sub" id="mapsub">A pistol deathmatch on a photoreal island against two rivals who think with Jev</p>
-        <div id="modes" role="tablist">
-          <button type="button" id="mode-solo" class="mode on" data-mode="solo">Single player</button>
-          <button type="button" id="mode-multi" class="mode" data-mode="multi">Multiplayer</button>
-        </div>
-        <p class="sub modehint" id="modehint">You and Jev-driven rivals. Last one standing wins.</p>
-        <div id="loading">
-          <div class="bar"><div id="loadbar"></div></div>
-          <div id="loadlabel">Starting…</div>
-        </div>
-        <button id="play" class="hidden">Fight</button>
-        <div id="roster"></div>
-        <div class="settings">
-          <label id="roomrow" class="hidden">Room
-            <input id="roomcode" type="text" maxlength="16" placeholder="lobby" autocomplete="off" spellcheck="false" />
-            <small id="roomshare">Share this page to invite someone</small>
-          </label>
-          <label>Map
-            <select id="map">
-              <option value="island">Relic Isle</option>
-              <option value="city">Dead District</option>
-              <option value="manhattan">Midtown</option>
-              <option value="garden">Madison Square Garden</option>
-              <option value="studio">Dizengoff Square</option>
-            </select>
-          </label>
-          <label>Graphics
-            <select id="quality">
-              <option value="low">Low</option>
-              <option value="medium">Medium</option>
-              <option value="high" selected>High</option>
-              <option value="ultra">Ultra</option>
-            </select>
-          </label>
-          <label id="todrow">Time of day
-            <input id="timeofday" type="range" min="0" max="1000" value="90" />
-          </label>
-          <label id="minrow" class="hidden">Min players
-            <select id="minplayers">
-              <option value="2" selected>2</option>
-              <option value="3">3</option>
-              <option value="4">4</option>
-              <option value="5">5</option>
-              <option value="6">6</option>
-              <option value="8">8</option>
-            </select>
-            <small>Fight starts when this many have joined</small>
-          </label>
-          <label>Mouse sensitivity
-            <input id="sens" type="range" min="1" max="20" value="8" />
-          </label>
-          <label>Volume
-            <input id="volume" type="range" min="0" max="100" value="70" />
-          </label>
-        </div>
-        <p class="sub touch-hint">Left stick move · drag right to look · Fire shoots. Jump swims up, Crouch dives. Landscape is easier.</p>
-        <div class="controls">
-          <div><b>WASD</b> move</div><div><b>Shift</b> sprint</div>
-          <div><b>F</b> jump / swim up</div><div><b>Ctrl</b> / <b>C</b> crouch / dive</div>
-          <div><b>V</b> walk / jog toggle</div>
-          <div><b>Right mouse</b> aim pistols / show throw arc</div><div><b>Space</b> fire / throw</div>
-          <div><b>Space hold / release</b> sniper aim / shot</div><div><b>Shift</b> (scoped) hold breath</div>
-          <div><b>1 2 3</b>, <b>wheel</b>, <b>Q</b> switch weapon</div><div><b>R</b> reload</div>
-          <div><b>T</b> (hold) fast-forward time</div><div><b>Enter</b> restart round</div>
-          <div><b>F3</b> stats</div><div><b>Esc</b> menu</div>
-        </div>
-      </div>
-    </div>
-
-    <div id="error" class="hidden"></div>
-    <script>
-      (function () {
-        const q = new URLSearchParams(location.search);
-        const soloBtn = document.getElementById('mode-solo');
-        const multiBtn = document.getElementById('mode-multi');
-        const hint = document.getElementById('modehint');
-        const roomRow = document.getElementById('roomrow');
-        const code = document.getElementById('roomcode');
-        const share = document.getElementById('roomshare');
-        const multi = q.get('mode') !== 'solo' && (q.get('mode') === 'multi' || !!q.get('room') || localStorage.getItem('relic-mode') === 'multi');
-        const room = (q.get('room') || localStorage.getItem('relic-room') || 'lobby').slice(0, 16);
-        soloBtn.classList.toggle('on', !multi);
-        multiBtn.classList.toggle('on', multi);
-        roomRow.classList.toggle('hidden', !multi);
-        hint.textContent = multi
-          ? 'First player in the room sets the map, time, and min players. Everyone else joins.'
-          : 'You against Jev-driven rivals. Last one standing wins.';
-        code.value = room;
-        const url = new URL(location.href);
-        if (multi) {
-          url.searchParams.set('mode', 'multi');
-          if (room && room !== 'lobby') url.searchParams.set('room', room);
-          share.textContent = 'Share ' + url.origin + url.search;
-        }
-        const go = (next) => {
-          localStorage.setItem('relic-mode', next);
-          const dest = new URL(location.href);
-          if (next === 'multi') {
-            dest.searchParams.set('mode', 'multi');
-            const r = (code.value || 'lobby').trim().slice(0, 16) || 'lobby';
-            localStorage.setItem('relic-room', r);
-            if (r !== 'lobby') dest.searchParams.set('room', r);
-            else dest.searchParams.delete('room');
-          } else {
-            dest.searchParams.delete('mode');
-            dest.searchParams.delete('room');
-          }
-          location.assign(dest);
-        };
-        soloBtn.onclick = () => go('solo');
-        multiBtn.onclick = () => go('multi');
-        code.onchange = () => { if (multi) go('multi'); };
-      })();
-    </script>
-    <script type="module" src="/src/main.js"></script>
+    <main>
+      <p class="kicker">justTesting7</p>
+      <h1>Games</h1>
+      <p class="sub">Pick a title. More rooms will land here.</p>
+      <a class="game" href="/shootout/">
+        <strong>Shootout</strong>
+        <span>Third-person fight · Relic Isle, Midtown, the Garden, Dizengoff Square</span>
+      </a>
+    </main>
   </body>
 </html>

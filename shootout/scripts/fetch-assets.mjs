@@ -1,4 +1,4 @@
-// Downloads third-party assets into public/assets/vendor (not committed).
+// Downloads third-party assets into shootout/public/assets/vendor (not committed).
 //  - Poly Haven textures and models: CC0 (https://polyhaven.com/license)
 //  - Ready Player Me avatar + animations: Ready Player Me Animation Library
 //    license, which permits use with Ready Player Me avatars but not
@@ -117,7 +117,7 @@ async function main() {
     console.log('[assets] already downloaded');
     return;
   }
-  console.log('[assets] fetching third-party assets into public/assets/vendor ...');
+  console.log('[assets] fetching third-party assets into shootout/public/assets/vendor ...');
   const tasks = [];
 
   for (const [key, id] of Object.entries(PH_TEXTURES)) {

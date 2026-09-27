@@ -1,7 +1,7 @@
 import { GRID_N } from './constants.js';
 
 /** Drop a Blender glTF Binary on top of this path to replace the default room. */
-export const STUDIO_GLB = '/assets/maps/custom.glb';
+export const STUDIO_GLB = `${import.meta.env?.BASE_URL || '/shootout/'}assets/maps/custom.glb`;
 export const STUDIO_TARGET_SPAN = 32;
 
 /**
