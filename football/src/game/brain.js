@@ -118,6 +118,8 @@ export class Brain {
     if (!p.holding && best?.kind === 'shoot') hold = 0.06;
     else if (!p.holding && (best?.combo || (passing && best.gain > 1))) hold = 0.04;
     else if (!p.holding && passing) hold = 0.08;
+    // Leave room for a Jev reply. The answer releases the touch as soon as it lands.
+    if (this.jev) hold = Math.max(hold, 0.6);
     const d = { at: m.time + hold, choice: best, list, source: 'local', confidence: 0, epoch: m.time, player: p };
     this.decisions.set(p, d);
     this.ask(p, d, list);
@@ -230,16 +232,18 @@ export class Brain {
       if (!cur || cur.epoch !== epoch || m.owner !== p && !cur.restart) return;
       const a = ans?.action;
       const opt = a && list.find((o) => o.id === a.choice);
-      if (!opt) return;
-      this.stats.answered++;
-      const conf = a.confidence ?? 0.5;
-      const localVal = cur.choice?.value ?? -1;
-      if (conf >= 0.3 || opt.value > localVal - 0.3) {
-        if (opt !== cur.choice) this.stats.overrides++;
-        cur.choice = opt;
-        cur.source = 'jev';
-        cur.confidence = conf;
+      if (opt) {
+        this.stats.answered++;
+        const conf = a.confidence ?? 0.5;
+        const localVal = cur.choice?.value ?? -1;
+        if (conf >= 0.3 || opt.value > localVal - 0.3) {
+          if (opt !== cur.choice) this.stats.overrides++;
+          cur.choice = opt;
+          cur.source = 'jev';
+          cur.confidence = conf;
+        }
       }
+      cur.at = Math.min(cur.at, m.time);
     });
   }
 

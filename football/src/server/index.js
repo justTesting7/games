@@ -10,6 +10,15 @@ export default {
 
 async function proxyJev(request, env) {
   const key = env.JEV_API_KEY;
+  // Secrets stay on the worker they were set on. Relic Isle already has the key.
+  if (!key && env.SHOOTER) {
+    const body = await request.arrayBuffer();
+    return env.SHOOTER.fetch(new Request('https://relic-isle/api/jev', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body,
+    }));
+  }
   if (!key) return Response.json({ error: 'Jev key missing' }, { status: 503 });
   const res = await fetch(JEV, {
     method: 'POST',
