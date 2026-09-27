@@ -170,7 +170,7 @@ function readInput() {
   const nearLoose = !match.owner && h && h.pos.distanceTo(match.ball.pos) < 2.5;
   const input = {
     move,
-    sprint: k('ShiftLeft') || k('ShiftRight'),
+    sprint: k('KeyW'),
     pass: p('KeyS') && !defending && (match.owner?.team === match.humanTeam || nearLoose || match.state !== 'play'),
     through: p('KeyQ') && !defending,
     lob: p('KeyA') && !defending,
