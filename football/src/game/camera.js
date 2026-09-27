@@ -59,7 +59,10 @@ export class BroadcastCamera {
     this.mode = mode;
     this.modeT = 0;
     this.subject = subject;
-    this.cut = true;
+    // A goal stays on the broadcast picture for a second, so the ball is
+    // seen in the net before the cut to the celebration.
+    this.goalCut = mode === 'goal';
+    this.cut = mode !== 'goal';
   }
 
   update(dt, match) {
@@ -67,7 +70,10 @@ export class BroadcastCamera {
     const cam = this.camera;
     const ball = match.ball.pos;
     if (this.mode === 'intro') return this.intro(dt);
-    if (this.mode === 'goal' && this.subject && this.modeT < 4.6) return this.closeUp(dt, this.subject, match);
+    if (this.mode === 'goal' && this.subject && this.modeT >= 1 && this.modeT < 5.6) {
+      if (this.goalCut) { this.cut = true; this.goalCut = false; }
+      return this.closeUp(dt, this.subject, match);
+    }
     if (this.mode === 'fulltime') return this.intro(dt, true);
 
     const V = VIEWS[this.view];
@@ -139,7 +145,7 @@ export class BroadcastCamera {
     cam.lookAt(look);
     cam.fov = 34;
     cam.updateProjectionMatrix();
-    if (this.modeT > 4.5) { this.mode = 'play'; this.cut = true; }
+    if (this.modeT > 5.5) { this.mode = 'play'; this.cut = true; }
   }
 
   // Slow crane around the bowl before kick-off / after the final whistle.

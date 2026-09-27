@@ -254,7 +254,7 @@ export class Match {
       return this.events;
     }
     if (this.state === 'goal') {
-      if (this.stateT > 5.2) {
+      if (this.stateT > 6.2) {
         this.setupKickoff(this.kickoffTeam, true);
         this.state = 'kickoff';
         this.stateT = 0;
