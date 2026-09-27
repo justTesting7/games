@@ -30,20 +30,26 @@ export function teamShape(match, team) {
       const d = p.def;
       if (p.role === 'GK') { out.set(p, team.toWorld(-0.96, 0)); continue; }
       let x = d.x, z = d.z;
-      const push = attacking ? 0.36 + (m.counter ? 0.1 : 0) : 0.18;
-      x += bx * push + (attacking ? 0.16 : -0.04) + m.line / HL;
-      if (p.role === 'FWD') {
-        if (attacking) x = Math.max(x, bx - 0.05 + 0.12);
-        else if (bx > 0.5) x = Math.min(x, 0.46);
-        else x = Math.max(x, bx - 0.02);
+      if (attacking) {
+        // Higher than the ball, but close enough that a pass can still arrive.
+        // The station lifts a deep team into the opponent half; the cap stops
+        // the target being a point that runs away up the pitch.
+        x += bx * 0.4 + 0.1 + m.line / HL;
+        const wide = d.pos === 'LM' || d.pos === 'RM';
+        const full = d.pos === 'LB' || d.pos === 'RB';
+        const lead = p.role === 'FWD' ? 0.14 : wide ? 0.06 : d.pos === 'CM' ? 0.0 : full ? -0.06 : -0.16;
+        const station = p.role === 'FWD' ? 0.2 : wide ? 0.08 : d.pos === 'CM' ? -0.02 : full ? -0.1 : -0.24;
+        const cap = bx + (p.role === 'DEF' ? 0.1 : 0.28);
+        const depth = Math.min(Math.max(bx + lead, station), cap);
+        x = clamp(Math.max(x, depth), -0.88, 0.9);
+      } else {
+        // Ball lost: sprint onto a compact line just goalside of it.
+        // Too deep and the next attack starts from the penalty box.
+        const drop = p.role === 'FWD' ? 0.02 : p.role === 'MID' ? 0.08 : (d.pos === 'LB' || d.pos === 'RB' ? 0.12 : 0.18);
+        x = clamp(bx - drop, -0.88, Math.min(offsideLine(match, team), bx - 0.01));
       }
-      if (p.role === 'DEF') x = Math.min(x, bx - 0.12);
-      // Slide across with the ball; wide players tuck in when it's far side.
-      const width = (attacking ? 1.08 : 0.78) * m.width;
-      z = z * width + bz * (attacking ? 0.2 : 0.34);
-      if (m.counter && !attacking && p.role === 'FWD') x = Math.max(x, -0.05);
-      // Hold the offside line: nobody ahead of the last defender unless moving.
-      x = clamp(x, -0.9, offsideLine(match, team) - 0.01);
+      const width = (attacking ? 1.18 : 0.7) * m.width;
+      z = z * width + bz * (attacking ? 0.08 : 0.3);
       z = clamp(z, -0.94, 0.94);
       out.set(p, team.toWorld(x, z));
     }
@@ -115,7 +121,8 @@ export function defendTargets(match, team, shape) {
       const cover = byDist[1];
       if (cover) {
         const cp = carrier.pos.clone().addScaledVector(toGoal, 6);
-        out.set(cover, { point: cp, speed: cover.maxSpeed * 0.8, press: cover.pos.distanceTo(carrier.pos) < 2.2 });
+        const caught = cover.pos.x * team.dir > carrier.pos.x * team.dir + 2;
+        out.set(cover, { point: cp, speed: caught ? cover.maxSpeed : cover.maxSpeed * 0.85, press: cover.pos.distanceTo(carrier.pos) < 2.2 });
         assigned.add(cover);
       }
     }
@@ -133,23 +140,32 @@ export function defendTargets(match, team, shape) {
         const d = o.pos.distanceTo(home);
         if (d < 14 && d < bs) { bs = d; best = o; }
       }
-      if (best && (p.role === 'DEF' || best.pos.distanceTo(goal) < 40)) {
+      const ballX = carrier.pos.x * team.dir;
+      const px = p.pos.x * team.dir;
+      // Still ahead of the ball: forget the man and sprint back onto the line.
+      const recovering = px > ballX - 1;
+      if (best && !recovering && (p.role === 'DEF' || best.pos.distanceTo(goal) < 40)) {
         taken.add(best);
         // Goal side and ball side of the man.
         const side = _v.subVectors(goal, best.pos).setY(0).normalize().multiplyScalar(1.6);
         const bsd = new THREE.Vector3().subVectors(carrier.pos, best.pos).setY(0).normalize().multiplyScalar(0.8);
-        const pt = best.pos.clone().add(side).add(bsd).lerp(home, p.role === 'DEF' ? 0.25 : 0.45);
-        out.set(p, { point: pt, speed: pt.distanceTo(p.pos) > 5 ? 6.4 : 4.5, press: pt.distanceTo(carrier.pos) < 2 });
-      } else out.set(p, { point: home, speed: home.distanceTo(p.pos) > 6 ? 6 : 4, press: false });
+        const pt = best.pos.clone().add(side).add(bsd).lerp(home, p.role === 'DEF' ? 0.35 : 0.55);
+        if (pt.x * team.dir > home.x * team.dir) pt.x = home.x;
+        const speed = px > ballX - 4 || pt.distanceTo(p.pos) > 7 ? p.maxSpeed : 5;
+        out.set(p, { point: pt, speed, press: pt.distanceTo(carrier.pos) < 2 });
+      } else {
+        const pt = home.clone();
+        const speed = recovering || pt.distanceTo(p.pos) > 5 ? p.maxSpeed : 4.8;
+        out.set(p, { point: pt, speed, press: false });
+      }
     }
     return out;
   });
 }
 
-// In possession the side keeps a readable shape: one striker times a run,
-// the other comes short, the two central midfielders offer either side,
-// and everyone else jogs on their formation side. Targets move continuously
-// so players don't twitch off a blocker every frame.
+// In possession everyone runs onto the high line from teamShape, then jogs
+// once they get there so a pass can reach them. One striker times a run
+// beyond that line; the rest hold width.
 export function supportTargets(match, team, shape) {
   return cached(match, team, 'support', () => {
     const out = new Map();
@@ -157,70 +173,31 @@ export function supportTargets(match, team, shape) {
     const ourPass = match.pass?.team === team ? match.pass : null;
     const c = carrier || ourPass?.from;
     if (!c) return out;
-    const anchor = carrier ? carrier.pos : (ourPass?.target || match.ball.pos);
     const dir = team.dir;
-    const lineM = offsideLine(match, team) * HL;
-    const ax = anchor.x * dir;
-    const inOppHalf = ax > -8;
-    const inFinal = ax > HL * 0.02;
     const mates = team.players.filter((p) => p !== c && p !== ourPass?.to && p.role !== 'GK' && !p.busy);
     const sts = mates.filter((p) => p.slot === 'ST').sort((a, b) => b.def.x - a.def.x);
-    const runner = inOppHalf ? sts[0] : null;
-    const outlet = runner ? sts[1] : sts[0];
-    // A slow pulse takes the striker a few metres in behind and back again,
-    // so the run is timed instead of a target that jumps across the box.
-    const pulse = inFinal && runner ? Math.max(0, Math.sin(match.time * 0.62 + team.index * 1.7)) : 0;
+    const runner = sts[0] || null;
+    // A slow pulse, used only once the striker has reached the line.
+    const pulse = runner ? Math.max(0, Math.sin(match.time * 0.55 + team.index * 1.7)) : 0;
 
     for (const p of mates) {
       const home = shape.get(p);
-      const side = Math.sign(home.z) || 1;
-      let pt;
-      let hurry = false;
-      if (p === runner) {
-        const extra = pulse * 6.5;
-        const runX = Math.min(lineM - 0.9 + extra, HL - 9);
-        pt = new THREE.Vector3(runX * dir, 0, clamp(home.z * 0.85 + anchor.z * 0.08, -16, 16));
-        p.run = extra > 3.2 ? { t: match.time } : null;
-        hurry = extra > 2.2;
-      } else if (p === outlet) {
-        p.run = null;
-        const depth = Math.min(ax + 13, lineM - 3.5);
-        pt = new THREE.Vector3(clamp(depth, -HL + 8, HL - 14) * dir, 0, clamp(home.z * 1.4 + anchor.z * 0.12, -14, 14));
-      } else if (p.slot === 'CM') {
-        p.run = null;
-        const ang = side * 0.85;
-        pt = new THREE.Vector3(
-          anchor.x + Math.cos(ang) * dir * 11,
-          0,
-          anchor.z + Math.sin(ang) * 11,
-        ).lerp(home, 0.32);
-      } else if (p.slot === 'LM' || p.slot === 'RM') {
-        p.run = null;
-        const ballSide = Math.sign(anchor.z || side) === side;
-        const depth = ballSide ? ax + 3 : ax + (inOppHalf ? 12 : 4);
-        pt = new THREE.Vector3(
-          clamp(Math.min(depth, lineM - 1.5), -HL + 6, HL - 8) * dir,
-          0,
-          side * (ballSide ? HW * 0.62 : HW * 0.78),
-        );
-        // Far winger attacks the space in front of him when the ball is central in their half.
-        hurry = !ballSide && inFinal;
-        if (hurry) p.run = { t: match.time };
-      } else if ((p.slot === 'LB' || p.slot === 'RB') && inOppHalf && Math.sign(anchor.z || side) === side) {
-        p.run = null;
-        // Overlap behind the winger, still a safe square ball.
-        pt = new THREE.Vector3(clamp(ax - 7, -HL + 4, HL - 16) * dir, 0, side * HW * 0.7);
-      } else {
-        p.run = null;
-        pt = home.clone();
-      }
-      if (pt.x * dir > lineM - 0.6 && p !== runner) pt.x = (lineM - 0.6) * dir;
+      const pt = home.clone();
+      const px = p.pos.x * dir;
+      const base = home.x * dir;
+      if (p === runner && px > base - 7) {
+        const burst = pulse * 6;
+        pt.x = Math.min(base + burst, HL - 8) * dir;
+        p.run = burst > 3 ? { t: match.time } : null;
+      } else p.run = null;
       pt.x = clamp(pt.x, -HL + 1.5, HL - 1.5);
       pt.z = clamp(pt.z, -HW + 1.5, HW - 1.5);
+      const short = pt.x * dir - px;
       const gap = pt.distanceTo(p.pos);
-      const speed = hurry
-        ? (gap > 2.5 ? p.maxSpeed * 0.9 : 4.8)
-        : gap > 14 ? 6.1 : gap > 4 ? 4.8 : 3.1;
+      // Sprint only while a long way short of the line, then jog onto the pass.
+      const speed = short > 8 || gap > 14
+        ? p.maxSpeed * 0.92
+        : gap > 4 ? 4.8 : 3.2;
       out.set(p, { point: pt, speed });
     }
     return out;
@@ -301,12 +278,14 @@ export function carrierOptions(match, p) {
       if (w.dist > 6 && w.dist < 17) v += 0.32;
       else if (w.dist > 28) v -= 0.35;
       if (q.role === 'GK') v -= 0.75;
+      if (gain > 5) v += 0.24;
       if (attThird && gain > 6) v += 0.28;
-      if (gain < -8 && pr.dist > 5) v -= 0.4;
+      if (gain < -4 && pr.dist > 3.5) v -= 0.35;
       const inBox = Math.abs(w.spot.x - goal.x) < 18 && Math.abs(w.spot.z) < 18;
       if (inBox && gain > 0) v += 0.45;
       if (q.run && w.margin > 0.18) v += 0.15;
-      if (spinning) v -= 0.7;
+      // Still sprinting away from the passer: the ball arrives at empty feet.
+      if (spinning) v = -1;
     }
     const kind = w.margin < 0.12 && open > 0.6 && d > 16 && gain > 2 && !spinning ? 'lob' : 'pass';
     if (kind === 'lob') v = open * 0.55 + clamp(gain / 32, 0, 0.3) + (attThird ? 0.1 : 0) - 0.2;
@@ -332,6 +311,7 @@ export function carrierOptions(match, p) {
   const fwd = new THREE.Vector3().subVectors(goal, p.pos).setY(0).normalize();
   const space = spaceAhead(match, p, fwd);
   let dribbleValue = clamp(space / 14, 0, 1) * 0.55 + p.def.pace * 0.12 - (pr.dist < 2 ? 0.35 : 0);
+  if (space > 6 && pr.dist > 2.5) dribbleValue += 0.28;
   if (distGoal < 24 && space > 9 && blockers === 0) dribbleValue += 0.25;
   opts.push({ id: 'dribble', kind: 'dribble', dir: fwd, value: dribbleValue, text: `dribble forward toward goal (${space > 10 ? 'lots of space ahead' : space > 5 ? 'some space ahead' : 'crowded ahead'})` });
   const inOwnThird = p.pos.x * T.dir < -HL * 0.45;

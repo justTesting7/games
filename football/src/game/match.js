@@ -601,7 +601,8 @@ export class Match {
     }
     p.target.copy(shape.get(p));
     const dist = p.pos.distanceTo(p.target);
-    p.targetSpeed = dist > 12 ? 6.2 : dist > 4 ? 4.8 : 2.6;
+    const caughtUp = !mine && p.pos.x * T.dir > ball.pos.x * T.dir + 2;
+    p.targetSpeed = caughtUp ? p.maxSpeed : dist > 12 ? 6.4 : dist > 4 ? 5 : 3.2;
   }
 
   humanMove(p, input, dt) {
@@ -1225,8 +1226,11 @@ export class Match {
     if (use.waiting) {
       const pr = this.pressureOn(p);
       const dir = _v.set(0, 0, 0);
-      if (use.receiver) dir.subVectors(use.receiver.pos, p.pos).setY(0);
-      else if (use.dir) dir.copy(use.dir);
+      if (use.receiver) {
+        dir.subVectors(use.receiver.pos, p.pos).setY(0);
+        // A teammate behind him is a square option. He keeps facing the attack.
+        if (dir.x * T.dir < 0) dir.set(T.dir, 0, dir.z * 0.35);
+      } else if (use.dir) dir.copy(use.dir);
       else dir.set(T.dir, 0, 0);
       if (dir.lengthSq() < 1e-4) dir.set(T.dir, 0, 0);
       dir.normalize();

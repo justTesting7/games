@@ -132,7 +132,11 @@ export class Brain {
       if (p.holding && choice.kind === 'pass') return { kind: 'gkThrow', receiver: choice.receiver };
       // The window may have closed while he shaped to pass.
       if (choice.kind === 'pass') {
-        const w = passWindow(this.match, p.pos, choice.receiver);
+        const q = choice.receiver;
+        const dx = p.pos.x - q.pos.x, dz = p.pos.z - q.pos.z;
+        const coming = (q.vel.x * dx + q.vel.z * dz) / (Math.hypot(dx, dz) || 1);
+        if (q.speed > 6.2 && coming < 0.2) return null;
+        const w = passWindow(this.match, p.pos, q);
         if (w.margin < 0.06 || w.recvLate > 0.3) return null;
       } else if (choice.kind === 'through') {
         const w = throughWindow(this.match, p.pos, choice.receiver);
