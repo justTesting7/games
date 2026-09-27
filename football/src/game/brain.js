@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { PITCH } from '../world/dims.js';
-import { carrierOptions } from './ai.js';
+import { carrierOptions, passWindow, throughWindow } from './ai.js';
 import { MENTALITY } from './match.js';
 
 const HL = PITCH.halfLength, HW = PITCH.halfWidth;
@@ -68,8 +68,10 @@ export class Brain {
   // Softmax-ish local pick so AI isn't perfectly predictable.
   pick(list) {
     if (!list.length) return null;
-    const top = list[0].value;
-    const pool = list.filter((o) => o.value > top - 0.25);
+    let src = list.filter((o) => o.value > 0.15);
+    if (!src.length) src = [list.find((o) => o.kind === 'dribble') || list[0]];
+    const top = src[0].value;
+    const pool = src.filter((o) => o.value > top - 0.08);
     const w = pool.map((o) => Math.exp((o.value - top) * 6));
     let r = this.rnd() * w.reduce((a, b) => a + b, 0);
     for (let i = 0; i < pool.length; i++) { r -= w[i]; if (r <= 0) return pool[i]; }
@@ -84,7 +86,12 @@ export class Brain {
       best = this.pick(list);
     }
     const pr = m.pressureOn(p).dist;
-    const hold = p.holding ? 1.2 + this.rnd() * 0.6 : pr < 1.8 ? 0.12 : pr < 4 ? 0.35 + this.rnd() * 0.3 : 0.7 + this.rnd() * 0.7;
+    // A tackle on top of him is released at once. A simple pass is one touch.
+    // Anything else gets a look up so a teammate can arrive.
+    let hold = p.holding ? 1.2 + this.rnd() * 0.6 : pr < 1.15 ? 0.08 : pr < 3.5 ? 0.42 + this.rnd() * 0.2 : 0.6 + this.rnd() * 0.3;
+    if (!p.holding && best?.kind === 'shoot') hold = pr < 2.5 ? 0.1 : 0.2;
+    else if (!p.holding && best?.kind === 'pass' && best.dist < 17 && pr > 2) hold = 0.16 + this.rnd() * 0.1;
+    else if (!p.holding && best?.kind === 'through') hold = 0.26 + this.rnd() * 0.1;
     const d = { at: m.time + hold, choice: best, list, source: 'local', confidence: 0, epoch: m.time, player: p };
     this.decisions.set(p, d);
     this.ask(p, d, list);
@@ -100,16 +107,21 @@ export class Brain {
     if (d.choice?.kind === 'dribble' || d.choice?.kind === 'shield') {
       if (m.time >= d.at) {
         const pr = m.pressureOn(p).dist;
-        const until = d.dribbleUntil ?? (d.dribbleUntil = m.time + (pr < 3 ? 0.5 : 1.1 + this.rnd() * 0.6));
+        const until = d.dribbleUntil ?? (d.dribbleUntil = m.time + (pr < 2.4 ? 0.28 : 0.85 + this.rnd() * 0.35));
         if (m.time >= until) { this.decisions.delete(p); d = this.decide(p); }
       }
       return this.resolve(p, d.choice) || { kind: 'dribble' };
     }
     // Emergency: an opponent is about to take it.
     if (m.pressureOn(p).dist < 1.1 && m.time > d.epoch + 0.08) d.at = Math.min(d.at, m.time);
-    if (m.time < d.at) return { kind: 'dribble', dir: d.choice?.dir, waiting: true };
+    if (m.time < d.at) return { kind: 'dribble', dir: d.choice?.dir, receiver: d.choice?.receiver, waiting: true };
     const plan = this.resolve(p, d.choice);
-    return plan || { kind: 'dribble' };
+    if (!plan) {
+      // That pass had closed. Think again instead of forcing it.
+      this.decisions.delete(p);
+      return { kind: 'dribble' };
+    }
+    return plan;
   }
 
   // Refresh option parameters (receiver may have moved), drop stale ones.
@@ -118,6 +130,14 @@ export class Brain {
     if (choice.kind === 'pass' || choice.kind === 'through' || choice.kind === 'lob') {
       if (!choice.receiver || choice.receiver.busy) return null;
       if (p.holding && choice.kind === 'pass') return { kind: 'gkThrow', receiver: choice.receiver };
+      // The window may have closed while he shaped to pass.
+      if (choice.kind === 'pass') {
+        const w = passWindow(this.match, p.pos, choice.receiver);
+        if (w.margin < 0.06 || w.recvLate > 0.3) return null;
+      } else if (choice.kind === 'through') {
+        const w = throughWindow(this.match, p.pos, choice.receiver);
+        if (w.margin < 0.08 || w.recvLate > 0.35) return null;
+      }
       return { kind: choice.kind, receiver: choice.receiver };
     }
     if (p.holding && choice.kind !== 'lob' && choice.kind !== 'pass') {

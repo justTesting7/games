@@ -4,7 +4,7 @@ import { PITCH, GOAL, BALL_RADIUS } from '../world/dims.js';
 import { KICKOFF, KICKOFF_DEFEND, squad, CLUBS } from './teams.js';
 import { groundPass, loftedPass, shotVelocity, leadTarget, gauss } from './kicks.js';
 import { ACTION_DUR, KICK } from './actions.js';
-import { teamShape, chooseChasers, defendTargets, supportTargets, keeperTarget, carrierOptions, laneOpen } from './ai.js';
+import { teamShape, chooseChasers, defendTargets, supportTargets, keeperTarget, carrierOptions, laneOpen, passWindow, throughWindow } from './ai.js';
 
 const HL = PITCH.halfLength, HW = PITCH.halfWidth, R = BALL_RADIUS;
 const GOAL_LINE = HL - PITCH.line * 0.5;
@@ -494,7 +494,11 @@ export class Match {
 
   setPieceTargets(p, shape) {
     const r = this.restart;
-    if (r?.taker === p) { p.targetSpeed = p.pos.distanceTo(p.target) > 6 ? 6.5 : 3.5; return; }
+    if (r?.taker === p) {
+      const d = p.pos.distanceTo(p.target);
+      p.targetSpeed = d > 1.4 ? p.maxSpeed : 3.2;
+      return;
+    }
     const s = shape.get(p);
     p.target.copy(s);
     p.targetSpeed = 5;
@@ -533,9 +537,30 @@ export class Match {
     if (p === this.owner) { this.carrierAI(p, dt); return; }
     // A pass names its receiver. That player (whoever he is) goes to the ball.
     if (this.pass && this.pass.to === p && !this.owner) {
-      const dest = this.pass.kind === 'pass' ? ball.pos : (this.receptionPoint(p) || ball.pos);
-      p.target.copy(dest).setY(0);
-      p.targetSpeed = p.maxSpeed;
+      const pass = this.pass;
+      const spot = (pass.target || ball.pos).clone().setY(0);
+      const toBall = p.pos.distanceTo(ball.pos);
+      const toSpot = p.pos.distanceTo(spot);
+      const sx = spot.x - ball.pos.x, sz = spot.z - ball.pos.z;
+      const closing = ball.vel.x * sx + ball.vel.z * sz;
+      // Chase only once the ball has missed the spot. Until then, go and wait.
+      const missed = ball.pos.distanceTo(spot) > 5 && closing < -2;
+      if (pass.kind === 'through' || pass.kind === 'lob' || pass.kind === 'cross') {
+        const dest = this.receptionPoint(p) || spot;
+        const gap = dest.distanceTo(p.pos);
+        p.target.copy(dest).setY(0);
+        p.targetSpeed = gap > 3 ? p.maxSpeed : Math.max(3.2, gap * 2.2);
+      } else if (missed || toBall < 8) {
+        // Onto the ball once it's near, or chase it if the pass has missed the spot.
+        p.target.copy(ball.pos).setY(0);
+        p.targetSpeed = p.maxSpeed;
+      } else if (toSpot < 1.15) {
+        p.target.copy(spot);
+        p.targetSpeed = 1.8;
+      } else {
+        p.target.copy(spot);
+        p.targetSpeed = toSpot > 5 ? p.maxSpeed * 0.92 : 5;
+      }
       p.face = ball.pos;
       this.tryHeader(p);
       return;
@@ -544,7 +569,8 @@ export class Match {
     const chase = this.chasers.get(p);
     const mine = this.owner?.team === T;
     const theirs = this.owner && !mine;
-    if (!this.owner && chase?.lead) {
+    const ourPass = this.pass && this.pass.team === T && !this.owner;
+    if (!this.owner && chase?.lead && !ourPass) {
       p.target.copy(chase.point).setY(0);
       p.targetSpeed = p.maxSpeed;
       if (chase.t < 0.35) p.face = ball.pos;
@@ -558,13 +584,20 @@ export class Match {
         p.target.copy(job.point);
         p.targetSpeed = job.speed;
         if (job.press) this.maybeTackle(p, dt);
+        else if (job.speed < 5) p.face = ball.pos;
         return;
       }
     }
-    if (mine) {
+    if (mine || ourPass) {
       const s = supportTargets(this, T, shape);
       const job = s.get(p);
-      if (job) { p.target.copy(job.point); p.targetSpeed = job.speed; return; }
+      if (job) {
+        p.target.copy(job.point);
+        p.targetSpeed = job.speed;
+        if (job.speed < 4.2) p.face = ball.pos;
+        else p.face = null;
+        return;
+      }
     }
     p.target.copy(shape.get(p));
     const dist = p.pos.distanceTo(p.target);
@@ -765,7 +798,7 @@ export class Match {
     p.buffered = p.buffered && this.time - p.buffered.t < 0.45 ? p.buffered : null;
     if (this.pass) {
       const T = this.pass.team;
-      if (T === p.team) { T.stats.completed++; }
+      if (T === p.team) T.stats.completed++;
       if (this.pass.to) this.pass.to.incoming = null;
       this.pass = null;
     }
@@ -788,8 +821,10 @@ export class Match {
       const dTouch = Math.hypot(ball.pos.x - tp.x, ball.pos.z - tp.z);
       const dBody = Math.hypot(ball.pos.x - p.pos.x, ball.pos.z - p.pos.z);
       const d = Math.min(dTouch, dBody);
-      const reach = keeperHands ? 1.15 : ball.pos.y > 0.75 ? 0.55 : 0.62 + Math.min(0.25, p.speed * 0.03) + (p === this.human ? 0.35 : 0);
-      if (d < reach && d < bd) { bd = d; best = p; bestClean = dBody < 0.55 || dTouch < 0.45; }
+      const named = this.pass?.to === p && this.pass.team === p.team;
+      const reach = keeperHands ? 1.15 : ball.pos.y > 0.75 ? 0.55 : 0.62 + Math.min(0.25, p.speed * 0.03) + (p === this.human ? 0.35 : 0) + (named ? 0.5 : 0);
+      const rank = d - (named ? 0.4 : 0);
+      if (d < reach && rank < bd) { bd = rank; best = p; bestClean = dBody < 0.55 || dTouch < 0.45 || named; }
     }
     if (!best) return;
     const rel = _w.subVectors(ball.vel, best.vel);
@@ -1012,19 +1047,18 @@ export class Match {
       let target;
       let arrive;
       if (kind === 'through') {
-        const run = q.vel.lengthSq() > 4 ? q.vel.clone().normalize() : T.attackGoal.clone().sub(q.pos).setY(0).normalize();
-        target = q.pos.clone().addScaledVector(run, 7 + q.speed * 0.6).setY(R);
-        arrive = 2.5;
+        const w = throughWindow(this, from, q);
+        target = w.spot;
+        arrive = w.arrive;
       } else {
-        // A pass is played to that player. Inside a quarter of the pitch it
-        // is driven hard enough to reach him with pace.
-        const dist = Math.max(1, from.distanceTo(q.pos));
-        target = q.pos.clone().addScaledVector(q.vel, dist <= HL / 2 ? 0.18 : 0.3).setY(R);
-        arrive = dist <= HL / 2 + 3 ? Math.min(14, 8.5 + dist * 0.18) : Math.min(12, 6 + dist * 0.1);
+        // Same spot and pace the decision scored, so he can wait on it.
+        const w = passWindow(this, from, q);
+        target = w.spot;
+        arrive = w.arrive;
       }
       target.x = THREE.MathUtils.clamp(target.x, -HL + 1, HL - 1);
       target.z = THREE.MathUtils.clamp(target.z, -HW + 1, HW - 1);
-      const err = (0.028 + (1 - p.def.passing) * 0.05) * errScale;
+      const err = (0.028 + (1 - p.def.passing) * 0.05) * errScale * (kind === 'pass' ? 0.55 : 1);
       spec.velocity = () => groundPass(ball.pos, target, { error: err, rnd: this.rnd, arrive });
       spec.receiver = q;
       spec.target = target;
@@ -1188,6 +1222,22 @@ export class Match {
     if (p.pendingKick) { p.target.copy(p.pos).addScaledVector(p.forward(_v), 1); p.targetSpeed = 1.5; return; }
     const plan = this.brain ? this.brain.planFor(p) : null;
     const use = plan || p.plan || this.localPlan(p);
+    if (use.waiting) {
+      const pr = this.pressureOn(p);
+      const dir = _v.set(0, 0, 0);
+      if (use.receiver) dir.subVectors(use.receiver.pos, p.pos).setY(0);
+      else if (use.dir) dir.copy(use.dir);
+      else dir.set(T.dir, 0, 0);
+      if (dir.lengthSq() < 1e-4) dir.set(T.dir, 0, 0);
+      dir.normalize();
+      p.intent.copy(dir);
+      p.face = use.receiver ? use.receiver.pos : this.ball.pos;
+      p.target.copy(p.pos).addScaledVector(dir, pr.dist < 2.2 ? 2.2 : 1.15);
+      p.target.x = THREE.MathUtils.clamp(p.target.x, -HL + 1, HL - 1);
+      p.target.z = THREE.MathUtils.clamp(p.target.z, -HW + 1.5, HW - 1.5);
+      p.targetSpeed = pr.dist < 2 ? 4 : 2.1;
+      return;
+    }
     if (use.kind === 'dribble' || use.kind === 'shield') {
       const dir = use.dir || T.attackGoal.clone().sub(p.pos).setY(0).normalize();
       const pr = this.pressureOn(p);

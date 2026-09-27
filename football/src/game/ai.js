@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { PITCH, GOAL } from '../world/dims.js';
-import { groundPassSpeed } from './ball.js';
+import { groundPassSpeed, rollTime } from './ball.js';
 
 const HL = PITCH.halfLength, HW = PITCH.halfWidth;
 const clamp = THREE.MathUtils.clamp;
@@ -32,7 +32,11 @@ export function teamShape(match, team) {
       let x = d.x, z = d.z;
       const push = attacking ? 0.36 + (m.counter ? 0.1 : 0) : 0.18;
       x += bx * push + (attacking ? 0.16 : -0.04) + m.line / HL;
-      if (p.role === 'FWD') x = Math.max(x, bx - 0.05 + (attacking ? 0.12 : 0));
+      if (p.role === 'FWD') {
+        if (attacking) x = Math.max(x, bx - 0.05 + 0.12);
+        else if (bx > 0.5) x = Math.min(x, 0.46);
+        else x = Math.max(x, bx - 0.02);
+      }
       if (p.role === 'DEF') x = Math.min(x, bx - 0.12);
       // Slide across with the ball; wide players tuck in when it's far side.
       const width = (attacking ? 1.08 : 0.78) * m.width;
@@ -142,56 +146,82 @@ export function defendTargets(match, team, shape) {
   });
 }
 
-// In possession: offer angles near the carrier and run in behind.
+// In possession the side keeps a readable shape: one striker times a run,
+// the other comes short, the two central midfielders offer either side,
+// and everyone else jogs on their formation side. Targets move continuously
+// so players don't twitch off a blocker every frame.
 export function supportTargets(match, team, shape) {
   return cached(match, team, 'support', () => {
     const out = new Map();
-    const c = match.owner || match.pass?.from;
+    const carrier = match.owner?.team === team ? match.owner : null;
+    const ourPass = match.pass?.team === team ? match.pass : null;
+    const c = carrier || ourPass?.from;
     if (!c) return out;
-    const goal = team.attackGoal;
-    const line = offsideLine(match, team) * HL; // team frame metres
-    const t = match.time;
-    for (const p of team.players) {
-      if (p === c || p.role === 'GK' || p.busy) continue;
+    const anchor = carrier ? carrier.pos : (ourPass?.target || match.ball.pos);
+    const dir = team.dir;
+    const lineM = offsideLine(match, team) * HL;
+    const ax = anchor.x * dir;
+    const inOppHalf = ax > -8;
+    const inFinal = ax > HL * 0.02;
+    const mates = team.players.filter((p) => p !== c && p !== ourPass?.to && p.role !== 'GK' && !p.busy);
+    const sts = mates.filter((p) => p.slot === 'ST').sort((a, b) => b.def.x - a.def.x);
+    const runner = inOppHalf ? sts[0] : null;
+    const outlet = runner ? sts[1] : sts[0];
+    // A slow pulse takes the striker a few metres in behind and back again,
+    // so the run is timed instead of a target that jumps across the box.
+    const pulse = inFinal && runner ? Math.max(0, Math.sin(match.time * 0.62 + team.index * 1.7)) : 0;
+
+    for (const p of mates) {
       const home = shape.get(p);
-      const pt = home.clone();
-      const rel = _v.subVectors(p.pos, c.pos);
-      const dist = rel.length();
-      // Runs in behind: forwards and wide men peel off on a timer.
-      const phase = (t * 0.23 + p.index * 0.37) % 1;
-      const carrierX = c.pos.x * team.dir;
-      const inRun = (p.role === 'FWD' || p.pos === 'LM' || p.pos === 'RM' || p.index === 6 && phase > 0.8) && phase > 0.55 && carrierX > -HL * 0.4;
-      if (inRun) {
-        const runX = Math.min(line + 8 + phase * 6, HL - 6);
-        pt.x = runX * team.dir;
-        pt.z = clamp(home.z * 0.8, -HW + 3, HW - 3);
-        p.run = { t };
-        out.set(p, { point: pt, speed: p.maxSpeed * 0.95 });
-        continue;
+      const side = Math.sign(home.z) || 1;
+      let pt;
+      let hurry = false;
+      if (p === runner) {
+        const extra = pulse * 6.5;
+        const runX = Math.min(lineM - 0.9 + extra, HL - 9);
+        pt = new THREE.Vector3(runX * dir, 0, clamp(home.z * 0.85 + anchor.z * 0.08, -16, 16));
+        p.run = extra > 3.2 ? { t: match.time } : null;
+        hurry = extra > 2.2;
+      } else if (p === outlet) {
+        p.run = null;
+        const depth = Math.min(ax + 13, lineM - 3.5);
+        pt = new THREE.Vector3(clamp(depth, -HL + 8, HL - 14) * dir, 0, clamp(home.z * 1.4 + anchor.z * 0.12, -14, 14));
+      } else if (p.slot === 'CM') {
+        p.run = null;
+        const ang = side * 0.85;
+        pt = new THREE.Vector3(
+          anchor.x + Math.cos(ang) * dir * 11,
+          0,
+          anchor.z + Math.sin(ang) * 11,
+        ).lerp(home, 0.32);
+      } else if (p.slot === 'LM' || p.slot === 'RM') {
+        p.run = null;
+        const ballSide = Math.sign(anchor.z || side) === side;
+        const depth = ballSide ? ax + 3 : ax + (inOppHalf ? 12 : 4);
+        pt = new THREE.Vector3(
+          clamp(Math.min(depth, lineM - 1.5), -HL + 6, HL - 8) * dir,
+          0,
+          side * (ballSide ? HW * 0.62 : HW * 0.78),
+        );
+        // Far winger attacks the space in front of him when the ball is central in their half.
+        hurry = !ballSide && inFinal;
+        if (hurry) p.run = { t: match.time };
+      } else if ((p.slot === 'LB' || p.slot === 'RB') && inOppHalf && Math.sign(anchor.z || side) === side) {
+        p.run = null;
+        // Overlap behind the winger, still a safe square ball.
+        pt = new THREE.Vector3(clamp(ax - 7, -HL + 4, HL - 16) * dir, 0, side * HW * 0.7);
+      } else {
+        p.run = null;
+        pt = home.clone();
       }
-      p.run = null;
-      // Offer a short angle when the carrier is under pressure.
-      if (dist < 22 && (p.role === 'MID' || p.role === 'DEF')) {
-        const pressure = match.pressureOn(c).dist < 3;
-        if (pressure && dist < 16) {
-          const ang = Math.atan2(rel.z, rel.x);
-          pt.set(c.pos.x + Math.cos(ang) * 11, 0, c.pos.z + Math.sin(ang) * 11);
-        }
-      }
-      // Stay onside unless on a timed run.
-      const px = pt.x * team.dir;
-      if (px > line - 0.5) pt.x = (line - 0.8) * team.dir;
-      // Avoid standing in a passing shadow: nudge away from the nearest opponent.
-      let near = null, nd = 4;
-      for (const o of team.opp.players) {
-        const d = o.pos.distanceTo(pt);
-        if (d < nd) { nd = d; near = o; }
-      }
-      if (near) pt.addScaledVector(_v.subVectors(pt, near.pos).setY(0).normalize(), 4 - nd);
-      pt.x = clamp(pt.x, -HL + 2, HL - 2);
+      if (pt.x * dir > lineM - 0.6 && p !== runner) pt.x = (lineM - 0.6) * dir;
+      pt.x = clamp(pt.x, -HL + 1.5, HL - 1.5);
       pt.z = clamp(pt.z, -HW + 1.5, HW - 1.5);
-      if (goal.distanceTo(pt) < 6) pt.addScaledVector(_v.subVectors(pt, goal).setY(0).normalize(), 3);
-      out.set(p, { point: pt, speed: pt.distanceTo(p.pos) > 8 ? 6.5 : 4.2 });
+      const gap = pt.distanceTo(p.pos);
+      const speed = hurry
+        ? (gap > 2.5 ? p.maxSpeed * 0.9 : 4.8)
+        : gap > 14 ? 6.1 : gap > 4 ? 4.8 : 3.1;
+      out.set(p, { point: pt, speed });
     }
     return out;
   });
@@ -227,7 +257,7 @@ export function carrierOptions(match, p) {
   const distGoal = p.pos.distanceTo(goal);
   const pr = match.pressureOn(p);
   const ang = Math.abs(Math.atan2(p.pos.z, Math.abs(goal.x - p.pos.x)));
-  const inRange = distGoal < 28 && ang < 1.1;
+  const inRange = distGoal < 32 && ang < 1.2;
   const keeper = T.opp.keeper;
   // Shot quality: distance, angle, blockers in the cone.
   let blockers = 0;
@@ -243,34 +273,52 @@ export function carrierOptions(match, p) {
   }
   if (inRange) {
     const q = clamp(1.25 - distGoal / 24 - ang * 0.35 - blockers * 0.22 + p.def.shooting * 0.3, 0, 1);
-    opts.push({ id: 'shoot', kind: 'shoot', value: q * 1.3 + (distGoal < 13 ? 0.35 : 0), text: `shoot at goal from ${Math.round(distGoal)} m${blockers ? `, ${blockers} defender${blockers > 1 ? 's' : ''} in the way` : ', clear sight of goal'}` });
+    let value = q * 1.15 + (distGoal < 16 ? 0.35 : 0);
+    // A clear sight is the finish. It outranks another sideways pass.
+    if (distGoal < 22 && blockers === 0 && ang < 0.7) value = Math.max(value, 1.9);
+    else if (blockers === 0 && ang < 0.75 && distGoal < 24) value = Math.max(value, 1.9);
+    else if (blockers === 0 && ang < 0.55 && distGoal < 32) value = Math.max(value, 1.4);
+    else if (distGoal < 18 && blockers <= 1 && ang < 0.9) value = Math.max(value, 1.55);
+    else if (distGoal < 13 && blockers <= 2) value = Math.max(value, 1.35);
+    opts.push({ id: 'shoot', kind: 'shoot', value, text: `shoot at goal from ${Math.round(distGoal)} m${blockers ? `, ${blockers} defender${blockers > 1 ? 's' : ''} in the way` : ', clear sight of goal'}` });
   }
   const mates = T.players.filter((q) => q !== p && !q.busy);
   const passes = [];
+  const attThird = p.pos.x * T.dir > HL * 0.05;
   for (const q of mates) {
     const d = q.pos.distanceTo(p.pos);
-    if (d < 5 || d > 50) continue;
-    const lane = laneOpen(match, p.pos, q.pos);
+    if (d < 5 || d > 48) continue;
     const open = match.openness(q);
     const gain = (q.pos.x - p.pos.x) * T.dir;
-    const qGoal = q.pos.distanceTo(goal);
-    let v = lane * 1.1 - (lane < 0.3 ? 0.6 : 0) + open * 0.35 + clamp(gain / 30, -0.5, 0.6) + (qGoal < 25 ? 0.25 : 0) - (q.role === 'GK' ? 0.8 : 0) - d * 0.006;
-    const lofted = lane < 0.45 && d > 12;
-    if (lofted) {
-      // Defenders close in while the ball hangs in the air.
-      const flight = 0.6 + d / 20;
-      let md = Infinity;
-      for (const o of T.opp.players) md = Math.min(md, o.pos.distanceTo(q.pos));
-      const landing = clamp((md - 1.5 - flight * 2.5) / 5, 0, 1);
-      v = landing * 0.9 - 0.2 + clamp(gain / 30, -0.5, 0.6) + (qGoal < 25 ? 0.2 : 0) - d * 0.006 - (q.role === 'GK' ? 0.8 : 0);
+    const w = passWindow(match, p.pos, q);
+    const toward = _v.subVectors(p.pos, q.pos).setY(0);
+    const towardLen = toward.length() || 1;
+    const coming = q.vel.dot(toward) / towardLen;
+    const spinning = q.speed > 6.2 && coming < 0.2;
+    let v = -1;
+    if (w.margin >= 0.12 && w.recvLate < 0.25 && Number.isFinite(w.flight)) {
+      v = 0.32 + clamp(w.margin, 0, 0.7) * 1.05 + open * 0.32 + clamp(gain / 28, -0.2, 0.42);
+      if (w.dist > 6 && w.dist < 17) v += 0.32;
+      else if (w.dist > 28) v -= 0.35;
+      if (q.role === 'GK') v -= 0.75;
+      if (attThird && gain > 6) v += 0.28;
+      if (gain < -8 && pr.dist > 5) v -= 0.4;
+      const inBox = Math.abs(w.spot.x - goal.x) < 18 && Math.abs(w.spot.z) < 18;
+      if (inBox && gain > 0) v += 0.45;
+      if (q.run && w.margin > 0.18) v += 0.15;
+      if (spinning) v -= 0.7;
     }
-    passes.push({ id: `pass_${q.number}`, kind: lofted ? 'lob' : 'pass', receiver: q, value: v * 0.9, text: `${lofted ? 'chip a lofted ball' : 'pass'} to ${q.name} (#${q.number}, ${q.slot}), ${Math.round(d)} m ${gain > 4 ? 'forward' : gain < -4 ? 'back' : 'square'}, ${open > 0.6 ? 'unmarked' : open > 0.25 ? 'loosely marked' : 'tightly marked'}` });
-    if (q.run && gain > 6) {
-      const runDir = q.vel.lengthSq() > 4 ? q.vel.clone().setY(0).normalize() : new THREE.Vector3().subVectors(goal, q.pos).setY(0).normalize();
-      const spot = q.pos.clone().addScaledVector(runDir, 7 + q.speed * 0.6);
-      const tl = laneOpen(match, p.pos, spot);
-      const tv = tl * 0.9 - (tl < 0.3 ? 0.5 : 0) + open * 0.3 + clamp(gain / 25, 0, 0.8) + (qGoal < 30 ? 0.3 : 0) + p.def.passing * 0.2 - 0.3;
-      passes.push({ id: `through_${q.number}`, kind: 'through', receiver: q, value: tv, text: `through ball into the path of ${q.name} (#${q.number}) running in behind` });
+    const kind = w.margin < 0.12 && open > 0.6 && d > 16 && gain > 2 && !spinning ? 'lob' : 'pass';
+    if (kind === 'lob') v = open * 0.55 + clamp(gain / 32, 0, 0.3) + (attThird ? 0.1 : 0) - 0.2;
+    passes.push({ id: `pass_${q.number}`, kind, receiver: q, dist: Math.round(d), value: v, text: `${kind === 'lob' ? 'chip a lofted ball' : 'pass'} to ${q.name} (#${q.number}, ${q.slot}), ${Math.round(d)} m ${gain > 4 ? 'forward' : gain < -4 ? 'back' : 'square'}, ${open > 0.6 ? 'unmarked' : open > 0.25 ? 'loosely marked' : 'tightly marked'}` });
+    if (q.run && gain > 3) {
+      const tw = throughWindow(match, p.pos, q);
+      let tv = -1;
+      if (tw.margin >= 0.1 && tw.recvLate < 0.35 && Number.isFinite(tw.flight)) {
+        tv = 0.55 + clamp(tw.margin, 0, 0.8) * 0.9 + (attThird ? 0.4 : 0.1);
+        if (Math.abs(tw.spot.x - goal.x) < 20) tv += 0.25;
+      }
+      passes.push({ id: `through_${q.number}`, kind: 'through', receiver: q, dist: Math.round(tw.dist), value: tv, text: `through ball into the path of ${q.name} (#${q.number}) running in behind` });
     }
   }
   passes.sort((a, b) => b.value - a.value);
@@ -278,12 +326,14 @@ export function carrierOptions(match, p) {
   const wide = Math.abs(p.pos.z) > HW - 18 && p.pos.x * T.dir > HL - 30;
   if (wide) {
     const inBox = T.players.filter((m) => m !== p && Math.abs(m.pos.x - goal.x) < 17 && Math.abs(m.pos.z) < 18).length;
-    opts.push({ id: 'cross', kind: 'cross', value: 0.35 + inBox * 0.2, text: `whip a cross into the box (${inBox} teammate${inBox === 1 ? '' : 's'} there)` });
+    opts.push({ id: 'cross', kind: 'cross', value: 0.55 + inBox * 0.25, text: `whip a cross into the box (${inBox} teammate${inBox === 1 ? '' : 's'} there)` });
   }
   // Dribble: open space ahead?
   const fwd = new THREE.Vector3().subVectors(goal, p.pos).setY(0).normalize();
   const space = spaceAhead(match, p, fwd);
-  opts.push({ id: 'dribble', kind: 'dribble', dir: fwd, value: clamp(space / 14, 0, 1) * 0.7 + p.def.pace * 0.2 - (pr.dist < 1.6 ? 0.3 : 0), text: `dribble forward toward goal (${space > 10 ? 'lots of space ahead' : space > 5 ? 'some space ahead' : 'crowded ahead'})` });
+  let dribbleValue = clamp(space / 14, 0, 1) * 0.55 + p.def.pace * 0.12 - (pr.dist < 2 ? 0.35 : 0);
+  if (distGoal < 24 && space > 9 && blockers === 0) dribbleValue += 0.25;
+  opts.push({ id: 'dribble', kind: 'dribble', dir: fwd, value: dribbleValue, text: `dribble forward toward goal (${space > 10 ? 'lots of space ahead' : space > 5 ? 'some space ahead' : 'crowded ahead'})` });
   const inOwnThird = p.pos.x * T.dir < -HL * 0.45;
   if (inOwnThird && pr.dist < 3) opts.push({ id: 'clear', kind: 'clear', value: 0.55 + (p.role === 'DEF' ? 0.2 : 0), text: 'clear the ball upfield to safety' });
   if (pr.dist < 2.5 && p.pos.x * T.dir > -10) opts.push({ id: 'shield', kind: 'shield', dir: fwd.clone().negate(), value: 0.2, text: 'shield the ball and hold it up' });
@@ -291,31 +341,104 @@ export function carrierOptions(match, p) {
   return opts;
 }
 
-// 1 when no defender can reach the ground-pass lane before the ball does,
-// falling to 0 when one gets there comfortably first.
-export function laneOpen(match, from, to) {
-  const team = match.owner?.team;
-  const opps = team ? team.opp.players : match.players;
-  const ab = new THREE.Vector3().subVectors(to, from).setY(0);
-  const len = ab.length();
-  ab.divideScalar(len || 1);
-  const v0 = groundPassSpeed(len, 6);
-  const pt = new THREE.Vector3();
-  let worst = 1;
-  for (let x = 0.8; x < len - 0.8; x += 1.5) {
-    // Rolling decelerates roughly linearly between v0 and the arrival speed.
-    const v = v0 + (6 - v0) * (x / len);
-    const ballT = 2 * x / (v0 + v);
-    pt.copy(from).addScaledVector(ab, x);
-    for (const o of opps) {
-      const d = Math.max(0, Math.hypot(o.pos.x - pt.x, o.pos.z - pt.z) - 0.6);
-      // From a near standstill: accelerate at ~6 m/s² up to top speed.
-      const dAcc = o.maxSpeed * o.maxSpeed / 12.4;
-      const reachT = 0.22 + (d < dAcc ? Math.sqrt(d / 3.1) : o.maxSpeed / 6.2 + (d - dAcc) / o.maxSpeed);
-      worst = Math.min(worst, clamp((reachT - ballT + 0.05) / 0.35, 0, 1));
-    }
+// Arrival speed for a ground pass played to feet. Firm enough that a free
+// man is reached before a defender covering from several metres away.
+export function passArrive(dist) {
+  return clamp(8.8 + dist * 0.14, 9.4, 13.2);
+}
+
+const _a = new THREE.Vector3(), _b = new THREE.Vector3(), _c = new THREE.Vector3();
+
+// Where a ground pass should arrive: just in front of the receiver, so he
+// steps onto it. A runner spinning away is not led — that pass is a through ball.
+function feetSpot(from, receiver) {
+  const spot = _a.copy(receiver.pos).setY(0);
+  const back = _b.subVectors(from, spot).setY(0);
+  const gap = back.length();
+  if (gap > 0.8) {
+    back.multiplyScalar(1 / gap);
+    spot.addScaledVector(back, clamp(gap * 0.07, 0.35, 1.35));
   }
-  return worst;
+  if (receiver.speed > 2 && back.dot(receiver.vel) > 0) {
+    const vel = _c.copy(receiver.vel).setY(0);
+    if (vel.lengthSq() > 0.04) spot.addScaledVector(vel.normalize(), Math.min(1.3, receiver.speed * 0.22));
+  }
+  spot.x = clamp(spot.x, -HL + 1.2, HL - 1.2);
+  spot.z = clamp(spot.z, -HW + 1.2, HW - 1.2);
+  return spot.clone();
+}
+
+function throughSpot(receiver) {
+  const team = receiver.team;
+  const runDir = receiver.vel.lengthSq() > 9
+    ? _c.copy(receiver.vel).setY(0).normalize()
+    : _c.subVectors(team.attackGoal, receiver.pos).setY(0).normalize();
+  const lead = clamp(3.2 + receiver.speed * 0.28, 3.2, 5.6);
+  const spot = _a.copy(receiver.pos).addScaledVector(runDir, lead).setY(0);
+  spot.x = clamp(spot.x, -HL + 1.2, HL - 1.2);
+  spot.z = clamp(spot.z, -HW + 1.2, HW - 1.2);
+  return spot.clone();
+}
+
+// How late the first defender is, in seconds, at the points that matter.
+// Positive means the ball gets there first.
+function marginAlong(match, from, spot, arrive, team, receiver) {
+  const ab = _a.subVectors(spot, from).setY(0);
+  const dist = Math.max(1.2, ab.length());
+  ab.multiplyScalar(1 / (ab.length() || 1));
+  const v0 = groundPassSpeed(dist, arrive);
+  const flight = rollTime(v0, dist);
+  const opps = team ? team.opp.players : [];
+  let margin = 5;
+  const fracs = dist > 18 ? [0.5, 0.78, 1] : [0.72, 1];
+  for (const f of fracs) {
+    const x = dist * f;
+    const v = v0 + (arrive - v0) * f;
+    const ballT = 2 * x / Math.max(0.4, v0 + v);
+    _b.copy(from).addScaledVector(ab, x).setY(0);
+    for (const o of opps) margin = Math.min(margin, timeToReach(o, _b) - ballT);
+  }
+  const flightT = Number.isFinite(flight) ? flight : 4;
+  const recvLate = receiver ? timeToReach(receiver, spot) - flightT : 0;
+  return { spot: spot.clone(), arrive, dist, flight, margin, recvLate, v0 };
+}
+
+// Ground pass to a teammate's feet, and the same numbers the kick uses.
+export function passWindow(match, from, receiver) {
+  const spot = feetSpot(from, receiver);
+  const dist = Math.max(1.2, spot.distanceTo(from));
+  return marginAlong(match, from, spot, passArrive(dist), receiver.team, receiver);
+}
+
+// Firm ball into the space a runner is already moving toward.
+export function throughWindow(match, from, receiver) {
+  const spot = throughSpot(receiver);
+  const dist = Math.max(2, spot.distanceTo(from));
+  const arrive = clamp(passArrive(dist) * 0.82, 7.5, 11.5);
+  return marginAlong(match, from, spot, arrive, receiver.team, receiver);
+}
+
+// 1 when no defender can reach the ground-pass lane before the ball does.
+export function laneOpen(match, from, to) {
+  const dist = Math.max(1.2, from.distanceTo(to));
+  const team = match.owner?.team;
+  const w = marginAlong(match, from, to, passArrive(dist), team, null);
+  return clamp((w.margin + 0.02) / 0.55, 0, 1);
+}
+
+// Seconds for a player to reach `pt`, given the speed he already has toward it.
+function timeToReach(o, pt) {
+  const dx = pt.x - o.pos.x, dz = pt.z - o.pos.z;
+  const dist = Math.hypot(dx, dz);
+  const d = Math.max(0, dist - 0.55);
+  if (d < 0.05) return 0.08;
+  const v = Math.max(0, (o.vel.x * dx + o.vel.z * dz) / dist);
+  const a = 6.2, vmax = o.maxSpeed;
+  if (v >= vmax - 0.05) return 0.1 + d / vmax;
+  const tAcc = (vmax - v) / a;
+  const dAcc = v * tAcc + 0.5 * a * tAcc * tAcc;
+  if (d <= dAcc) return 0.1 + (-v + Math.sqrt(v * v + 2 * a * d)) / a;
+  return 0.1 + tAcc + (d - dAcc) / vmax;
 }
 
 function spaceAhead(match, p, dir) {
