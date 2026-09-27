@@ -101,7 +101,7 @@ export function aheadOfEveryone(match, p) {
 
 // A run in behind is an advantage when this player reaches the spot before
 // every outfield defender. The spot is in a gap, just beyond the offside line.
-function bestAdvantage(match, p, passer) {
+function bestAdvantage(match, p, passer, depths = [4.5, 8], allowLose = false) {
   if (playerOffside(match, p)) return null;
   const dir = p.team.dir;
   const max = onsideMax(match, p.team);
@@ -119,8 +119,9 @@ function bestAdvantage(match, p, passer) {
     if (Math.abs(z - p.pos.z) <= 16) lanes.push(clamp(z, -16, 16));
   }
   let best = null;
+  let fallback = null;
   for (const z of lanes) {
-    for (const depth of [4.5, 8]) {
+    for (const depth of depths) {
       const spot = new THREE.Vector3(clamp((max + depth) * dir, -HL + 2, HL - 5.5), 0, z);
       if ((spot.x - p.pos.x) * dir < 3) continue;
       if (passer && (spot.x - passer.pos.x) * dir < 2) continue;
@@ -129,26 +130,40 @@ function bestAdvantage(match, p, passer) {
       for (const o of opps) theirs = Math.min(theirs, timeToReach(o, spot));
       const margin = theirs - mine;
       const live = p.run && match.time - p.run.t < 0.45;
-      if (margin < (live ? 0.04 : 0.12)) continue;
       let score = margin;
       if (passer) {
         const w = callWindow(match, passer.pos, p, spot);
         if (Number.isFinite(w.flight) && w.recvLate < 0.55) score += 0.4 + Math.max(0, w.margin);
       }
+      if (!fallback || score > fallback.score) fallback = { spot, margin, score };
+      if (margin < (live ? 0.04 : 0.12)) continue;
       if (!best || score > best.score) best = { spot, margin, score };
     }
   }
-  return best;
+  return best || (allowLose ? fallback : null);
+}
+
+// A forward with no winning lane still runs at a long ball past the line.
+function longCallSpot(match, p) {
+  const dir = p.team.dir;
+  const max = onsideMax(match, p.team);
+  const sx = clamp(Math.max(p.pos.x * dir + 12, max + 12), -HL + 4, HL - 8);
+  const side = Math.sign(p.pos.z || p.def?.z || 1);
+  const z = clamp(p.pos.z * 0.5 + side * 5, -16, 16);
+  return new THREE.Vector3(sx * dir, 0, z);
 }
 
 // Pull a run back onto the line. Returns the speed to use so he does not
 // sprint through it and get flagged.
-function holdOnside(match, team, p, pt, speed) {
+function holdOnside(match, team, p, pt, speed, attackRun = false) {
   const dir = team.dir;
   const max = onsideMax(match, team);
   if (pt.x * dir > max) pt.x = max * dir;
   const x = p.pos.x * dir;
   if (x > max + 0.15) return p.maxSpeed;
+  // A called run keeps its sprint. The arrival brake sheds it on the line.
+  // A second cut to a jog is what lets the through ball run away from him.
+  if (attackRun) return speed;
   // Arrive on the shoulder at pace. Only check the stride that would cross the line.
   if (x > max - 0.85) return Math.min(speed, 4.2);
   return speed;
@@ -264,10 +279,11 @@ export function supportTargets(match, team, shape) {
     if (!c) return out;
     const dir = team.dir;
     const mates = team.players.filter((p) => p !== c && p !== ourPass?.to && p.role !== 'GK' && !p.busy);
-    // Anyone off the ball can run, but only into a gap he reaches first. The best three go.
+    // Forwards always go long. Everyone else runs only into a gap he reaches first.
     const chasing = new Map();
     const ranked = [];
     for (const p of mates) {
+      if (p.role === 'FWD') continue;
       const dp0 = match.doublePass;
       if (dp0 && dp0.runner === p && dp0.team === team && match.time < dp0.until && !dp0.returned) continue;
       const run = bestAdvantage(match, p, c);
@@ -288,7 +304,20 @@ export function supportTargets(match, team, shape) {
         pt.z = clamp(p.pos.z, -HW + 2, HW - 2);
         p.call = null;
         p.run = { t: match.time };
-        const speed = holdOnside(match, team, p, pt, p.maxSpeed);
+        const speed = holdOnside(match, team, p, pt, p.maxSpeed, true);
+        out.set(p, { point: pt, speed });
+        continue;
+      }
+      if (p.role === 'FWD') {
+        // Always in behind, always asking for the long ball. Feet stay onside
+        // until the pass is struck.
+        const run = bestAdvantage(match, p, c, [12, 16], true);
+        const spot = run?.spot || longCallSpot(match, p);
+        pt.copy(spot);
+        if (!playerOffside(match, p)) p.call = { spot: spot.clone(), until: match.time + 0.9 };
+        else p.call = null;
+        p.run = { t: match.time };
+        const speed = holdOnside(match, team, p, pt, p.maxSpeed, true);
         out.set(p, { point: pt, speed });
         continue;
       }
@@ -323,6 +352,69 @@ export function supportTargets(match, team, shape) {
     }
     return out;
   });
+}
+
+// Where a player without the ball can run. The offline pick and Jev share this list.
+// A forward's long run, a gap run, the press and the mark are only listed when
+// that action is really his. Holding the shape is always available.
+export function moveOptions(match, p) {
+  if (!p || p === match.owner) return [];
+  const T = p.team;
+  const shape = teamShape(match, T);
+  const home = shape.get(p);
+  const shapeOpt = {
+    id: 'shape', kind: 'run', point: home.clone(), speed: 4.6, value: 0.35,
+    text: 'hold your position in the team shape',
+  };
+  if (p.role === 'GK') {
+    const pt = keeperTarget(match, p);
+    return [{
+      id: 'guard', kind: 'run', point: pt, speed: 5.5, value: 1.5,
+      text: 'guard the goal, on the line between the posts and the ball',
+    }];
+  }
+  if (match.pass?.to === p && !match.owner) {
+    const spot = (match.pass.target || match.ball.pos).clone().setY(0);
+    return [{
+      id: 'onto_ball', kind: 'run', point: spot, speed: p.maxSpeed, value: 2,
+      text: 'the ball is played to you. Run onto it and do not slow down before you reach it',
+    }];
+  }
+  const theirs = match.owner && match.owner.team !== T;
+  if (theirs) {
+    const opts = [];
+    const job = defendTargets(match, T, shape).get(p);
+    if (job?.press) {
+      opts.push({
+        id: 'press', kind: 'run', press: true, point: job.point.clone(), speed: job.speed, value: 2,
+        text: 'close down the ball carrier. You are the nearest player to him',
+      });
+    } else if (job) {
+      opts.push({
+        id: 'mark', kind: 'run', point: job.point.clone(), speed: job.speed, value: 1.6,
+        text: 'stay goal-side of your man, between him and your goal',
+      });
+    }
+    opts.push(shapeOpt);
+    return opts;
+  }
+  const mine = match.owner?.team === T || (match.pass?.team === T && !match.owner);
+  if (!mine) return [shapeOpt];
+  const opts = [];
+  const job = supportTargets(match, T, shape).get(p);
+  if (p.role === 'FWD' && job) {
+    opts.push({
+      id: 'long_run', kind: 'run', point: job.point.clone(), speed: job.speed, value: 2,
+      text: 'you are a forward. Run ahead of the defence and call for a long through pass. Stay onside until it is played',
+    });
+  } else if (job && p.run) {
+    opts.push({
+      id: 'gap_run', kind: 'run', point: job.point.clone(), speed: job.speed, value: 1.7,
+      text: 'run into the gap behind the defence and call for the ball. You reach that space first',
+    });
+  }
+  opts.push(shapeOpt);
+  return opts;
 }
 
 // Keeper stands on the line bisecting the posts, a few metres off it, and
@@ -487,9 +579,9 @@ export function carrierOptions(match, p) {
         receiver: wall,
         dist: Math.round(wall.pos.distanceTo(p.pos)),
         gain: wallGain,
-        value: off ? -1 : 1.4,
+        value: off ? -1 : 1.75,
         offside: off,
-        text: `double pass with ${wall.name} (#${wall.number}, ${wall.slot}): only if no forward pass is on. The return often does not come back${off ? '. He is offside. Do not pass to him' : ''}`,
+        text: `double pass with ${wall.name} (#${wall.number}, ${wall.slot}): play it. He returns the ball into your run. This is how the attack scores${off ? '. He is offside. Do not pass to him' : ''}`,
       });
     }
   }
@@ -518,7 +610,8 @@ export function carrierOptions(match, p) {
     const gap = q.pos.distanceTo(call.spot);
     if (!Number.isFinite(w.flight) || w.recvLate > 0.45 || w.margin < -0.08 || gain < 0) continue;
     const off = playerOffside(match, q);
-    const sensible = !off && w.margin >= 0.22 && w.recvLate < 0.28 && gain > 1;
+    const long = q.role === 'FWD' || w.dist >= 16 || gain >= 12;
+    const sensible = !off && w.margin >= (long ? 0.1 : 0.22) && w.recvLate < (long ? 0.4 : 0.28) && gain > 1;
     const where = describeSpot(T, call.spot);
     const inArea = spotInBox(goal, call.spot);
     const verdict = sensible
@@ -534,8 +627,8 @@ export function carrierOptions(match, p) {
       spot: call.spot.clone(),
       dist: Math.round(w.dist),
       gain,
-      value: off ? -1 : sensible ? 1.45 + clamp(w.margin, 0, 0.4) + (inArea ? 0.2 : 0) : 0.05,
-      text: `${q.name} (#${q.number}) is running and calling for the ball ${where}. He is ${Math.round(gap)} m from that spot. ${off ? 'He is offside. Do not pass to him' : sensible ? `${verdict}. Play the through pass into that call.` : `${verdict}. Do not play it.`}`,
+      value: off ? -1 : sensible ? (long ? 1.95 : 1.45) + clamp(w.margin, 0, 0.4) + (inArea ? 0.2 : 0) : 0.05,
+      text: `${q.name} (#${q.number}) is running and calling for ${long ? 'a long through pass' : 'the ball'} ${where}. He is ${Math.round(gap)} m from that spot. ${off ? 'He is offside. Do not pass to him' : sensible ? `${verdict}. Play the through pass into that call.` : `${verdict}. Do not play it.`}`,
     });
   }
   passes.sort((a, b) => b.value - a.value);

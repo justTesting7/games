@@ -4,7 +4,7 @@ import { PITCH, GOAL, BALL_RADIUS } from '../world/dims.js';
 import { KICKOFF, KICKOFF_DEFEND, squad, CLUBS } from './teams.js';
 import { groundPass, loftedPass, shotVelocity, leadTarget, gauss } from './kicks.js';
 import { ACTION_DUR, KICK } from './actions.js';
-import { teamShape, chooseChasers, defendTargets, supportTargets, keeperTarget, carrierOptions, laneOpen, passWindow, throughWindow, doubleReturnWindow, callWindow, openCorner, onsideMax } from './ai.js';
+import { teamShape, chooseChasers, defendTargets, supportTargets, keeperTarget, carrierOptions, laneOpen, passWindow, throughWindow, doubleReturnWindow, callWindow, openCorner, onsideMax, aheadOfEveryone } from './ai.js';
 
 const HL = PITCH.halfLength, HW = PITCH.halfWidth, R = BALL_RADIUS;
 const GOAL_LINE = HL - PITCH.line * 0.5;
@@ -457,6 +457,7 @@ export class Match {
         if (p.action) { p.action.t += dt; if (p.action.t >= p.action.dur) p.action = null; }
         if (p.celebrate > 0) p.celebrate -= dt;
         p.face = null;
+        p.sprintThrough = false;
         p.lookAt.copy(this.ball.pos);
         const isHuman = p === this.human && (playing || this.state === 'dead' && this.restart?.taker === p || this.state === 'kickoff' && this.restart?.taker === p);
         if (this.state === 'intro') {
@@ -479,6 +480,7 @@ export class Match {
       }
     }
     this.separate();
+    this.enforceKickoffCircle();
   }
 
   celebrationTargets(p) {
@@ -533,14 +535,45 @@ export class Match {
         p.target.set(gx - Math.sign(gx) * (5 + (p.index % 5) * 1.3), 0, ((p.index % 6) - 2.5) * 5 + (att ? 1.2 : -1.2));
       }
     }
-    if (r.type === 'kickoff' || r.type === 'goalkick' || r.type === 'freekick') {
+    if (r.type === 'goalkick' || r.type === 'freekick') {
       if (!att && p.pos.distanceTo(r.pos) < 9.15) p.target.copy(r.pos).addScaledVector(_v.subVectors(p.target, r.pos).setY(0).normalize(), 9.5);
     }
     if (r.type === 'kickoff') {
-      p.target.x = p.team.dir > 0 ? Math.min(p.target.x, -0.5) : Math.max(p.target.x, 0.5);
-      if (p !== r.taker && r.team === p.team && p.index === 10) p.target.set(-p.team.dir * 0.2, 0, 3);
+      const opener = att && (p === r.taker || p.index === 10);
+      if (opener && p !== r.taker) p.target.set(-p.team.dir * 0.2, 0, 3);
+      else if (!opener) this.stayOwnHalfOutsideCircle(p.target, p.team.dir);
     }
     if (p.role === 'GK' && r.type !== 'goalkick' && r.type !== 'penalty') p.target.copy(keeperTarget(this, p));
+  }
+
+  // Kick-off: only the two players who take it may stand inside the centre circle.
+  // Everyone else stays in his own half, outside the circle.
+  kickoffOpener(p) {
+    const r = this.restart;
+    return !!(r && r.type === 'kickoff' && p.team === r.team && (p === r.taker || p.index === 10));
+  }
+
+  stayOwnHalfOutsideCircle(pos, dir) {
+    const limit = PITCH.centerCircle + 0.4;
+    pos.x = dir > 0 ? Math.min(pos.x, -0.45) : Math.max(pos.x, 0.45);
+    if (Math.hypot(pos.x, pos.z) >= limit) return;
+    const z = THREE.MathUtils.clamp(pos.z, -limit + 0.3, limit - 0.3);
+    pos.z = z;
+    const ax = Math.sqrt(Math.max(0.04, limit * limit - z * z));
+    pos.x = dir > 0 ? -ax : ax;
+  }
+
+  enforceKickoffCircle() {
+    if (this.state !== 'kickoff') return;
+    for (const p of this.players) {
+      if (this.kickoffOpener(p)) continue;
+      const before = Math.hypot(p.pos.x, p.pos.z);
+      this.stayOwnHalfOutsideCircle(p.pos, p.team.dir);
+      if (Math.hypot(p.pos.x, p.pos.z) > before + 0.05) {
+        p.vel.x = 0;
+        p.vel.z = 0;
+      }
+    }
   }
 
   aiMove(p, shape, dt) {
@@ -558,10 +591,16 @@ export class Match {
       // Chase only once the ball has missed the spot. Until then, go and wait.
       const missed = ball.pos.distanceTo(spot) > 5 && closing < -2;
       if (pass.kind === 'through' || pass.kind === 'lob' || pass.kind === 'cross') {
-        const dest = this.receptionPoint(p) || spot;
-        const gap = dest.distanceTo(p.pos);
-        p.target.copy(dest).setY(0);
-        p.targetSpeed = gap > 3 ? p.maxSpeed : Math.max(3.2, gap * 2.2);
+        const dest = this.longBallMeet(p, spot);
+        const run = _v.subVectors(dest, p.pos).setY(0);
+        if (run.lengthSq() < 0.25) run.set(T.dir, 0, 0);
+        else run.normalize();
+        // Aim beyond the ball. Stopping on the spot lets it run away from him.
+        p.target.copy(dest).addScaledVector(run, 6).setY(0);
+        p.target.x = THREE.MathUtils.clamp(p.target.x, -HL - 1, HL + 1);
+        p.target.z = THREE.MathUtils.clamp(p.target.z, -HW - 1, HW + 1);
+        p.targetSpeed = p.maxSpeed;
+        p.sprintThrough = true;
       } else if (missed || toBall < 8) {
         // Onto the ball once it's near, or chase it if the pass has missed the spot.
         p.target.copy(ball.pos).setY(0);
@@ -586,9 +625,7 @@ export class Match {
         THREE.MathUtils.clamp(p.pos.z, -HW + 2, HW - 2),
       );
       if (p.target.x * T.dir > limit) p.target.x = limit * T.dir;
-      const past = p.pos.x * T.dir > limit + 0.15;
-      const x = p.pos.x * T.dir;
-      p.targetSpeed = past || x < limit - 0.85 ? p.maxSpeed : 4.2;
+      p.targetSpeed = p.maxSpeed;
       p.run = { t: this.time };
       return;
     }
@@ -603,6 +640,21 @@ export class Match {
       if (chase.t < 0.35) p.face = ball.pos;
       this.tryHeader(p);
       return;
+    }
+    // Free players ask Jev where to run. The pass chase, the one-two run and
+    // the keeper's dive stay here: those are a touch already being completed.
+    if (this.brain?.controls(p)) {
+      const steered = this.brain.movement(p);
+      if (steered?.point) {
+        p.target.copy(steered.point).setY(0);
+        p.targetSpeed = steered.speed ?? 5;
+        if (steered.id === 'long_run' || steered.id === 'gap_run') p.run = { t: this.time };
+        else { p.call = null; p.run = null; }
+        if (steered.press) this.maybeTackle(p, dt);
+        else if (p.targetSpeed < 4.2) p.face = ball.pos;
+        else p.face = null;
+        return;
+      }
     }
     if (theirs) {
       p.call = null;
@@ -735,7 +787,10 @@ export class Match {
     } else {
       const toT = _v.subVectors(p.target, p.pos).setY(0);
       const dist = toT.length();
-      let want = p.busy ? 0 : Math.min(p.targetSpeed, dist * 2.2);
+      // A long-ball chase keeps its pace through the ball. Everyone else
+      // arrives at the point he is running to.
+      let want = p.busy ? 0 : p.sprintThrough ? p.targetSpeed : Math.min(p.targetSpeed, dist * 2.2);
+      if (p.sprintThrough && dist < 0.4) want = Math.min(p.targetSpeed, dist * 2.2);
       if (p.pendingKick) want *= 0.35;
       if (p.action?.type === 'throw') want = 0;
       const desired = dist > 1e-3 ? toT.multiplyScalar(want / dist) : toT.set(0, 0, 0);
@@ -1044,6 +1099,22 @@ export class Match {
     return best;
   }
 
+  // Furthest point on the ball's path the runner can still reach, so a long
+  // pass is met at pace instead of at the first sample in front of him.
+  longBallMeet(p, spot) {
+    const path = this.pathCache;
+    let dest = (spot || this.ball.pos).clone().setY(0);
+    if (!path) return dest;
+    let last = null;
+    for (const s of path) {
+      if (s.pos.y > 2.1) continue;
+      const d = Math.hypot(s.pos.x - p.pos.x, s.pos.z - p.pos.z);
+      if (d / p.maxSpeed <= s.t + 0.45) last = s.pos;
+    }
+    if (last) dest = last.clone().setY(0);
+    return dest;
+  }
+
   // Where a named receiver should meet a ball played into space.
   receptionPoint(p) {
     const path = this.pathCache;
@@ -1150,27 +1221,57 @@ export class Match {
       const g = T.attackGoal;
       const keeper = T.opp.keeper;
       const dist = from.distanceTo(g);
+      const oneOnOne = kind === 'shoot' && aheadOfEveryone(this, p);
       let aimZ;
-      if (plan.aim && Math.abs(plan.aim.z * T.dir) > 0.2 && this.humanTeam === T) aimZ = THREE.MathUtils.clamp(plan.aim.z * 3.6, -3.2, 3.2);
-      else {
-        const side = keeper.pos.z > from.z * 0.2 ? -1 : 1;
-        aimZ = side * (GOAL.halfWidth - 0.55 - this.rnd() * 0.6);
+      let power;
+      let target;
+      let speed;
+      let err;
+      let curl;
+      if (oneOnOne) {
+        // Alone with the keeper. Drive it low inside the far post. The flight
+        // solver lofts this and bends it back into his hands.
+        // Wide of a central keeper the far post crosses his dive. From out wide,
+        // the near post is the one he cannot get across to.
+        const near = Math.sign(from.z || 1);
+        const away = Math.abs(keeper.pos.z) > 0.45 ? -Math.sign(keeper.pos.z) : near;
+        const side = Math.abs(from.z) > 2.2 ? near : away;
+        aimZ = side * (GOAL.halfWidth - 0.7);
+        power = 0.92;
+        target = new THREE.Vector3(g.x, 0.42, aimZ);
+        speed = 35;
+        err = (0.01 + (1 - p.def.shooting) * 0.014) * errScale * 0.55 * (plan.firstTime ? 1.2 : 1);
+        curl = 0;
+      } else {
+        if (plan.aim && Math.abs(plan.aim.z * T.dir) > 0.2 && this.humanTeam === T) aimZ = THREE.MathUtils.clamp(plan.aim.z * 3.6, -3.2, 3.2);
+        else {
+          const side = keeper.pos.z > from.z * 0.2 ? -1 : 1;
+          aimZ = side * (GOAL.halfWidth - 0.55 - this.rnd() * 0.6);
+        }
+        power = plan.power ?? THREE.MathUtils.clamp(0.55 + dist / 45, 0.6, 0.95);
+        const baseH = kind === 'header' ? 0.4 : 0.25 + power * power * 1.55;
+        if (plan.aimZ != null && kind === 'shoot') aimZ = plan.aimZ;
+        target = new THREE.Vector3(g.x, THREE.MathUtils.clamp(baseH + (this.rnd() - 0.4) * 0.5, 0.2, 2.2), aimZ);
+        if (power > 0.93) target.y += (power - 0.93) * 18;
+        speed = kind === 'header' ? 11 + power * 5 : 16 + power * 15;
+        err = (0.018 + (1 - p.def.shooting) * 0.05) * errScale * (0.5 + power) * (kind === 'header' ? 1.6 : 1) * (plan.firstTime ? 1.25 : 1) * (1 + dist / 40);
+        curl = kind === 'shoot' && power < 0.75 ? -Math.sign(aimZ - from.z) * T.dir * 10 * (1 - power) : 0;
       }
-      const power = plan.power ?? THREE.MathUtils.clamp(0.55 + dist / 45, 0.6, 0.95);
-      const baseH = kind === 'header' ? 0.4 : 0.25 + power * power * 1.55;
-      // The touch instructions named this corner. Strike it there.
-      if (plan.aimZ != null && kind === 'shoot') aimZ = plan.aimZ;
-      const target = new THREE.Vector3(g.x, THREE.MathUtils.clamp(baseH + (this.rnd() - 0.4) * 0.5, 0.2, 2.2), aimZ);
-      if (power > 0.93) target.y += (power - 0.93) * 18;
-      const speed = kind === 'header' ? 11 + power * 5 : 16 + power * 15;
-      const err = (0.018 + (1 - p.def.shooting) * 0.05) * errScale * (0.5 + power) * (kind === 'header' ? 1.6 : 1) * (plan.firstTime ? 1.25 : 1) * (1 + dist / 40);
-      const curl = kind === 'shoot' && power < 0.75 ? -Math.sign(aimZ - from.z) * T.dir * 10 * (1 - power) : 0;
       spec.velocity = () => {
-        const v = shotVelocity(ball.pos, target, speed, new THREE.Vector3(0, curl, 0));
-        const yaw = gauss(this.rnd) * err, pitch = gauss(this.rnd) * err * 0.7;
+        let v;
+        if (oneOnOne) {
+          const dx = g.x - ball.pos.x, dz = aimZ - ball.pos.z;
+          const horiz = Math.max(0.5, Math.hypot(dx, dz));
+          const t = horiz / speed;
+          const vy = 0.5 * 9.81 * t + (0.42 - ball.pos.y) / Math.max(0.08, t);
+          v = new THREE.Vector3((dx / horiz) * speed, vy, (dz / horiz) * speed);
+        } else {
+          v = shotVelocity(ball.pos, target, speed, new THREE.Vector3(0, curl, 0));
+        }
+        const yaw = gauss(this.rnd) * err, pitch = gauss(this.rnd) * err * (oneOnOne ? 0.45 : 0.7);
         v.applyAxisAngle(UP, yaw);
-        const side = new THREE.Vector3(-v.z, 0, v.x).normalize();
-        v.applyAxisAngle(side, pitch);
+        const sideAxis = new THREE.Vector3(-v.z, 0, v.x).normalize();
+        v.applyAxisAngle(sideAxis, pitch);
         return v;
       };
       spec.spin = new THREE.Vector3(0, curl, 0);

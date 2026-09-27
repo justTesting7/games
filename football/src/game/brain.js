@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { PITCH } from '../world/dims.js';
-import { carrierOptions, passWindow, throughWindow, doubleReturnWindow, callWindow, ballCalls, playerOffside, aheadOfEveryone } from './ai.js';
+import { carrierOptions, passWindow, throughWindow, doubleReturnWindow, callWindow, ballCalls, playerOffside, aheadOfEveryone, moveOptions } from './ai.js';
 import { MENTALITY } from './match.js';
 
 const HL = PITCH.halfLength, HW = PITCH.halfWidth;
@@ -23,26 +23,38 @@ function zone(team, pos) {
 // The touch Jev is asked to choose. The offline pick follows this same order,
 // because the ball is played before a reply gets back. The team scores by
 // getting a man into the penalty area and finishing, not by keeping the ball.
-const CARRIER_INSTRUCTIONS = `You have the ball. Attack together and get a shot on goal.
+const CARRIER_INSTRUCTIONS = `You have the ball. Score with a long through pass to a forward, or with a double pass.
 A teammate is offside when he is in the opponent's half and nearer their goal than both the ball and the second-last defender. Never pass to him. A pass into the space beyond that line is allowed when he is still level with it.
-If you are ahead of every defender, keep running at goal. Do not pass. Shoot only when a shot from inside the penalty area on that run is listed. Until then, take another touch toward goal.
+If you are ahead of every defender, keep running at goal. Do not pass. Shoot when a shot on that run is listed. Until then, take another touch toward goal.
 If you just received a double pass and the return is listed, play it first time into the runner's path.
+Forwards without the ball are always running ahead and calling for a long through pass. If that through pass is listed and he reaches the space before a defender, play it.
+If a double pass is listed, start it. He returns the ball into your run.
 If a shot from inside the penalty area is listed, shoot. Do not pass a chance in the box away.
 If a clear sight of goal from inside 22 m is listed, shoot.
-Teammates without the ball call only when they reach the space before a defender.
-If a teammate is calling and the through pass to that call is listed, play it. He gets there first.
 If a through pass is listed that puts a teammate in the penalty area, play that.
-Do not play any other through ball. From midfield those passes are cut out.
 If you are wide and a cross is listed with a teammate in the box, cross it.
 If a pass to feet is listed that puts a teammate in the penalty area, play that.
-If a forward pass to feet is listed, play it. A square pass is not forward. Do not start a double pass when a forward pass is on. The return does not come back.
-Carry toward goal when no shot and no forward pass is on and there is space.
-Pass backward only when every forward pass is closed and you cannot carry the ball forward.`;
+If a forward pass to feet is listed, play it. A square pass is not forward.
+Carry toward goal when no shot, no long through and no double pass is on and there is space.
+Pass backward only when every forward ball is closed and you cannot carry the ball forward.`;
+
+// How often each player asks Jev. Close to the ball means a decision every
+// 300 ms. Everyone else, once a second. One request per player at a time.
+const CLOSE_TO_BALL = 12;
+
+const OFF_BALL_INSTRUCTIONS = `You do not have the ball. Choose where to run.
+If the ball is played to you, run onto it. Do not slow down before you reach it.
+If you are a forward and your team has the ball, run ahead and call for a long through pass. Stay onside until it is played.
+If a run into a gap behind the defence is listed, take it and call for the ball.
+If closing the carrier down is listed, press him. You are the nearest player.
+If marking your man is listed, stay goal-side of him.
+Hold your position in the shape when none of those runs is on.`;
 
 // Carrier decisions: a local choice is made instantly and executed after a
 // short, pressure-dependent hold. If Jev's answer arrives first it replaces
 // the local choice. Low-confidence answers only win when the local choice
-// is weak. Team mentality is re-asked every ~20 s of play.
+// is weak. Every player without the ball asks on his own cadence. Team
+// mentality is re-asked every ~20 s of play.
 export class Brain {
   constructor(match, jev, { rnd = Math.random, teams } = {}) {
     this.match = match;
@@ -50,6 +62,9 @@ export class Brain {
     this.rnd = rnd;
     this.teams = teams || match.teams.filter((t) => !t.human);
     this.decisions = new Map();
+    this.moves = new Map();
+    this.lastAsk = new Map();
+    this.inflight = new Set();
     this.log = [];
     this.mentalityT = new Map(this.teams.map((t) => [t, 2]));
     this.stats = { asked: 0, answered: 0, overrides: 0 };
@@ -68,7 +83,20 @@ export class Brain {
         this.mentalityT.set(t, 18 + this.rnd() * 6);
         this.askMentality(t);
       }
+      if (m.state !== 'play') continue;
+      for (const p of t.players) {
+        if (!this.controls(p) || p === m.owner) continue;
+        this.tickMove(p);
+      }
     }
+    if (m.state === 'play' && m.owner && this.controls(m.owner)) this.refreshCarrier(m.owner);
+  }
+
+  // Close to the ball: 300 ms. Far from it: 1 s. The carrier is always close.
+  cadence(p) {
+    const m = this.match;
+    if (p === m.owner || p === m.pass?.to) return 0.3;
+    return p.pos.distanceTo(m.ball.pos) < CLOSE_TO_BALL ? 0.3 : 1;
   }
 
   // ------------------------------------------------------------ carrier
@@ -76,7 +104,7 @@ export class Brain {
   onPossession(p) {
     this.decisions.delete(p);
     if (!this.controls(p)) return;
-    this.decide(p);
+    this.decide(p, null, true);
   }
 
   options(p) {
@@ -101,6 +129,8 @@ export class Brain {
     if (sight.length) return this.among(sight);
     const calls = src.filter((o) => o.call && o.sensible);
     if (calls.length) return this.among(calls);
+    const dbl = src.filter((o) => o.combo === 'double');
+    if (dbl.length) return this.among(dbl);
     const thr = src.filter((o) => o.kind === 'through' && !o.call && o.intoBox);
     if (thr.length) return this.among(thr);
     const cross = src.find((o) => o.kind === 'cross' && o.boxMates > 0);
@@ -126,7 +156,7 @@ export class Brain {
     return near[0];
   }
 
-  decide(p, filter = null) {
+  decide(p, filter = null, forceAsk = false) {
     const m = this.match;
     let { list, best } = this.options(p);
     if (filter) {
@@ -144,7 +174,7 @@ export class Brain {
     if (this.jev) hold = Math.max(hold, 0.6);
     const d = { at: m.time + hold, choice: best, list, source: 'local', confidence: 0, epoch: m.time, player: p };
     this.decisions.set(p, d);
-    this.ask(p, d, list);
+    this.ask(p, d, list, forceAsk);
     return d;
   }
 
@@ -156,7 +186,7 @@ export class Brain {
     // He has gone past the last defender. Drop the pass and run at goal.
     if (d.choice && !d.choice.alone && d.choice.finish !== 'break' && aheadOfEveryone(m, p)) {
       this.decisions.delete(p);
-      d = this.decide(p);
+      d = this.decide(p, null, true);
     }
     // Dribbling: re-evaluate every so often, faster when pressed.
     if (d.choice?.kind === 'dribble' || d.choice?.kind === 'shield') {
@@ -233,7 +263,7 @@ export class Brain {
     if (r.type === 'corner') return { kind: 'cross' };
     let d = this.decisions.get(p);
     if (!d || d.restart !== r) {
-      d = this.decide(p, (o) => o.kind === 'pass' || o.kind === 'lob' || r.type === 'freekick' && (o.kind === 'shoot' || o.kind === 'through'));
+      d = this.decide(p, (o) => o.kind === 'pass' || o.kind === 'lob' || r.type === 'freekick' && (o.kind === 'shoot' || o.kind === 'through'), true);
       d.restart = r;
       d.at = m.time + 0.28;
     }
@@ -245,9 +275,15 @@ export class Brain {
     return plan;
   }
 
-  ask(p, d, list) {
+  ask(p, d, list, force = false) {
     if (!this.jev || !list.length) return;
+    if (this.inflight.has(p)) return;
     const m = this.match;
+    const every = this.cadence(p);
+    const last = this.lastAsk.get(p);
+    if (!force && last != null && m.time - last < every - 1e-4) return;
+    this.inflight.add(p);
+    this.lastAsk.set(p, m.time);
     const T = p.team;
     const criteria = {};
     const head = list.filter((o) => o.alone || o.finish === 'break' || o.combo || o.call || o.kind === 'through' || o.finish || o.intoBox || (o.kind === 'cross' && o.boxMates > 0));
@@ -280,7 +316,107 @@ export class Brain {
         }
       }
       cur.at = Math.min(cur.at, m.time);
-    });
+    }).finally(() => this.inflight.delete(p));
+  }
+
+  // The carrier is close to the ball, so his touch is asked again every 300 ms
+  // without putting the kick back on the clock.
+  refreshCarrier(p) {
+    if (!this.jev || this.inflight.has(p)) return;
+    const m = this.match;
+    const last = this.lastAsk.get(p);
+    if (last != null && m.time - last < this.cadence(p) - 1e-4) return;
+    let d = this.decisions.get(p);
+    if (!d) { this.decide(p, null, true); return; }
+    const { list, best } = this.options(p);
+    d.list = list;
+    if (d.source !== 'jev') d.choice = best;
+    d.epoch = m.time;
+    this.ask(p, d, list, true);
+  }
+
+  // ---------------------------------------------------------------- off the ball
+
+  pickMove(list) {
+    if (!list?.length) return null;
+    const take = (id) => list.find((o) => o.id === id);
+    return take('onto_ball') || take('long_run') || take('gap_run') || take('press') || take('mark') || take('guard') || take('shape') || list[0];
+  }
+
+  tickMove(p) {
+    const m = this.match;
+    if (m.state !== 'play') return;
+    if (this.inflight.has(p)) return;
+    const last = this.lastAsk.get(p);
+    if (this.jev && last != null && m.time - last < this.cadence(p) - 1e-4) return;
+    const list = moveOptions(m, p);
+    if (!list.length) return;
+    const d = { choice: this.pickMove(list), list, epoch: m.time, source: 'local' };
+    this.moves.set(p, d);
+    this.askMove(p, d, list);
+  }
+
+  // The run Jev (or the offline pick) chose, with the spot refreshed for this frame.
+  movement(p) {
+    this.tickMove(p);
+    const d = this.moves.get(p);
+    if (!d?.choice) return null;
+    const list = moveOptions(this.match, p);
+    return list.find((o) => o.id === d.choice.id) || this.pickMove(list);
+  }
+
+  askMove(p, d, list) {
+    if (!this.jev || !list.length || this.inflight.has(p)) return;
+    const m = this.match;
+    this.inflight.add(p);
+    this.lastAsk.set(p, m.time);
+    const criteria = {};
+    for (const o of list.slice(0, 6)) criteria[o.id] = o.text;
+    const questions = {
+      action: {
+        type: 'choice',
+        instructions: `You are ${p.name} (#${p.number}, ${p.slot}) of ${p.team.club.name}, ${p.def.personality}. Team instruction: ${MENTALITY_TEXT[p.team.mentality]}. ${OFF_BALL_INSTRUCTIONS}`,
+        criteria,
+      },
+    };
+    this.stats.asked++;
+    const epoch = d.epoch;
+    this.jev.ask(this.moverState(p), questions).then((ans) => {
+      const cur = this.moves.get(p);
+      if (!cur || cur.epoch !== epoch) return;
+      const a = ans?.action;
+      const opt = a && list.find((o) => o.id === a.choice);
+      if (!opt) return;
+      this.stats.answered++;
+      const conf = a.confidence ?? 0.5;
+      const localVal = cur.choice?.value ?? -1;
+      if (conf >= 0.3 || opt.value > localVal - 0.3) {
+        if (opt.id !== cur.choice?.id) this.stats.overrides++;
+        cur.choice = opt;
+        cur.source = 'jev';
+        cur.confidence = conf;
+      }
+    }).finally(() => this.inflight.delete(p));
+  }
+
+  moverState(p) {
+    const m = this.match;
+    const T = p.team;
+    const ball = m.ball.pos;
+    const owner = m.owner;
+    return {
+      me: {
+        name: p.name, position: p.slot, zone: zone(T, p.pos),
+        distance_to_ball_m: Math.round(p.pos.distanceTo(ball)),
+        distance_to_goal_m: Math.round(p.pos.distanceTo(T.attackGoal)),
+      },
+      ball: {
+        zone: zone(T, ball),
+        our_team_has_it: owner?.team === T,
+        opponent_has_it: !!(owner && owner.team !== T),
+      },
+      team_mentality: MENTALITY[T.mentality].label,
+    };
   }
 
   note(p, d) {
