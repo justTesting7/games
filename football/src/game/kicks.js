@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { Ball, groundPassSpeed, loftSpeed, rollTime } from './ball.js';
+import { Ball, groundPassSpeed, loftSpeed, rollTime, rollSpeedAfter } from './ball.js';
 import { BALL_RADIUS } from '../world/dims.js';
 
 // Box-Muller normal sample for kick error.
@@ -24,8 +24,10 @@ const _d = new THREE.Vector3();
 export function groundPass(from, target, { error = 0, rnd = Math.random, arrive } = {}) {
   _d.subVectors(target, from).setY(0);
   const dist = Math.max(1, _d.length());
-  const want = arrive ?? THREE.MathUtils.clamp(3.5 + dist * 0.14, 4, 10);
-  const speed = Math.min(27, groundPassSpeed(dist, want));
+  const want = arrive ?? THREE.MathUtils.clamp(7 + dist * 0.18, 8, 14);
+  let speed = Math.min(34, groundPassSpeed(dist, want));
+  // The rolling solve can come up short; a pass has to actually arrive.
+  if (rollSpeedAfter(speed, dist) < want * 0.8) speed = Math.min(36, speed + 4);
   const yaw = Math.atan2(_d.z, _d.x) + gauss(rnd) * error;
   const k = 1 + gauss(rnd) * error * 0.8;
   return new THREE.Vector3(Math.cos(yaw) * speed * k, 0, Math.sin(yaw) * speed * k);
