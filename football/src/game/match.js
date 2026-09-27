@@ -4,7 +4,7 @@ import { PITCH, GOAL, BALL_RADIUS } from '../world/dims.js';
 import { KICKOFF, KICKOFF_DEFEND, squad, CLUBS } from './teams.js';
 import { groundPass, loftedPass, shotVelocity, leadTarget, gauss } from './kicks.js';
 import { ACTION_DUR, KICK } from './actions.js';
-import { teamShape, chooseChasers, defendTargets, supportTargets, keeperTarget, carrierOptions, laneOpen, passWindow, throughWindow, doubleReturnWindow } from './ai.js';
+import { teamShape, chooseChasers, defendTargets, supportTargets, keeperTarget, carrierOptions, laneOpen, passWindow, throughWindow, doubleReturnWindow, callWindow } from './ai.js';
 
 const HL = PITCH.halfLength, HW = PITCH.halfWidth, R = BALL_RADIUS;
 const GOAL_LINE = HL - PITCH.line * 0.5;
@@ -592,6 +592,7 @@ export class Match {
       return;
     }
     if (theirs) {
+      p.call = null;
       const d = defendTargets(this, T, shape);
       const job = d.get(p);
       if (job) {
@@ -822,6 +823,7 @@ export class Match {
     else if (dp && p === dp.runner && dp.returned) this.doublePass = null;
     if (prev && prev.team !== p.team) this.emit({ type: 'turnover', team: p.team, player: p });
     this.emit({ type: 'control', player: p, how });
+    p.call = null;
     this.brain?.onPossession(p);
   }
 
@@ -1064,7 +1066,11 @@ export class Match {
       if (!q) return this.executePlan(p, { kind: 'dribble', dir: T.attackGoal.clone().sub(p.pos).normalize() });
       let target;
       let arrive;
-      if (kind === 'through') {
+      if (plan.call && plan.spot) {
+        const w = callWindow(this, from, q, plan.spot);
+        target = plan.spot.clone();
+        arrive = w.arrive;
+      } else if (kind === 'through') {
         const w = plan.combo === 'return' ? doubleReturnWindow(this, from, q) : throughWindow(this, from, q);
         target = w.spot;
         arrive = w.arrive;

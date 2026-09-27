@@ -175,6 +175,9 @@ export function supportTargets(match, team, shape) {
     if (!c) return out;
     const dir = team.dir;
     const mates = team.players.filter((p) => p !== c && p !== ourPass?.to && p.role !== 'GK' && !p.busy);
+    const goal = team.attackGoal;
+    // The two men nearest the opponent's goal make the run. Everyone else holds the line.
+    const leaders = new Set(mates.slice().sort((a, b) => a.pos.distanceTo(goal) - b.pos.distanceTo(goal)).slice(0, 2));
     const sts = mates.filter((p) => p.slot === 'ST').sort((a, b) => b.def.x - a.def.x);
     const runner = sts[0] || null;
     // A slow pulse, used only once the striker has reached the line.
@@ -190,10 +193,21 @@ export function supportTargets(match, team, shape) {
         // He has already played the first ball. The run is the rest of the drill.
         pt.x = clamp(p.pos.x + dir * 12, -HL + 2, HL - 2);
         pt.z = clamp(p.pos.z, -HW + 2, HW - 2);
+        p.call = null;
         p.run = { t: match.time };
         out.set(p, { point: pt, speed: p.maxSpeed });
         continue;
       }
+      if (leaders.has(p)) {
+        const live = p.call && match.time < p.call.until && p.call.spot;
+        if (!live) p.call = { spot: advantageSpot(p), until: match.time + 2.4 };
+        pt.copy(p.call.spot);
+        const gap = pt.distanceTo(p.pos);
+        p.run = { t: match.time };
+        out.set(p, { point: pt, speed: gap < 1.4 ? 2.2 : p.maxSpeed });
+        continue;
+      }
+      p.call = null;
       p.run = null;
       if (p === runner && px > base - 7) {
         const burst = pulse * 6;
@@ -362,6 +376,31 @@ export function carrierOptions(match, p) {
       });
     }
   }
+  for (const q of mates) {
+    const call = q.call;
+    if (!call?.spot || match.time > call.until) continue;
+    const w = callWindow(match, p.pos, q, call.spot);
+    const gain = (call.spot.x - p.pos.x) * T.dir;
+    const gap = q.pos.distanceTo(call.spot);
+    if (!Number.isFinite(w.flight) || w.recvLate > 0.45 || w.margin < -0.08 || gain < 0) continue;
+    const sensible = w.margin >= 0.1 && w.recvLate < 0.35 && gain > 1;
+    const where = describeSpot(T, call.spot);
+    const verdict = sensible
+      ? `he reaches it ${w.margin.toFixed(1)} s before a defender`
+      : `a defender gets there first`;
+    opts.push({
+      id: `call_${q.number}`,
+      kind: 'through',
+      call: true,
+      sensible,
+      receiver: q,
+      spot: call.spot.clone(),
+      dist: Math.round(w.dist),
+      gain,
+      value: sensible ? 1.35 + clamp(w.margin, 0, 0.4) : 0.05,
+      text: `${q.name} (#${q.number}) wants the ball ${where}. He is ${Math.round(gap)} m from that spot and running onto it. ${verdict}. Pass into that call only if he wins the race.`,
+    });
+  }
   passes.sort((a, b) => b.value - a.value);
   opts.push(...passes.slice(0, 4));
   const wide = Math.abs(p.pos.z) > HW - 18 && p.pos.x * T.dir > HL - 30;
@@ -450,6 +489,54 @@ export function passWindow(match, from, receiver) {
 }
 
 // Firm ball into the space a runner is already moving toward.
+// Where one of the two players nearest the opponent's goal asks for the ball.
+function advantageSpot(p) {
+  const goal = p.team.attackGoal;
+  const dir = p.team.dir;
+  const distGoal = p.pos.distanceTo(goal);
+  const spot = p.pos.clone().setY(0);
+  let bend = 0;
+  let nearest = null;
+  let nd = Infinity;
+  for (const o of p.team.opp.players) {
+    if (o.role === 'GK') continue;
+    const d = Math.hypot(o.pos.x - p.pos.x, o.pos.z - p.pos.z);
+    if (d < nd) { nd = d; nearest = o; }
+  }
+  if (nearest && nd < 9) bend = Math.sign(p.pos.z - nearest.pos.z) * clamp(4.5 - nd * 0.35, 1.2, 4);
+  if (!bend) bend = p.pos.z > 2 ? -2.5 : p.pos.z < -2 ? 2.5 : (p.def?.z > 0 ? 3 : -3);
+  if (distGoal < 18) {
+    const ahead = (goal.x - Math.sign(goal.x) * clamp(Math.min(distGoal, 14), 8, 14) - p.pos.x) * dir;
+    spot.x = clamp(p.pos.x + dir * clamp(ahead, 2, 6), -HL + 2, HL - 8);
+  } else {
+    spot.x = clamp(p.pos.x + dir * 8, -HL + 2, HL - 8);
+  }
+  spot.z = clamp(p.pos.z + bend, -HW + 2, HW - 2);
+  return spot;
+}
+
+function describeSpot(team, spot) {
+  const dg = Math.round(spot.distanceTo(team.attackGoal));
+  const side = Math.abs(spot.z) < 8 ? 'central' : spot.z > 0 ? 'on the right' : 'on the left';
+  return `${dg} m from goal, ${side}`;
+}
+
+// Broadcasts from teammates running onto a spot. The carrier's decision reads these.
+export function ballCalls(match, carrier) {
+  const out = [];
+  for (const q of carrier.team.players) {
+    if (q === carrier || !q.call?.spot || match.time > q.call.until) continue;
+    const w = callWindow(match, carrier.pos, q, q.call.spot);
+    const gap = Math.round(q.pos.distanceTo(q.call.spot));
+    const where = describeSpot(q.team, q.call.spot);
+    const verdict = w.margin >= 0.1 && w.recvLate < 0.35
+      ? `he reaches it ${w.margin.toFixed(1)} s before a defender`
+      : `a defender gets there first`;
+    out.push(`${q.name} (#${q.number}) wants the ball ${where}. He is ${gap} m from that spot and running onto it. ${verdict}.`);
+  }
+  return out;
+}
+
 export function throughWindow(match, from, receiver) {
   const spot = throughSpot(receiver);
   const dist = Math.max(2, spot.distanceTo(from));
@@ -459,6 +546,13 @@ export function throughWindow(match, from, receiver) {
 
 // The second ball of a double pass: further ahead than a normal through ball,
 // into the space the runner is already sprinting toward.
+// A pass to the spot a runner is calling for, not to where he is standing.
+export function callWindow(match, from, runner, spot) {
+  const dist = Math.max(4, spot.distanceTo(from));
+  const arrive = clamp(9.5 + dist * 0.08, 10, 13.5);
+  return marginAlong(match, from, spot.clone().setY(0), arrive, runner.team, runner);
+}
+
 export function doubleReturnWindow(match, from, runner) {
   const team = runner.team;
   const speed = Math.max(runner.speed, 5.5);

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { PITCH } from '../world/dims.js';
-import { carrierOptions, passWindow, throughWindow, doubleReturnWindow } from './ai.js';
+import { carrierOptions, passWindow, throughWindow, doubleReturnWindow, callWindow, ballCalls } from './ai.js';
 import { MENTALITY } from './match.js';
 
 const HL = PITCH.halfLength, HW = PITCH.halfWidth;
@@ -25,6 +25,7 @@ function zone(team, pos) {
 const CARRIER_INSTRUCTIONS = `You have the ball. Choose the next touch.
 If a double-pass return is listed, play that first time into the runner's path.
 If you have a clear sight of goal, shoot.
+Teammates nearest the opponent's goal run without the ball and call for it at a spot. If a call is listed and he reaches that spot before a defender, pass into the call. Ignore the call when a defender gets there first.
 Otherwise, if a double pass is listed, take it: give the short pass and sprint past the receiver so he can play you in.
 If there is no double pass, pass forward as soon as a teammate has a direct line. Do not wait on the ball.
 Carry it forward when no forward pass is on and there is space.
@@ -84,6 +85,8 @@ export class Brain {
     if (ret) return ret;
     const shots = src.filter((o) => o.kind === 'shoot' && o.value >= 1.7);
     if (shots.length) return this.among(shots);
+    const calls = src.filter((o) => o.call && o.sensible);
+    if (calls.length) return this.among(calls);
     const dbl = src.find((o) => o.combo === 'double');
     if (dbl) return dbl;
     const fwd = src.filter((o) => (o.kind === 'pass' || o.kind === 'through' || o.kind === 'lob') && (o.gain ?? 0) > 1);
@@ -158,6 +161,11 @@ export class Brain {
       if (!choice.receiver || choice.receiver.busy) return null;
       if (p.holding && choice.kind === 'pass') return { kind: 'gkThrow', receiver: choice.receiver };
       // The window may have closed while he shaped to pass.
+      if (choice.call && choice.spot) {
+        const w = callWindow(this.match, p.pos, choice.receiver, choice.spot);
+        if (w.margin < 0.06 || w.recvLate > 0.4) return null;
+        return { kind: 'through', receiver: choice.receiver, call: true, spot: choice.spot.clone() };
+      }
       if (choice.kind === 'pass') {
         const q = choice.receiver;
         const dx = p.pos.x - q.pos.x, dz = p.pos.z - q.pos.z;
@@ -214,7 +222,7 @@ export class Brain {
     const m = this.match;
     const T = p.team;
     const criteria = {};
-    const head = list.filter((o) => o.combo || (o.kind === 'shoot' && o.value >= 1.7));
+    const head = list.filter((o) => o.combo || o.call || (o.kind === 'shoot' && o.value >= 1.7));
     const rest = list.filter((o) => !head.includes(o));
     for (const o of [...head, ...rest].slice(0, 7)) criteria[o.id] = o.text;
     const state = this.carrierState(p);
@@ -274,6 +282,7 @@ export class Brain {
         ratings: { pace: +p.def.pace.toFixed(2), passing: +p.def.passing.toFixed(2), shooting: +p.def.shooting.toFixed(2) },
       },
       teammates: mates,
+      calls_for_the_ball: ballCalls(m, p),
       team_mentality: MENTALITY[T.mentality].label,
       double_pass: m.doublePass?.wall === p
         ? `${m.doublePass.runner.name} gave you the first ball and is sprinting on. Return it first time into his run.`
