@@ -24,6 +24,7 @@ function zone(team, pos) {
 // because the ball is played before a reply gets back. The team scores by
 // getting a man into the penalty area and finishing, not by keeping the ball.
 const CARRIER_INSTRUCTIONS = `You have the ball. Score with a long through pass to a forward, or with a double pass.
+If you are the goalkeeper, kick the ball long into midfield. Do not pass it short.
 A teammate is offside when he is in the opponent's half and nearer their goal than both the ball and the second-last defender. Never pass to him. A pass into the space beyond that line is allowed when he is still level with it.
 If you are ahead of every defender, keep running at goal. Do not pass. Shoot when a shot on that run is listed. Until then, take another touch toward goal.
 If you just received a double pass and the return is listed, play it first time into the runner's path.
@@ -117,6 +118,8 @@ export class Brain {
     if (!list.length) return null;
     const live = list.filter((o) => o.value > 0.15 && !o.offside);
     const src = live.length ? live : [list.find((o) => o.kind === 'dribble') || list[0]];
+    const punt = src.find((o) => o.midfield);
+    if (punt) return punt;
     const breakShot = src.find((o) => o.finish === 'break');
     if (breakShot) return breakShot;
     const breakRun = src.find((o) => o.alone && o.kind === 'dribble');
@@ -211,6 +214,7 @@ export class Brain {
   // Refresh option parameters (receiver may have moved), drop stale ones.
   resolve(p, choice) {
     if (!choice) return null;
+    if (p.role === 'GK' && (p.holding || choice.midfield)) return { kind: 'clear', midfield: true };
     if (choice.kind === 'pass' || choice.kind === 'through' || choice.kind === 'lob') {
       if (!choice.receiver || choice.receiver.busy) return null;
       if (playerOffside(this.match, choice.receiver)) return null;
@@ -236,6 +240,7 @@ export class Brain {
       }
       return { kind: choice.kind, receiver: choice.receiver, combo: choice.combo || null };
     }
+    if (choice.kind === 'clear' || choice.midfield) return { kind: 'clear', midfield: p.role === 'GK' || !!choice.midfield };
     if (p.holding && choice.kind !== 'lob' && choice.kind !== 'pass') {
       const fwd = p.team.players.filter((q) => q.role !== 'GK').sort((a, b) => b.pos.x * p.team.dir - a.pos.x * p.team.dir)[3];
       return { kind: 'lob', receiver: fwd };
@@ -259,6 +264,7 @@ export class Brain {
     if (!this.controls(p)) return null;
     const m = this.match;
     if (r.type === 'penalty') return { kind: 'shoot', power: 0.78 + this.rnd() * 0.12 };
+    if (r.type === 'goalkick') return { kind: 'clear', midfield: true };
     if (r.type === 'kickoff') return null;
     if (r.type === 'corner') return { kind: 'cross' };
     let d = this.decisions.get(p);

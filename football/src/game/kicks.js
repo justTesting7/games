@@ -43,6 +43,47 @@ export function loftedPass(from, target, angle, { error = 0, rnd = Math.random }
   return new THREE.Vector3(Math.cos(yaw) * Math.cos(a) * speed, Math.sin(a) * speed, Math.sin(yaw) * Math.cos(a) * speed);
 }
 
+// Driven punt whose first bounce is at `target`, solved from the real release
+// height. A ground solver sends a chest-high goal kick well short of midfield.
+const _punt = new Ball();
+_punt.silent = true;
+_punt.collideGoal = () => {};
+_punt.collideBoards = () => {};
+function puntRange(y0, speed, angle) {
+  const b = _punt;
+  b.place(-20, 0, y0);
+  b.vel.set(Math.cos(angle) * speed, Math.sin(angle) * speed, 0);
+  b.spin.set(0, 0, 0);
+  b.inGoal = 0;
+  b.acc = 0;
+  b.quat.identity();
+  b.onGround = false;
+  b.events.length = 0;
+  let airborne = false;
+  const h = 1 / 240;
+  for (let t = 0; t < 4.5; t += h) {
+    b.substep(h);
+    if (b.pos.y > BALL_RADIUS + 0.35) airborne = true;
+    if (airborne && b.pos.y <= BALL_RADIUS + 0.02) return b.pos.x + 20;
+  }
+  return b.pos.x + 20;
+}
+
+export function puntVelocity(from, target, angle = 0.46) {
+  _d.subVectors(target, from).setY(0);
+  const dist = Math.max(8, _d.length());
+  const yaw = Math.atan2(_d.z, _d.x);
+  const y0 = Math.max(BALL_RADIUS + 0.02, from.y);
+  let lo = 12, hi = 40;
+  for (let i = 0; i < 14; i++) {
+    const mid = (lo + hi) / 2;
+    if (puntRange(y0, mid, angle) < dist) lo = mid;
+    else hi = mid;
+  }
+  const speed = (lo + hi) / 2;
+  return new THREE.Vector3(Math.cos(yaw) * Math.cos(angle) * speed, Math.sin(angle) * speed, Math.sin(yaw) * Math.cos(angle) * speed);
+}
+
 // Velocity that sends the ball through `target` (a point on the goal plane)
 // at roughly `speed`, found by simulating the real flight and correcting.
 export function shotVelocity(from, target, speed, spin) {

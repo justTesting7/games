@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { Ball } from './ball.js';
 import { PITCH, GOAL, BALL_RADIUS } from '../world/dims.js';
 import { KICKOFF, KICKOFF_DEFEND, squad, CLUBS } from './teams.js';
-import { groundPass, loftedPass, shotVelocity, leadTarget, gauss } from './kicks.js';
+import { groundPass, loftedPass, puntVelocity, shotVelocity, leadTarget, gauss } from './kicks.js';
 import { ACTION_DUR, KICK } from './actions.js';
 import { teamShape, chooseChasers, defendTargets, supportTargets, keeperTarget, carrierOptions, laneOpen, passWindow, throughWindow, doubleReturnWindow, callWindow, openCorner, onsideMax, aheadOfEveryone } from './ai.js';
 
@@ -358,10 +358,7 @@ export class Match {
     }
     if (r.type === 'penalty') return { kind: 'shoot' };
     if (r.type === 'corner') return { kind: 'cross' };
-    if (r.type === 'goalkick') {
-      const fwd = mates.filter((q) => q.role !== 'DEF').sort((a, b) => b.pos.x * p.team.dir - a.pos.x * p.team.dir)[0];
-      return this.rnd() < 0.5 ? { kind: 'lob', receiver: fwd } : { kind: 'pass', receiver: mates.filter((q) => q.role === 'DEF')[Math.floor(this.rnd() * 4)] };
-    }
+    if (r.type === 'goalkick') return { kind: 'clear', midfield: true };
     const near = mates.sort((a, b) => a.pos.distanceTo(p.pos) - b.pos.distanceTo(p.pos)).slice(0, 3);
     return { kind: r.type === 'throw' ? 'throw' : 'pass', receiver: near[Math.floor(this.rnd() * near.length)] };
   }
@@ -1196,17 +1193,32 @@ export class Match {
         const far = -Math.sign(p.pos.z || 1);
         target = q ? leadTarget(from, q.pos, q.vel, 0.6) : new THREE.Vector3(g.x - Math.sign(g.x) * 8, R, far * 3);
       } else if (kind === 'clear') {
-        target = p.pos.clone().addScaledVector(T.attackGoal.clone().sub(p.pos).setY(0).normalize(), 38);
-        target.z = THREE.MathUtils.clamp(target.z + (this.rnd() - 0.5) * 20, -HW + 3, HW - 3);
-        target.x = THREE.MathUtils.clamp(target.x, -HL + 5, HL - 5);
+        if (p.role === 'GK' || plan.midfield) {
+          // First bounce around the halfway line. Roll carries it through midfield.
+          const depth = -2 + this.rnd() * 12;
+          target = new THREE.Vector3(T.dir * depth, 0, (this.rnd() - 0.5) * 22);
+          target.x = THREE.MathUtils.clamp(target.x, -14, 14);
+          target.z = THREE.MathUtils.clamp(target.z, -22, 22);
+          q = null;
+        } else {
+          target = p.pos.clone().addScaledVector(T.attackGoal.clone().sub(p.pos).setY(0).normalize(), 38);
+          target.z = THREE.MathUtils.clamp(target.z + (this.rnd() - 0.5) * 20, -HW + 3, HW - 3);
+          target.x = THREE.MathUtils.clamp(target.x, -HL + 5, HL - 5);
+        }
       } else {
         if (!q) q = this.pickReceiver(p, null, false, true);
         target = q ? leadTarget(from, q.pos, q.vel, 0.9) : p.pos.clone().addScaledVector(p.forward(_v), 25);
       }
       const dist = from.distanceTo(target);
+      const gkPunt = kind === 'clear' && (p.role === 'GK' || plan.midfield);
       const angle = kind === 'throw' ? 0.35 : kind === 'clear' ? 0.62 : kind === 'cross' ? 0.42 : THREE.MathUtils.clamp(0.3 + dist * 0.006, 0.32, 0.62);
       const err = (kind === 'clear' ? 0.08 : 0.035 + (1 - p.def.passing) * 0.05) * errScale;
       spec.velocity = () => {
+        if (gkPunt) {
+          const v = puntVelocity(ball.pos, target, 0.46);
+          v.applyAxisAngle(UP, (this.rnd() - 0.5) * 0.05);
+          return v;
+        }
         const v = loftedPass(ball.pos, target, angle, { error: err, rnd: this.rnd });
         if (kind === 'throw') v.multiplyScalar(Math.min(1, 14 / v.length()));
         return v;
@@ -1503,11 +1515,7 @@ export class Match {
   }
 
   localKeeperPlan(p) {
-    const mates = p.team.players.filter((q) => q !== p);
-    const open = mates.filter((q) => q.role === 'DEF' && this.openness(q) > 0.5);
-    if (open.length && this.rnd() < 0.6) return { kind: 'gkThrow', receiver: open[Math.floor(this.rnd() * open.length)] };
-    const fwd = mates.filter((q) => q.role === 'FWD' || q.role === 'MID').sort((a, b) => this.openness(b) - this.openness(a))[0];
-    return { kind: 'lob', receiver: fwd };
+    return { kind: 'clear', midfield: true };
   }
 
   keeperAI(p, dt) {
@@ -1660,6 +1668,8 @@ export class Match {
   tryHeader(p, human = false) {
     const ball = this.ball;
     if (p.kickLock > 0 || p.busy || p.action) return;
+    // A throw-in is for feet. Heading it, facing the ball, plays it back over the line.
+    if (this.pass?.kind === 'throw') return;
     if (ball.pos.y < 1.35 || ball.pos.y > 2.7) return;
     const head = p.pos.clone().setY(1.75);
     if (head.distanceTo(ball.pos) > 0.85) return;
@@ -1678,9 +1688,21 @@ export class Match {
     else if (Math.abs(p.pos.x - T.ownGoal.x) < 25) plan = { kind: 'headClear' };
     else plan = { kind: 'headPass', receiver: this.pickReceiver(p, null, false) };
     if (plan.kind === 'header') { this.executePlan(p, plan); return; }
-    const target = plan.kind === 'headClear' || !plan.receiver
+    let target = plan.kind === 'headClear' || !plan.receiver
       ? p.pos.clone().addScaledVector(T.attackGoal.clone().sub(p.pos).setY(0).normalize(), 18)
       : plan.receiver.pos.clone();
+    // Never head back toward the touchline. The player is facing the ball, so
+    // the man "ahead" of him is often the one standing on the line.
+    const margin = Math.abs(p.pos.z) - Math.abs(target.z);
+    if (margin < 4 || Math.abs(target.z) > HW - 6) {
+      const inward = -Math.sign(p.pos.z || 1);
+      target = new THREE.Vector3(
+        THREE.MathUtils.clamp(p.pos.x + T.dir * 10, -HL + 4, HL - 4),
+        0,
+        THREE.MathUtils.clamp(p.pos.z + inward * 14, -(HW - 10), HW - 10),
+      );
+      plan.receiver = null;
+    }
     const v = loftedPass(ball.pos, target, 0.5, { error: 0.08, rnd: this.rnd });
     v.multiplyScalar(Math.min(1, 15 / v.length()));
     this.headBall(p, { kind: 'headPass', velocity: () => v, receiver: plan.receiver || null, power: 0.4 });

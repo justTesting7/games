@@ -444,6 +444,12 @@ export function carrierOptions(match, p) {
   const T = p.team;
   const goal = T.attackGoal;
   const opts = [];
+  if (p.role === 'GK') {
+    return [{
+      id: 'punt', kind: 'clear', midfield: true, value: 2,
+      text: 'kick the ball long into midfield, around the halfway line. Do not pass it short',
+    }];
+  }
   const distGoal = p.pos.distanceTo(goal);
   const pr = match.pressureOn(p);
   const ang = Math.abs(Math.atan2(p.pos.z, Math.abs(goal.x - p.pos.x)));
