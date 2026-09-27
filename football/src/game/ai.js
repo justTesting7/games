@@ -37,9 +37,11 @@ export function teamShape(match, team) {
         x += bx * 0.4 + 0.1 + m.line / HL;
         const wide = d.pos === 'LM' || d.pos === 'RM';
         const full = d.pos === 'LB' || d.pos === 'RB';
-        const lead = p.role === 'FWD' ? 0.14 : wide ? 0.06 : d.pos === 'CM' ? 0.0 : full ? -0.06 : -0.16;
-        const station = p.role === 'FWD' ? 0.2 : wide ? 0.08 : d.pos === 'CM' ? -0.02 : full ? -0.1 : -0.24;
-        const cap = bx + (p.role === 'DEF' ? 0.1 : 0.28);
+        // Strikers live in the final third so a call is a ball into the box,
+        // not another pass in midfield. The cap still keeps the run reachable.
+        const lead = p.role === 'FWD' ? 0.32 : wide ? 0.14 : d.pos === 'CM' ? 0.02 : full ? -0.04 : -0.16;
+        const station = p.role === 'FWD' ? 0.4 : wide ? 0.18 : d.pos === 'CM' ? 0.0 : full ? -0.08 : -0.24;
+        const cap = bx + (p.role === 'FWD' ? 0.52 : wide ? 0.38 : p.role === 'DEF' ? 0.1 : 0.28);
         const depth = Math.min(Math.max(bx + lead, station), cap);
         x = clamp(Math.max(x, depth), -0.88, 0.9);
       } else {
@@ -199,12 +201,16 @@ export function supportTargets(match, team, shape) {
         continue;
       }
       if (leaders.has(p)) {
-        const live = p.call && match.time < p.call.until && p.call.spot;
-        if (!live) p.call = { spot: advantageSpot(p), until: match.time + 2.4 };
-        pt.copy(p.call.spot);
-        const gap = pt.distanceTo(p.pos);
+        const step = advantageSpot(p);
+        const arrived = p.call?.spot && p.pos.distanceTo(p.call.spot) < 2.2;
+        const live = p.call && match.time < p.call.until && p.call.spot && !arrived;
+        if (!live) p.call = { spot: step, until: match.time + 2.2 };
+        // Keep going to the attacking station after the called spot, so the
+        // run does not die ten metres ahead of a midfield ball.
+        const further = home.x * dir > p.call.spot.x * dir ? home : p.call.spot;
+        pt.copy(further);
         p.run = { t: match.time };
-        out.set(p, { point: pt, speed: gap < 1.4 ? 2.2 : p.maxSpeed });
+        out.set(p, { point: pt, speed: p.maxSpeed });
         continue;
       }
       p.call = null;
@@ -259,29 +265,29 @@ export function carrierOptions(match, p) {
   const pr = match.pressureOn(p);
   const ang = Math.abs(Math.atan2(p.pos.z, Math.abs(goal.x - p.pos.x)));
   const inRange = distGoal < 32 && ang < 1.2;
-  const keeper = T.opp.keeper;
-  // Shot quality: distance, angle, blockers in the cone.
-  let blockers = 0;
-  for (const o of T.opp.players) {
-    if (o === keeper) continue;
-    const a = _v.subVectors(o.pos, p.pos).setY(0);
-    const g = new THREE.Vector3().subVectors(goal, p.pos).setY(0);
-    const along = a.dot(g.normalize());
-    if (along > 0 && along < distGoal) {
-      const perp = Math.sqrt(Math.max(0, a.lengthSq() - along * along));
-      if (perp < 1.2 + along * 0.08) blockers++;
-    }
-  }
+  const corner = openCorner(T, p.pos);
+  const blockers = corner.blockers;
   if (inRange) {
     const q = clamp(1.25 - distGoal / 24 - ang * 0.35 - blockers * 0.22 + p.def.shooting * 0.3, 0, 1);
     let value = q * 1.15 + (distGoal < 16 ? 0.35 : 0);
-    // A clear sight is the finish. It outranks another sideways pass.
-    if (distGoal < 22 && blockers === 0 && ang < 0.7) value = Math.max(value, 1.9);
-    else if (blockers === 0 && ang < 0.75 && distGoal < 24) value = Math.max(value, 1.9);
-    else if (blockers === 0 && ang < 0.55 && distGoal < 32) value = Math.max(value, 1.4);
+    // A finish is only listed when the open corner is actually free. That is
+    // the shot CARRIER_INSTRUCTIONS tells him to take.
+    const inBox = distGoal < 16.5 && ang < 1.1 && corner.open;
+    const clearSight = distGoal < 22 && ang < 0.8 && corner.open;
+    let finish = null;
+    let text = `shoot at goal from ${Math.round(distGoal)} m${blockers ? `, ${blockers} defender${blockers > 1 ? 's' : ''} in the way` : corner.covered ? ', keeper is covering the near corner' : ', clear sight of goal'}`;
+    if (inBox) {
+      finish = 'box';
+      value = Math.max(value, 2);
+      text = `shot from inside the penalty area into the open corner, ${Math.round(distGoal)} m out. Nobody is in the way and the keeper is not covering it. Finish it`;
+    } else if (clearSight) {
+      finish = 'sight';
+      value = Math.max(value, 1.9);
+      text = `clear sight of goal from ${Math.round(distGoal)} m into the open corner, inside 22 m. Finish it`;
+    } else if (blockers === 0 && ang < 0.55 && distGoal < 32) value = Math.max(value, 1.4);
     else if (distGoal < 18 && blockers <= 1 && ang < 0.9) value = Math.max(value, 1.55);
     else if (distGoal < 13 && blockers <= 2) value = Math.max(value, 1.35);
-    opts.push({ id: 'shoot', kind: 'shoot', value, text: `shoot at goal from ${Math.round(distGoal)} m${blockers ? `, ${blockers} defender${blockers > 1 ? 's' : ''} in the way` : ', clear sight of goal'}` });
+    opts.push({ id: 'shoot', kind: 'shoot', finish, aimZ: finish ? corner.aimZ : null, value, text });
   }
   const mates = T.players.filter((q) => q !== p && !q.busy);
   const passes = [];
@@ -313,7 +319,11 @@ export function carrierOptions(match, p) {
     }
     const kind = w.margin < 0.12 && open > 0.6 && d > 16 && gain > 2 && !spinning ? 'lob' : 'pass';
     if (kind === 'lob') v = open * 0.55 + clamp(gain / 32, 0, 0.3) + (attThird ? 0.1 : 0) - 0.2;
-    passes.push({ id: `pass_${q.number}`, kind, receiver: q, dist: Math.round(d), gain, value: v, text: `${kind === 'lob' ? 'chip a lofted ball' : 'pass'} to ${q.name} (#${q.number}, ${q.slot}), ${Math.round(d)} m ${gain > 4 ? 'forward' : gain < -4 ? 'back' : 'square'}, ${open > 0.6 ? 'unmarked' : open > 0.25 ? 'loosely marked' : 'tightly marked'}` });
+    const passBox = spotInBox(goal, w.spot) && gain > 2 && v > 0.45;
+    passes.push({
+      id: `pass_${q.number}`, kind, receiver: q, dist: Math.round(d), gain, value: v, intoBox: passBox,
+      text: `${kind === 'lob' ? 'chip a lofted ball' : 'pass'} to ${q.name} (#${q.number}, ${q.slot}), ${Math.round(d)} m ${gain > 4 ? 'forward' : gain < -4 ? 'back' : 'square'}, ${open > 0.6 ? 'unmarked' : open > 0.25 ? 'loosely marked' : 'tightly marked'}${passBox ? '. This puts him in the penalty area' : ''}`,
+    });
     const goingOn = q.vel.x * T.dir > 2.2;
     if ((q.run || goingOn) && gain > 2) {
       const tw = throughWindow(match, p.pos, q);
@@ -322,7 +332,11 @@ export function carrierOptions(match, p) {
         tv = 0.55 + clamp(tw.margin, 0, 0.8) * 0.9 + (attThird ? 0.4 : 0.1);
         if (Math.abs(tw.spot.x - goal.x) < 20) tv += 0.25;
       }
-      passes.push({ id: `through_${q.number}`, kind: 'through', receiver: q, dist: Math.round(tw.dist), gain, value: tv, text: `through ball into the path of ${q.name} (#${q.number}) running in behind` });
+      const throughBox = spotInBox(goal, tw.spot) && tv > 0.45;
+      passes.push({
+        id: `through_${q.number}`, kind: 'through', receiver: q, dist: Math.round(tw.dist), gain, value: tv, intoBox: throughBox,
+        text: `through ball into the path of ${q.name} (#${q.number}) running in behind${throughBox ? '. This puts him in the penalty area' : ''}`,
+      });
     }
   }
   let bestForward = -1;
@@ -332,7 +346,8 @@ export function carrierOptions(match, p) {
   const inOwnThird = p.pos.x * T.dir < -HL * 0.45;
   // A double pass needs a teammate close enough to play off, and room to run past him.
   const dp = match.doublePass;
-  if (!(dp && dp.wall === p) && p.role !== 'GK' && space >= 4) {
+  // A one-two is for breaking a line. Inside the area the touch is a finish.
+  if (!(dp && dp.wall === p) && p.role !== 'GK' && space >= 4 && distGoal >= 16.5) {
     let wall = null, wallScore = -1, wallGain = 0;
     for (const q of mates) {
       if (q.role === 'GK') continue;
@@ -385,6 +400,7 @@ export function carrierOptions(match, p) {
     if (!Number.isFinite(w.flight) || w.recvLate > 0.45 || w.margin < -0.08 || gain < 0) continue;
     const sensible = w.margin >= 0.1 && w.recvLate < 0.35 && gain > 1;
     const where = describeSpot(T, call.spot);
+    const inArea = spotInBox(goal, call.spot);
     const verdict = sensible
       ? `he reaches it ${w.margin.toFixed(1)} s before a defender`
       : `a defender gets there first`;
@@ -397,8 +413,8 @@ export function carrierOptions(match, p) {
       spot: call.spot.clone(),
       dist: Math.round(w.dist),
       gain,
-      value: sensible ? 1.35 + clamp(w.margin, 0, 0.4) : 0.05,
-      text: `${q.name} (#${q.number}) wants the ball ${where}. He is ${Math.round(gap)} m from that spot and running onto it. ${verdict}. Pass into that call only if he wins the race.`,
+      value: sensible ? 1.45 + clamp(w.margin, 0, 0.4) + (inArea ? 0.2 : 0) : 0.05,
+      text: `${q.name} (#${q.number}) is running into the penalty area and wants the ball ${where}. He is ${Math.round(gap)} m from that spot. ${verdict}. Pass into that call only if he wins the race.`,
     });
   }
   passes.sort((a, b) => b.value - a.value);
@@ -406,7 +422,7 @@ export function carrierOptions(match, p) {
   const wide = Math.abs(p.pos.z) > HW - 18 && p.pos.x * T.dir > HL - 30;
   if (wide) {
     const inBox = T.players.filter((m) => m !== p && Math.abs(m.pos.x - goal.x) < 17 && Math.abs(m.pos.z) < 18).length;
-    opts.push({ id: 'cross', kind: 'cross', value: 0.55 + inBox * 0.25, text: `whip a cross into the box (${inBox} teammate${inBox === 1 ? '' : 's'} there)` });
+    opts.push({ id: 'cross', kind: 'cross', boxMates: inBox, value: 0.55 + inBox * 0.25, text: `cross from wide with ${inBox} teammate${inBox === 1 ? '' : 's'} in the box` });
   }
   // Dribble: open space ahead?
   let dribbleValue = clamp(space / 14, 0, 1) * 0.55 + p.def.pace * 0.12 - (pr.dist < 2 ? 0.35 : 0);
@@ -489,11 +505,42 @@ export function passWindow(match, from, receiver) {
 }
 
 // Firm ball into the space a runner is already moving toward.
+// The corner furthest from the keeper, and whether a shot there is free.
+export function openCorner(team, from) {
+  const goal = team.attackGoal;
+  const keeper = team.opp.keeper;
+  const near = GOAL.halfWidth - 0.45;
+  const posts = [-near, near];
+  const aimZ = posts.reduce((best, z) => Math.abs(z - keeper.pos.z) > Math.abs(best - keeper.pos.z) ? z : best);
+  const aim = _b.set(goal.x, 0, aimZ);
+  const dist = Math.max(1, Math.hypot(goal.x - from.x, goal.z - from.z));
+  let blockers = 0;
+  const gx = aim.x - from.x, gz = aim.z - from.z;
+  const glen = Math.hypot(gx, gz) || 1;
+  const ux = gx / glen, uz = gz / glen;
+  for (const o of team.opp.players) {
+    if (o.role === 'GK') continue;
+    const ax = o.pos.x - from.x, az = o.pos.z - from.z;
+    const along = ax * ux + az * uz;
+    if (along > 0.5 && along < dist) {
+      const perp = Math.sqrt(Math.max(0, ax * ax + az * az - along * along));
+      if (perp < 0.65 + along * 0.035) blockers++;
+    }
+  }
+  const covered = Math.abs(keeper.pos.z - aimZ) < 1.4;
+  return { aimZ, blockers, covered, open: blockers === 0 && !covered };
+}
+
+function spotInBox(goal, spot) {
+  return !!spot && Math.abs(spot.x - goal.x) < 16.5 && Math.abs(spot.z) < 20.5;
+}
+
 // Where one of the two players nearest the opponent's goal asks for the ball.
+// The run aims at the penalty spot. The call itself is only the part of that
+// run he can reach before the ball would, so the carrier has a real pass.
 function advantageSpot(p) {
   const goal = p.team.attackGoal;
   const dir = p.team.dir;
-  const distGoal = p.pos.distanceTo(goal);
   const spot = p.pos.clone().setY(0);
   let bend = 0;
   let nearest = null;
@@ -504,14 +551,27 @@ function advantageSpot(p) {
     if (d < nd) { nd = d; nearest = o; }
   }
   if (nearest && nd < 9) bend = Math.sign(p.pos.z - nearest.pos.z) * clamp(4.5 - nd * 0.35, 1.2, 4);
-  if (!bend) bend = p.pos.z > 2 ? -2.5 : p.pos.z < -2 ? 2.5 : (p.def?.z > 0 ? 3 : -3);
-  if (distGoal < 18) {
-    const ahead = (goal.x - Math.sign(goal.x) * clamp(Math.min(distGoal, 14), 8, 14) - p.pos.x) * dir;
-    spot.x = clamp(p.pos.x + dir * clamp(ahead, 2, 6), -HL + 2, HL - 8);
-  } else {
-    spot.x = clamp(p.pos.x + dir * 8, -HL + 2, HL - 8);
+  if (!bend) bend = p.pos.z > 2 ? -2.2 : p.pos.z < -2 ? 2.2 : (p.def?.z > 0 ? 2.4 : -2.4);
+  const distGoal = p.pos.distanceTo(goal);
+  // Already at the goalkeeper: stay in the six-yard box and attack the ball.
+  if (distGoal < 12) {
+    spot.x = clamp(p.pos.x + dir * clamp(distGoal - 6.5, 1.5, 4), -HL + 2, HL - 5.5);
+    spot.z = clamp(p.pos.z + bend, -8, 8);
+    return spot;
   }
-  spot.z = clamp(p.pos.z + bend, -HW + 2, HW - 2);
+  const aim = goal.clone().setY(0);
+  aim.x -= Math.sign(goal.x || dir) * 11;
+  aim.z = clamp(bend, -7.5, 7.5);
+  const to = _a.subVectors(aim, spot).setY(0);
+  const dist = to.length();
+  if (dist < 1.2) {
+    spot.z = clamp(spot.z + Math.sign(bend || 1) * 3, -8, 8);
+  } else {
+    const step = Math.min(dist, 9.5);
+    spot.addScaledVector(to.multiplyScalar(1 / dist), step);
+  }
+  spot.x = clamp(spot.x, -HL + 2, HL - 5.5);
+  spot.z = clamp(spot.z, -HW + 2, HW - 2);
   return spot;
 }
 
@@ -532,7 +592,7 @@ export function ballCalls(match, carrier) {
     const verdict = w.margin >= 0.1 && w.recvLate < 0.35
       ? `he reaches it ${w.margin.toFixed(1)} s before a defender`
       : `a defender gets there first`;
-    out.push(`${q.name} (#${q.number}) wants the ball ${where}. He is ${gap} m from that spot and running onto it. ${verdict}.`);
+    out.push(`${q.name} (#${q.number}) is running into the penalty area and wants the ball ${where}. He is ${gap} m from that spot. ${verdict}.`);
   }
   return out;
 }

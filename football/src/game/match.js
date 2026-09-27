@@ -4,7 +4,7 @@ import { PITCH, GOAL, BALL_RADIUS } from '../world/dims.js';
 import { KICKOFF, KICKOFF_DEFEND, squad, CLUBS } from './teams.js';
 import { groundPass, loftedPass, shotVelocity, leadTarget, gauss } from './kicks.js';
 import { ACTION_DUR, KICK } from './actions.js';
-import { teamShape, chooseChasers, defendTargets, supportTargets, keeperTarget, carrierOptions, laneOpen, passWindow, throughWindow, doubleReturnWindow, callWindow } from './ai.js';
+import { teamShape, chooseChasers, defendTargets, supportTargets, keeperTarget, carrierOptions, laneOpen, passWindow, throughWindow, doubleReturnWindow, callWindow, openCorner } from './ai.js';
 
 const HL = PITCH.halfLength, HW = PITCH.halfWidth, R = BALL_RADIUS;
 const GOAL_LINE = HL - PITCH.line * 0.5;
@@ -1132,6 +1132,8 @@ export class Match {
       }
       const power = plan.power ?? THREE.MathUtils.clamp(0.55 + dist / 45, 0.6, 0.95);
       const baseH = kind === 'header' ? 0.4 : 0.25 + power * power * 1.55;
+      // The touch instructions named this corner. Strike it there.
+      if (plan.aimZ != null && kind === 'shoot') aimZ = plan.aimZ;
       const target = new THREE.Vector3(g.x, THREE.MathUtils.clamp(baseH + (this.rnd() - 0.4) * 0.5, 0.2, 2.2), aimZ);
       if (power > 0.93) target.y += (power - 0.93) * 18;
       const speed = kind === 'header' ? 11 + power * 5 : 16 + power * 15;

@@ -21,14 +21,18 @@ function zone(team, pos) {
 }
 
 // The touch Jev is asked to choose. The offline pick follows this same order,
-// because the ball is played before a reply gets back.
-const CARRIER_INSTRUCTIONS = `You have the ball. Choose the next touch.
-If a double-pass return is listed, play that first time into the runner's path.
-If you have a clear sight of goal, shoot.
-Teammates nearest the opponent's goal run without the ball and call for it at a spot. If a call is listed and he reaches that spot before a defender, pass into the call. Ignore the call when a defender gets there first.
-Otherwise, if a double pass is listed, take it: give the short pass and sprint past the receiver so he can play you in.
-If there is no double pass, pass forward as soon as a teammate has a direct line. Do not wait on the ball.
-Carry it forward when no forward pass is on and there is space.
+// because the ball is played before a reply gets back. The team scores by
+// getting a man into the penalty area and finishing, not by keeping the ball.
+const CARRIER_INSTRUCTIONS = `You have the ball. Attack together and get a shot on goal.
+If a double-pass return is listed, play it first time into the runner's path.
+If a shot from inside the penalty area is listed, shoot. Do not pass a chance in the box away.
+If a clear sight of goal from inside 22 m is listed, shoot.
+The two teammates nearest the opponent's goal are running into the penalty area and calling for the ball. If a call is listed and he reaches that spot before a defender, pass into the call. Ignore the call when a defender gets there first.
+If you are wide and a cross is listed with a teammate in the box, cross it.
+If a pass or through ball is listed that puts a teammate in the penalty area, play that.
+Otherwise, if a double pass is listed, take it: give the short pass and sprint past the receiver so he can play you in. Do not start a double pass when a shot or a ball into the box is on.
+If none of those is on, pass forward as soon as a teammate has a direct line. Do not wait on the ball.
+Carry toward goal only when no shot and no forward pass is on and there is space.
 Pass backward only when every forward pass is closed and you cannot carry the ball forward.`;
 
 // Carrier decisions: a local choice is made instantly and executed after a
@@ -83,10 +87,16 @@ export class Brain {
     const src = live.length ? live : [list.find((o) => o.kind === 'dribble') || list[0]];
     const ret = src.find((o) => o.combo === 'return');
     if (ret) return ret;
-    const shots = src.filter((o) => o.kind === 'shoot' && o.value >= 1.7);
-    if (shots.length) return this.among(shots);
+    const box = src.filter((o) => o.finish === 'box');
+    if (box.length) return this.among(box);
+    const sight = src.filter((o) => o.finish === 'sight');
+    if (sight.length) return this.among(sight);
     const calls = src.filter((o) => o.call && o.sensible);
     if (calls.length) return this.among(calls);
+    const cross = src.find((o) => o.kind === 'cross' && o.boxMates > 0);
+    if (cross) return cross;
+    const into = src.filter((o) => o.intoBox);
+    if (into.length) return this.among(into);
     const dbl = src.find((o) => o.combo === 'double');
     if (dbl) return dbl;
     const fwd = src.filter((o) => (o.kind === 'pass' || o.kind === 'through' || o.kind === 'lob') && (o.gain ?? 0) > 1);
@@ -188,6 +198,7 @@ export class Brain {
     if (choice.kind === 'dribble' || choice.kind === 'shield') {
       return { kind: choice.kind, dir: new THREE.Vector3().subVectors(p.team.attackGoal, p.pos).setY(0).normalize().lerp(choice.dir || new THREE.Vector3(), 0.3).normalize() };
     }
+    if (choice.kind === 'shoot') return { kind: 'shoot', aimZ: choice.aimZ ?? null };
     return { kind: choice.kind };
   }
 
@@ -222,7 +233,7 @@ export class Brain {
     const m = this.match;
     const T = p.team;
     const criteria = {};
-    const head = list.filter((o) => o.combo || o.call || (o.kind === 'shoot' && o.value >= 1.7));
+    const head = list.filter((o) => o.combo || o.call || o.finish || o.intoBox || (o.kind === 'cross' && o.boxMates > 0));
     const rest = list.filter((o) => !head.includes(o));
     for (const o of [...head, ...rest].slice(0, 7)) criteria[o.id] = o.text;
     const state = this.carrierState(p);
