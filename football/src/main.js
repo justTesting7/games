@@ -12,6 +12,7 @@ import { Match, MENTALITY } from './game/match.js';
 import { Brain } from './game/brain.js';
 import { Jev } from './game/jev.js';
 import { BroadcastCamera, VIEWS } from './game/camera.js';
+import { MatchAudio } from './game/audio.js';
 
 const $ = (id) => document.getElementById(id);
 const HOME = 'kingsbridge', AWAY = 'redmoor';
@@ -66,6 +67,9 @@ function tex(name, srgb) {
 const world = { views: [] };
 let match = null, brain = null;
 const jev = new Jev();
+const audio = new MatchAudio();
+const soundEl = $('sound');
+if (soundEl) soundEl.textContent = audio.muted ? 'off' : 'on';
 
 async function load() {
   const textures = await progress.task('Textures', 2, async () => {
@@ -139,6 +143,11 @@ addEventListener('keydown', (e) => {
     banner(VIEWS[broadcast.view].label, '', 1.2);
   }
   if (k === 'Escape' && started) paused = !paused;
+  if (k === 'KeyM') {
+    const off = audio.toggle();
+    const el = $('sound');
+    if (el) el.textContent = off ? 'off' : 'on';
+  }
   if (k.startsWith('Arrow') || k === 'Space') e.preventDefault();
 });
 addEventListener('keyup', (e) => keys.delete(e.code));
@@ -175,6 +184,7 @@ function banner(title, sub = '', dur = 2.5) {
 const RESTART = { corner: 'Corner', freekick: 'Free kick', penalty: 'PENALTY', goalkick: 'Goal kick', throw: '' };
 function onEvents(evs) {
   for (const e of evs) {
+    audio.play(e, match.ball);
     if (e.type === 'net') world.goals[e.side]?.hit(e.point, e.speed);
     if (e.type === 'goal') {
       banner('GOAL!', `${e.scorer.name}${e.own ? ' (og)' : ''} ${e.minute}'`, 4.5);
@@ -234,6 +244,7 @@ function showMenu(label) {
   started = false;
 }
 $('play').addEventListener('click', () => {
+  audio.start();
   if (match.state !== 'intro') newMatch();
   $('menu').classList.add('hidden');
   for (const id of ['scorebug', 'jev', 'help']) $(id).classList.remove('hidden');
@@ -261,6 +272,7 @@ function step(dt, draw) {
     }
   }
   excite = Math.max(0, excite - dt * 0.15);
+  audio.update(dt, { excite, paused: !started || paused });
   if (!draw) return;
   syncViews(paused ? 0 : dt);
   for (const s of [-1, 1]) world.goals[s].update(dt, time);
