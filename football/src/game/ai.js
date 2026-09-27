@@ -87,6 +87,18 @@ export function playerOffside(match, p) {
   return x > second + 0.12 && x > ball + 0.12;
 }
 
+// Through on goal: every outfield opponent is behind him. The keeper is still to beat.
+export function aheadOfEveryone(match, p) {
+  if (!p || p.role === 'GK') return false;
+  const dir = p.team.dir;
+  const x = p.pos.x * dir;
+  for (const o of p.team.opp.players) {
+    if (o.role === 'GK') continue;
+    if (o.pos.x * dir > x + 0.4) return false;
+  }
+  return true;
+}
+
 // A run in behind is an advantage when this player reaches the spot before
 // every outfield defender. The spot is in a gap, just beyond the offside line.
 function bestAdvantage(match, p, passer) {
@@ -346,6 +358,8 @@ export function carrierOptions(match, p) {
   const inRange = distGoal < 32 && ang < 1.2;
   const corner = openCorner(T, p.pos);
   const blockers = corner.blockers;
+  const alone = aheadOfEveryone(match, p);
+  const fwdDir = new THREE.Vector3().subVectors(goal, p.pos).setY(0).normalize();
   if (inRange) {
     const q = clamp(1.25 - distGoal / 24 - ang * 0.35 - blockers * 0.22 + p.def.shooting * 0.3, 0, 1);
     let value = q * 1.15 + (distGoal < 16 ? 0.35 : 0);
@@ -353,9 +367,14 @@ export function carrierOptions(match, p) {
     // the shot CARRIER_INSTRUCTIONS tells him to take.
     const inBox = distGoal < 16.5 && ang < 1.1 && corner.open;
     const clearSight = distGoal < 22 && ang < 0.8 && corner.open;
+    const breakaway = alone && distGoal < 18 && ang < 1.1;
     let finish = null;
     let text = `shoot at goal from ${Math.round(distGoal)} m${blockers ? `, ${blockers} defender${blockers > 1 ? 's' : ''} in the way` : corner.covered ? ', keeper is covering the near corner' : ', clear sight of goal'}`;
-    if (inBox) {
+    if (breakaway) {
+      finish = 'break';
+      value = Math.max(value, 2.4);
+      text = `you are ahead of every defender, ${Math.round(distGoal)} m from goal. Shoot. Do not pass`;
+    } else if (inBox) {
       finish = 'box';
       value = Math.max(value, 2);
       text = `shot from inside the penalty area into the open corner, ${Math.round(distGoal)} m out. Nobody is in the way and the keeper is not covering it. Finish it`;
@@ -366,7 +385,20 @@ export function carrierOptions(match, p) {
     } else if (blockers === 0 && ang < 0.55 && distGoal < 32) value = Math.max(value, 1.4);
     else if (distGoal < 18 && blockers <= 1 && ang < 0.9) value = Math.max(value, 1.55);
     else if (distGoal < 13 && blockers <= 2) value = Math.max(value, 1.35);
-    opts.push({ id: 'shoot', kind: 'shoot', finish, aimZ: finish ? corner.aimZ : null, value, text });
+    opts.push({ id: 'shoot', kind: 'shoot', finish, aimZ: finish ? corner.aimZ : null, alone: breakaway, value, text });
+  }
+  // Past the defence: run at goal. There is no pass to choose.
+  if (alone && !opts.some((o) => o.finish === 'break')) {
+    opts.push({
+      id: 'dribble', kind: 'dribble', alone: true, dir: fwdDir, value: 2.3,
+      text: `you are ahead of every defender. Run at goal and score. Do not pass`,
+    });
+    opts.sort((a, b) => b.value - a.value);
+    return opts;
+  }
+  if (alone) {
+    opts.sort((a, b) => b.value - a.value);
+    return opts;
   }
   const mates = T.players.filter((q) => q !== p && !q.busy);
   const passes = [];
@@ -422,7 +454,6 @@ export function carrierOptions(match, p) {
   }
   let bestForward = -1;
   for (const o of passes) if (o.gain > 1 && o.value > bestForward) bestForward = o.value;
-  const fwdDir = new THREE.Vector3().subVectors(goal, p.pos).setY(0).normalize();
   const space = spaceAhead(match, p, fwdDir);
   const inOwnThird = p.pos.x * T.dir < -HL * 0.45;
   // A double pass needs a teammate close enough to play off, and room to run past him.

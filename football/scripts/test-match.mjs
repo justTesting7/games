@@ -135,4 +135,48 @@ assert.ok((agg.turnover || 0) > 10, 'possession changes hands');
   }
 }
 
+// Ahead of every defender: run at goal, and shoot once he is close. No pass.
+{
+  const m = new Match({ humanTeam: null, halfSeconds: 600, rnd: seeded(2) });
+  const brain = new Brain(m, null, { rnd: seeded(2), teams: m.teams });
+  m.start();
+  m.state = 'play';
+  const att = m.teams[0];
+  const carrier = att.players[9];
+  const place = (x) => {
+    carrier.pos.set(att.dir * x, 0, 1);
+    m.owner = carrier;
+    m.ball.pos.copy(carrier.pos).setY(0.11);
+    m.ball.vel.set(0, 0, 0);
+    for (const o of att.opp.players) {
+      o.pos.set(o.role === 'GK' ? att.dir * 51 : att.dir * 8, o.role === 'GK' ? 0 : o.def.z * 18, 0);
+    }
+  };
+  place(28);
+  const far = brain.options(carrier).best;
+  assert.equal(far.kind, 'dribble', 'a breakaway from distance is a run at goal');
+  assert.equal(far.alone, true, 'the run is marked as ahead of everyone');
+  assert.ok(!brain.options(carrier).list.some((o) => o.kind === 'pass' || o.kind === 'through'), 'no pass is offered on a breakaway');
+  place(42);
+  const close = brain.options(carrier).best;
+  assert.equal(close.kind, 'shoot', 'he shoots once he is in on goal');
+  att.opp.players[4].pos.set(att.dir * 46, 0, 0);
+  const marked = brain.options(carrier).best;
+  assert.ok(!marked.alone && marked.finish !== 'break', 'a defender still in front means he is not through');
+  place(28);
+  let passed = false;
+  let shot = false;
+  for (let i = 0; i < 60 * 6 && !shot; i++) {
+    const evs = m.update(1 / 60);
+    brain.update(1 / 60);
+    for (const e of evs) {
+      if (e.player !== carrier) continue;
+      if (e.type === 'kick' && (e.kind === 'pass' || e.kind === 'through' || e.kind === 'lob' || e.kind === 'cross')) passed = true;
+      if (e.type === 'shot') shot = true;
+    }
+  }
+  assert.equal(passed, false, 'he does not pass once he is through');
+  assert.equal(shot, true, 'he finishes the breakaway himself');
+}
+
 console.log('match tests passed');

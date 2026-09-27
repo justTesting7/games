@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { PITCH } from '../world/dims.js';
-import { carrierOptions, passWindow, throughWindow, doubleReturnWindow, callWindow, ballCalls, playerOffside } from './ai.js';
+import { carrierOptions, passWindow, throughWindow, doubleReturnWindow, callWindow, ballCalls, playerOffside, aheadOfEveryone } from './ai.js';
 import { MENTALITY } from './match.js';
 
 const HL = PITCH.halfLength, HW = PITCH.halfWidth;
@@ -25,6 +25,7 @@ function zone(team, pos) {
 // getting a man into the penalty area and finishing, not by keeping the ball.
 const CARRIER_INSTRUCTIONS = `You have the ball. Attack together and get a shot on goal.
 A teammate is offside when he is in the opponent's half and nearer their goal than both the ball and the second-last defender. Never pass to him. A pass into the space beyond that line is allowed when he is still level with it.
+If you are ahead of every defender, run straight at goal and score. Do not pass. If a shot from that run is listed, shoot.
 If a double-pass return is listed, play it first time into the runner's path.
 If a shot from inside the penalty area is listed, shoot. Do not pass a chance in the box away.
 If a clear sight of goal from inside 22 m is listed, shoot.
@@ -88,6 +89,10 @@ export class Brain {
     if (!list.length) return null;
     const live = list.filter((o) => o.value > 0.15 && !o.offside);
     const src = live.length ? live : [list.find((o) => o.kind === 'dribble') || list[0]];
+    const breakShot = src.find((o) => o.finish === 'break');
+    if (breakShot) return breakShot;
+    const breakRun = src.find((o) => o.alone && o.kind === 'dribble');
+    if (breakRun) return breakRun;
     const ret = src.find((o) => o.combo === 'return');
     if (ret) return ret;
     const box = src.filter((o) => o.finish === 'box');
@@ -149,6 +154,11 @@ export class Brain {
     const m = this.match;
     let d = this.decisions.get(p);
     if (!d) d = this.decide(p);
+    // He has gone past the last defender. Drop the pass and run at goal.
+    if (d.choice && !d.choice.alone && d.choice.finish !== 'break' && aheadOfEveryone(m, p)) {
+      this.decisions.delete(p);
+      d = this.decide(p);
+    }
     // Dribbling: re-evaluate every so often, faster when pressed.
     if (d.choice?.kind === 'dribble' || d.choice?.kind === 'shield') {
       if (m.time >= d.at) {
@@ -202,7 +212,9 @@ export class Brain {
       return { kind: 'lob', receiver: fwd };
     }
     if (choice.kind === 'dribble' || choice.kind === 'shield') {
-      return { kind: choice.kind, dir: new THREE.Vector3().subVectors(p.team.attackGoal, p.pos).setY(0).normalize().lerp(choice.dir || new THREE.Vector3(), 0.3).normalize() };
+      const atGoal = new THREE.Vector3().subVectors(p.team.attackGoal, p.pos).setY(0).normalize();
+      const dir = choice.alone ? atGoal : atGoal.lerp(choice.dir || atGoal, 0.3).normalize();
+      return { kind: choice.kind, alone: !!choice.alone, dir };
     }
     if (choice.kind === 'shoot') return { kind: 'shoot', aimZ: choice.aimZ ?? null };
     return { kind: choice.kind };
@@ -239,7 +251,7 @@ export class Brain {
     const m = this.match;
     const T = p.team;
     const criteria = {};
-    const head = list.filter((o) => o.combo || o.call || o.kind === 'through' || o.finish || o.intoBox || (o.kind === 'cross' && o.boxMates > 0));
+    const head = list.filter((o) => o.alone || o.finish === 'break' || o.combo || o.call || o.kind === 'through' || o.finish || o.intoBox || (o.kind === 'cross' && o.boxMates > 0));
     const rest = list.filter((o) => !head.includes(o));
     for (const o of [...head, ...rest].slice(0, 7)) criteria[o.id] = o.text;
     const state = this.carrierState(p);

@@ -1360,6 +1360,12 @@ export class Match {
       if (use.kind === 'shield') {
         p.target.copy(p.pos).addScaledVector(dir, 1.2);
         p.targetSpeed = 1.6;
+      } else if (use.alone) {
+        p.intent.copy(dir);
+        p.target.copy(p.pos).addScaledVector(dir, 6);
+        p.target.x = THREE.MathUtils.clamp(p.target.x, -HL + 1, HL - 1);
+        p.target.z = THREE.MathUtils.clamp(p.target.z, -HW + 1.5, HW - 1.5);
+        p.targetSpeed = p.maxSpeed;
       } else {
         const avoid = new THREE.Vector3();
         for (const o of T.opp.players) {
