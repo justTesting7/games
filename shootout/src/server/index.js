@@ -7,6 +7,9 @@ const JEV = 'https://api.typesafe.ai/v1/systemone';
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    if (url.pathname === '/shootout') {
+      return Response.redirect(new URL('/shootout/', request.url), 308);
+    }
     if (url.pathname === '/ws' || url.pathname.startsWith('/ws/')) {
       const room = url.searchParams.get('room') || 'lobby';
       const id = env.ROOM.idFromName(room);

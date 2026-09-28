@@ -4,6 +4,7 @@ import { Loadout } from './weapons.js';
 import { byId, resolveLooks } from './roster.js';
 import { RemoteDrone } from './drone.js';
 import { standSpawn } from '../world/arenaLayout.js';
+import { studioSlotSpawn } from '../world/studioLayout.js';
 
 const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 const vec = (a, fallback = [0, 0, 0]) => new THREE.Vector3(a?.[0] ?? fallback[0], a?.[1] ?? fallback[1], a?.[2] ?? fallback[2]);
@@ -310,6 +311,9 @@ export class Session {
   placeLocal(slot = this.slot) {
     if (this.mapId === 'garden') {
       const s = standSpawn(slot);
+      this.player.spawn(s.x, s.z, s.yaw);
+    } else if (this.mapId === 'studio') {
+      const s = studioSlotSpawn(this.spawn, slot);
       this.player.spawn(s.x, s.z, s.yaw);
     } else {
       const ang = slot * 2.15;

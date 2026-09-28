@@ -1,6 +1,7 @@
 node_modules
 dist
 public/assets/vendor
+shootout/public/assets/vendor
 .env
 .env.*
 !.env.example

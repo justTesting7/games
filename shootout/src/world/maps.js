@@ -78,6 +78,26 @@ export const MAPS = {
     radarRange: 80,
     fixedTime: true,
   },
+  studio: {
+    id: 'studio',
+    label: 'Dizengoff Square',
+    subtitle: 'Kikar Dizengoff · Blender plaza, fountain and ring road',
+    loadLabel: 'Loading Dizengoff',
+    plantLabel: 'Placing the square',
+    textures: {
+      sand: 'asphalt_01',
+      grass: 'brushed_concrete_2',
+      forest: 'burned_ground_01',
+      rock: 'broken_brick_wall',
+    },
+    grass: false,
+    vegetation: false,
+    waterCamp: false,
+    timeOfDay: 0.18,
+    fogDensity: 0.0014,
+    radarRange: 90,
+    glb: true,
+  },
 };
 
 export function getMap(id) {

@@ -10,6 +10,7 @@ import { urbanRivalSpots } from './world/cityLayout.js';
 import { City } from './world/city.js';
 import { Arena } from './world/arena.js';
 import { arenaHeightAt, standSpawn } from './world/arenaLayout.js';
+import { loadStudioMap, studioRivalSpots, blockedAt } from './world/glbMap.js';
 import { Fish } from './world/fish.js';
 import { Character } from './game/character.js';
 import { Player } from './game/player.js';
@@ -290,18 +291,22 @@ async function init() {
     progress.task(mapDef.loadLabel, 3, () => generateHeightmap(mapDef.id)),
     progress.task('Loading terrain materials', 3, () => loadTerrainTextures(mapDef)),
   ]);
-  const indoor = mapDef.id === 'garden';
-  const urban = mapDef.id === 'city' || mapDef.id === 'manhattan' || indoor;
-  pipeline.indoor = indoor;
+  const garden = mapDef.id === 'garden';
+  const studioMap = mapDef.id === 'studio';
+  const urban = mapDef.id === 'city' || mapDef.id === 'manhattan' || garden;
+  pipeline.indoor = garden;
+  let studioHeight = (x, z) => 0;
   const terrain = new Terrain(data, textures, {
-    urban, arena: indoor, heightFn: indoor ? arenaHeightAt : null,
+    urban, arena: garden, heightFn: studioMap ? (x, z) => studioHeight(x, z) : garden ? arenaHeightAt : null,
   });
   world.terrain = terrain;
   pipeline.scene.add(terrain.group);
 
-  const water = new THREE.Mesh(new THREE.PlaneGeometry(12000, 12000).rotateX(-Math.PI / 2));
-  water.frustumCulled = false;
-  pipeline.setWater(water, terrain.heightTex, terrain.uniforms.uWorldSize.value);
+  if (!studioMap) {
+    const water = new THREE.Mesh(new THREE.PlaneGeometry(12000, 12000).rotateX(-Math.PI / 2));
+    water.frustumCulled = false;
+    pipeline.setWater(water, terrain.heightTex, terrain.uniforms.uWorldSize.value);
+  }
 
   let grass = null;
   if (mapDef.grass) {
@@ -318,7 +323,8 @@ async function init() {
   let arena = null;
   let fish = null;
   if (mapDef.id === 'city' || mapDef.id === 'manhattan') city = new City(terrain, veg.colliders, pipeline);
-  if (indoor) arena = new Arena(terrain, veg.colliders, pipeline);
+  if (garden) arena = new Arena(terrain, veg.colliders, pipeline);
+  let studio = null;
   const fighters = mode === 'solo'
     ? [selection.player, ...selection.rivals].map(byId)
     : [byId(selection.player)];
@@ -330,13 +336,23 @@ async function init() {
     mapDef.waterCamp ? props.load(progress) : Promise.resolve(),
     city ? city.load(progress) : Promise.resolve(),
     arena ? arena.load(progress) : Promise.resolve(),
+    studioMap ? progress.task(mapDef.plantLabel, 2, async () => {
+      studio = await loadStudioMap();
+      studioHeight = studio.heightAt;
+      studio.addColliders(veg.colliders);
+      pipeline.scene.add(studio.group);
+      terrain.group.visible = false;
+      pipeline.indoor = !studio.outdoor;
+    }) : Promise.resolve(),
   ]);
   character.load(charAssets, looks[0]);
   character.lookId = fighters[0].id;
 
-  const gardenSpot = indoor ? standSpawn(0) : null;
-  const spawn = gardenSpot ? { x: gardenSpot.x, z: gardenSpot.z } : data.spawn;
-  const facing = gardenSpot ? gardenSpot.yaw : Math.atan2(data.peak.x - spawn.x, data.peak.z - spawn.z);
+  const gardenSpot = garden ? standSpawn(0) : null;
+  const spawn = studio ? { x: studio.spawn.x, z: studio.spawn.z }
+    : gardenSpot ? { x: gardenSpot.x, z: gardenSpot.z } : data.spawn;
+  const facing = studio ? (studio.spawn.yaw ?? Math.PI)
+    : gardenSpot ? gardenSpot.yaw : Math.atan2(data.peak.x - spawn.x, data.peak.z - spawn.z);
   if (mapDef.vegetation) {
     await progress.task(mapDef.plantLabel, 1, async () => veg.scatter(terrain, spawn));
     veg.scale = pipeline.quality.trees;
@@ -371,7 +387,7 @@ async function init() {
   weapons.setGrenadeModel(charAssets.grenadeGltf);
   player.fighter.loadout = new Loadout(3);
   player.onScope = () => audio.mech('scope');
-  Object.assign(world, { grass, character, player, fx, weapons, data, city, arena, mapDef, cars, audio });
+  Object.assign(world, { grass, character, player, fx, weapons, data, city, arena, studio, mapDef, cars, audio });
 
   const rivals = fighters.slice(1).map((entry, i) => {
     const ch = new Character();
@@ -459,11 +475,16 @@ async function init() {
   // open, dry, walkable ground. In the Garden each fighter starts on a
   // different 18th-row stand.
   const spawnRivals = () => {
-    if (indoor) {
+    if (garden) {
       rivals.forEach((r, i) => {
         const s = standSpawn(i + 1);
         r.spawn(s.x, s.z, s.yaw);
       });
+      return;
+    }
+    if (studio) {
+      const spots = studioRivalSpots(spawn, rivals.length, (x, z) => blockedAt(veg.colliders, x, z));
+      rivals.forEach((r, i) => r.spawn(spots[i].x, spots[i].z, spots[i].yaw));
       return;
     }
     if (mapDef.id === 'city' || mapDef.id === 'manhattan') {
@@ -562,9 +583,12 @@ async function init() {
       round.state = 'waiting';
       return;
     }
-    if (indoor) {
+    if (garden) {
       const s = standSpawn(0);
       player.spawn(s.x, s.z, s.yaw);
+      player.vel.set(0, 0, 0);
+    } else if (studio) {
+      player.spawn(spawn.x, spawn.z, facing);
       player.vel.set(0, 0, 0);
     } else if (!player.fighter.alive) {
       player.spawn(spawn.x, spawn.z, facing);
