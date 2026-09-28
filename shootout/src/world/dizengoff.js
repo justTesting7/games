@@ -3,6 +3,7 @@ import { loadCity } from './loadCity.js';
 import { extractCityCars } from './cityCars.js';
 import { buildStadium } from './stadium.js';
 import { buildPitchProps } from './pitchProps.js';
+import { pickRivalSpots } from './rivalSpots.js';
 
 const BASE = import.meta.env?.BASE_URL || '/shootout/';
 export const navUrl = (folder) => `${BASE}assets/maps/${folder}/nav.json`;
@@ -71,6 +72,7 @@ export async function loadDizengoff(renderer, folder = 'dizengoff-center') {
     spawn,
     outdoor: true,
     stadium: nav.stadium || null,
+    rivalSpots: (origin, count) => pickRivalSpots(nav.spots || [], origin, count),
     heightAt,
     cameraFar: FAR_DISTANCE,
     addColliders: (colliders) => {

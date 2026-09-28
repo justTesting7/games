@@ -488,7 +488,8 @@ async function init() {
       return;
     }
     if (studio) {
-      const spots = studioRivalSpots(spawn, rivals.length, (x, z) => blockedAt(veg.colliders, x, z));
+      const spots = studio.rivalSpots?.(spawn, rivals.length)
+        || studioRivalSpots(spawn, rivals.length, (x, z) => blockedAt(veg.colliders, x, z));
       rivals.forEach((r, i) => r.spawn(spots[i].x, spots[i].z, spots[i].yaw));
       return;
     }

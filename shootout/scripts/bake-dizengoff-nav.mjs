@@ -346,6 +346,13 @@ for (let k = 0; k < W * H; k++) {
   if (score < bestScore) { bestScore = score; best = k; }
 }
 if (best < 0) throw new Error('no open spot with 10 m clearance');
+// rival spawn candidates: a 12 m lattice over the main open region, with room to stand
+const spots = [];
+for (let j = 0; j < H; j += 24) for (let i = 0; i < W; i += 24) {
+  const k = j * W + i;
+  if (comp[k] === main && dist[k] * CELL >= 3) spots.push([+(X0 + (i + 0.5) * CELL).toFixed(1), +(Z0 + (j + 0.5) * CELL).toFixed(1)]);
+}
+console.log('rival spawn candidates', spots.length);
 const sx = X0 + ((best % W) + 0.5) * CELL, sz = Z0 + (((best / W) | 0) + 0.5) * CELL;
 console.log('spawn', sx.toFixed(1), sz.toFixed(1), 'clearance', (dist[best] * CELL).toFixed(1), 'm');
 // face the direction with the longest clear line of sight
@@ -363,6 +370,7 @@ const out = {
   boxes,
   spawn: { x: +sx.toFixed(2), z: +sz.toFixed(2), y: +(ground[best]).toFixed(2), yaw: +yaw.toFixed(3) },
   cars,
+  spots,
   stadium,
   bounds: { minX, maxX, minZ, maxZ },
 };
