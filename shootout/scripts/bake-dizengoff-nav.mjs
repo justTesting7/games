@@ -8,6 +8,7 @@ import path from 'node:path';
 import { NodeIO } from '@gltf-transform/core';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
+import { measureProfile, classifyStadium, inGateDoor } from '../src/world/stadium.js';
 
 const MAP = process.argv[2];
 if (!MAP) throw new Error('usage: bake-dizengoff-nav.mjs <map-folder>');
@@ -23,6 +24,8 @@ const doc = await io.read(path.join(DIR, 'set.glb'));
 
 const tris = { ground: [], solid: [] };
 const carParts = { carpaint: [], carglass: [] };
+const wallCells = new Set();
+const seatTris = [];
 let minX = 1e9, maxX = -1e9, minZ = 1e9, maxZ = -1e9;
 for (const n of doc.getRoot().listNodes()) {
   const mesh = n.getMesh();
@@ -30,7 +33,8 @@ for (const n of doc.getRoot().listNodes()) {
   const name = n.getName();
   const kind = GROUND.test(name) ? 'ground' : SOLID.test(name) ? 'solid' : null;
   const carPart = carParts[name];
-  if (!kind && !carPart) continue;
+  const isSeats = name === 'st_seats';
+  if (!kind && !carPart && !isSeats) continue;
   const t = n.getTranslation(), s = n.getScale();
   for (const p of mesh.listPrimitives()) {
     const pos = p.getAttribute('POSITION');
@@ -40,6 +44,7 @@ for (const n of doc.getRoot().listNodes()) {
     const get = (i) => { pos.getElement(idx ? idx.getScalar(i) : i, v); return [v[0] * s[0] + t[0], v[1] * s[1] + t[1], v[2] * s[2] + t[2]]; };
     for (let i = 0; i + 2 < count; i += 3) {
       const tri = [get(i), get(i + 1), get(i + 2)];
+      if (isSeats) { seatTris.push(tri); continue; }
       if (carPart) { carPart.push(tri); continue; }
       tris[kind].push(tri);
       if (kind === 'ground') for (const q of tri) { minX = Math.min(minX, q[0]); maxX = Math.max(maxX, q[0]); minZ = Math.min(minZ, q[2]); maxZ = Math.max(maxZ, q[2]); }
@@ -79,6 +84,52 @@ for (const tri of tris.ground) {
   if (nl < 1e-9 || Math.abs(ny) / nl < 0.7) continue;
   sample(tri, CELL * 0.5, (x, y, z) => { const k = cellOf(x, z); if (k >= 0 && y > ground[k]) ground[k] = y; });
 }
+// stadium: the seat ramp ships with nothing under it. Give it a floor, an outer wall with
+// gates, a hall and tunnels (see src/world/stadium.js) so it can be walked into.
+let stadium = null, stadiumCell = () => null, stadiumDoor = () => false;
+if (seatTris.length) {
+  const inTri = (x, z, a, b, c) => {
+    const d = (b[2] - c[2]) * (a[0] - c[0]) + (c[0] - b[0]) * (a[2] - c[2]);
+    if (Math.abs(d) < 1e-9) return null;
+    const l1 = ((b[2] - c[2]) * (x - c[0]) + (c[0] - b[0]) * (z - c[2])) / d;
+    const l2 = ((c[2] - a[2]) * (x - c[0]) + (a[0] - c[0]) * (z - c[2])) / d;
+    const l3 = 1 - l1 - l2;
+    return l1 < 0 || l2 < 0 || l3 < 0 ? null : l1 * a[1] + l2 * b[1] + l3 * c[1];
+  };
+  const seatY = (x, z) => {
+    let y = null;
+    for (const t of seatTris) { const h = inTri(x, z, t[0], t[1], t[2]); if (h !== null && (y === null || h < y)) y = h; }
+    return y;
+  };
+  // pitch centre from the pitch quad, else the seat bounds
+  let sx = 0, sz = 0, sn = 0;
+  for (const t of seatTris) for (const q of t) { sx += q[0]; sz += q[2]; sn++; }
+  const c = [+(sx / sn).toFixed(1), +(sz / sn).toFixed(1)];
+  const profile = measureProfile(seatY, c, 180);
+  // walking height: plaza level just outside the stands
+  const outside = [];
+  for (let i = 0; i < 90; i++) {
+    const th = (i / 90) * Math.PI * 2, r = profile.top[Math.floor(i * 2)] + 3.5;
+    const k = cellOf(c[0] + Math.sin(th) * r, c[1] + Math.cos(th) * r);
+    if (k >= 0 && ground[k] > -1e8) outside.push(ground[k]);
+  }
+  outside.sort((a, b) => a - b);
+  const floorY = +(outside.length ? outside[outside.length >> 1] : 0.6).toFixed(2);
+  stadium = { ...profile, floorY };
+  stadiumCell = (x, z) => classifyStadium(profile, x, z);
+  stadiumDoor = (x, z) => inGateDoor(profile, x, z);
+  let stamped = 0;
+  for (let j = 0; j < H; j++) for (let i = 0; i < W; i++) {
+    const k = j * W + i;
+    const cls = stadiumCell(X0 + (i + 0.5) * CELL, Z0 + (j + 0.5) * CELL);
+    if (!cls) continue;
+    ground[k] = floorY;
+    if (cls === 'wall') wallCells.add(k);
+    stamped++;
+  }
+  console.log('stadium centre', c, 'floor', floorY, 'toe r', Math.min(...profile.toe).toFixed(0) + '-' + Math.max(...profile.toe).toFixed(0), 'cells', stamped);
+}
+
 // cars: cluster the paint triangles into vehicles, one drivable car each
 const cars = [];
 {
@@ -162,12 +213,14 @@ for (const tri of tris.solid) {
     if (k < 0 || ground[k] < -1e8) return;
     const d = y - ground[k];
     if (d < 2.4 && inCar(x, z)) return; // part of a drivable car
+    if (d < 4.5 && stadiumDoor(x, z)) return; // a gate cut through the stadium's glass wall
     if (d > BODY_LO && d < BODY_HI) low[k] = 1;
     if (d > TALL) tall[k] = 1;
   });
 }
 const void_ = new Uint8Array(W * H);
 let open = 0, blocked = 0;
+for (const k of wallCells) { low[k] = 1; tall[k] = 1; }
 for (let k = 0; k < W * H; k++) {
   if (ground[k] < -1e8) void_[k] = 1;
   if (void_[k] || low[k]) blocked++; else open++;
@@ -272,6 +325,7 @@ const cx = cxs / cn, cz = czs / cn;
 let best = -1, bestScore = 1e18;
 for (let k = 0; k < W * H; k++) {
   if (comp[k] !== main || dist[k] * CELL < 10) continue;
+  if (stadiumCell(X0 + ((k % W) + 0.5) * CELL, Z0 + (((k / W) | 0) + 0.5) * CELL)) continue;
   const score = Math.hypot((k % W) - cx, ((k / W) | 0) - cz);
   if (score < bestScore) { bestScore = score; best = k; }
 }
@@ -293,6 +347,7 @@ const out = {
   boxes,
   spawn: { x: +sx.toFixed(2), z: +sz.toFixed(2), y: +(ground[best]).toFixed(2), yaw: +yaw.toFixed(3) },
   cars,
+  stadium,
   bounds: { minX, maxX, minZ, maxZ },
 };
 fs.writeFileSync(path.join(DIR, 'nav.json'), JSON.stringify(out));

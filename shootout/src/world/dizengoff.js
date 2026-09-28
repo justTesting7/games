@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { loadCity } from './loadCity.js';
 import { extractCityCars } from './cityCars.js';
+import { buildStadium } from './stadium.js';
 
 const BASE = import.meta.env?.BASE_URL || '/shootout/';
 export const navUrl = (folder) => `${BASE}assets/maps/${folder}/nav.json`;
@@ -57,6 +58,7 @@ export async function loadDizengoff(renderer, folder = 'dizengoff-center') {
     if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; }
   });
   city.far.traverse((o) => { if (o.isMesh) o.frustumCulled = false; });
+  if (nav.stadium) group.add(buildStadium(THREE, city.set, nav.stadium, nav.stadium.floorY).group);
   const heightAt = makeNavHeight(nav);
   const spawn = { ...nav.spawn };
   spawn.y = heightAt(spawn.x, spawn.z);
@@ -65,6 +67,7 @@ export async function loadDizengoff(renderer, folder = 'dizengoff-center') {
     root: city.set,
     spawn,
     outdoor: true,
+    stadium: nav.stadium || null,
     heightAt,
     cameraFar: FAR_DISTANCE,
     addColliders: (colliders) => addNavColliders(nav, colliders, heightAt),
