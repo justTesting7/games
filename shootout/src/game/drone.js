@@ -12,7 +12,7 @@ export const DRONE = {
   radius: 9.5,
   damage: 150,
   hitR: 0.42,
-  maxRange: 92,
+  maxRange: Infinity, // no leash: it flies until it hits something or is shot down
 };
 
 const UP = new THREE.Vector3(0, 1, 0);

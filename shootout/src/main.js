@@ -957,11 +957,12 @@ async function init() {
     const leftHint = document.querySelector('#dronesplit .pane.left b');
     const leftTag = document.querySelector('#dronesplit .pane.left small');
     const range = weapons.drone.range();
-    const far = range > DRONE.maxRange * 0.78;
+    const far = Number.isFinite(DRONE.maxRange) && range > DRONE.maxRange * 0.78;
     if (leftHint) {
       leftHint.textContent = dying ? 'shot down'
         : far ? `range ${range.toFixed(0)} / ${DRONE.maxRange} m · turn back`
-        : `range ${range.toFixed(0)} / ${DRONE.maxRange} m · space explode`;
+        : Number.isFinite(DRONE.maxRange) ? `range ${range.toFixed(0)} / ${DRONE.maxRange} m · space explode`
+        : `${range.toFixed(0)} m out · space explode`;
     }
     if (leftTag) leftTag.textContent = dying ? 'signal lost' : far ? 'link fading' : 'drone';
     $('dronesplit').classList.toggle('far', flying && !dying && far);
