@@ -7,7 +7,7 @@ const main = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
 for (const [file, src, needle] of [
   ['player.js', player, 'update(dt, input, follow = null)'],
   ['player.js', player, 'this.updateCamera(dt, look.aiming, spd > 4.5 && !look.aiming, spd, follow)'],
-  ['player.js', player, 'const ride = follow?.vehicle || (!follow && this.vehicle)'],
+  ['player.js', player, 'const ride = rideCar(follow?.vehicle) || (!follow && rideCar(this.vehicle))'],
   ['player.js', player, 'this.updateCockpitCamera(dt, ride, follow, sprinting, speed)'],
   ['player.js', player, 'const body = follow?.pos || this.pos'],
   ['main.js', main, 'const refreshSpectate = ()'],
