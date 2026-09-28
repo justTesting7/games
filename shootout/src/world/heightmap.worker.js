@@ -3,6 +3,7 @@ import { buildCityHeightmap } from './cityLayout.js';
 import { buildArenaHeightmap } from './arenaLayout.js';
 import { buildStudioHeightmap } from './studioLayout.js';
 import { GRID_N, GRID_SPACING, HALF_WORLD } from './constants.js';
+import { MAPS } from './maps.js';
 
 const smoothstep = (a, b, x) => {
   const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
@@ -125,7 +126,7 @@ self.onmessage = (e) => {
   const out = map === 'city' ? buildCityHeightmap(seed)
     : map === 'manhattan' ? buildCityHeightmap(seed, { theme: 'manhattan' })
     : map === 'garden' ? buildArenaHeightmap(seed)
-    : map === 'dizengoff' || map === 'square' ? buildStudioHeightmap(seed)
+    : MAPS[map]?.cityFolder ? buildStudioHeightmap(seed)
     : generateIsland(seed);
   out.ms = performance.now() - t0;
   out.map = map;

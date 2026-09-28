@@ -120,6 +120,27 @@ export const MAPS = {
     radarRange: 100,
     soloOnly: true,
   },
+  bloomfield: {
+    id: 'bloomfield',
+    cityFolder: 'bloomfield',
+    label: 'Bloomfield',
+    subtitle: 'Tel Aviv · Bloomfield district streets and blocks',
+    loadLabel: 'Raising Bloomfield',
+    plantLabel: 'Loading the district',
+    textures: {
+      sand: 'asphalt_01',
+      grass: 'brushed_concrete_2',
+      forest: 'burned_ground_01',
+      rock: 'broken_brick_wall',
+    },
+    grass: false,
+    vegetation: false,
+    waterCamp: false,
+    timeOfDay: 0.3,
+    fogDensity: 0.0008,
+    radarRange: 100,
+    soloOnly: true,
+  },
 };
 
 export function getMap(id) {

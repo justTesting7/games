@@ -21,11 +21,11 @@ The rivals ask Jev for decisions through the Vite dev server, which proxies `/ap
 never reaches the browser, and `.env` is gitignored. Without a key, or in a static `npm run build`,
 the rivals fall back to a local heuristic, and the HUD shows "Jev offline".
 
-Pick **Relic Isle**, **Dead District**, **Midtown**, **Madison Square Garden**, **Dizengoff Center** or **Dizengoff Square** from the menu before you fight; the choice is saved in `localStorage`. The two Dizengoff maps are single player only.
+Pick **Relic Isle**, **Dead District**, **Midtown**, **Madison Square Garden**, **Dizengoff Center**, **Dizengoff Square** or **Bloomfield** from the menu before you fight; the choice is saved in `localStorage`. The Dizengoff and Bloomfield maps are single player only.
 
 ### Adding a city-set map
 
-Dizengoff Center and Dizengoff Square are built from `cityset` exports (`set.glb` plus an optional `far.glb` skyline).
+Dizengoff Center, Dizengoff Square and Bloomfield are built from `cityset` exports (`set.glb` plus an optional `far.glb` skyline).
 
 1. Put the original, unoptimised exports in `shootout/assets-src/<map-folder>/` (not in `public/`; Workers reject assets over 25 MB).
 2. `node shootout/scripts/build-city-map.mjs <map-folder>` shrinks the textures, encodes them to KTX2 and meshopt-compresses the buffers into `shootout/public/assets/maps/<map-folder>/`. It leaves vertex positions exactly as exported.
