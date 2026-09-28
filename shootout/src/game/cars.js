@@ -612,6 +612,44 @@ export class Cars {
     return this.list;
   }
 
+  /** Drivable cars whose bodies are supplied as meshes (city-set maps): spots are {x, y, z, yaw, mesh}. */
+  spawnCustom(spots) {
+    this.clear();
+    const { terrain } = this.world;
+    spots.forEach((s, i) => {
+      const y = terrain.heightAt(s.x, s.z);
+      const car = {
+        id: i,
+        x: s.x,
+        y,
+        z: s.z,
+        yaw: s.yaw,
+        speed: 0,
+        vel: new THREE.Vector3(),
+        seat: new THREE.Vector3(),
+        driver: null,
+        lastDriver: null,
+        remote: false,
+        squash: {},
+        glass: 0,
+        steer: 0,
+        mesh: s.mesh,
+        wheels: [],
+        lights: { emissiveIntensity: 0 },
+        tails: { emissiveIntensity: 0 },
+        panes: null,
+        wheelRig: null,
+        cluster: null,
+        home: { x: s.x, z: s.z, yaw: s.yaw },
+      };
+      this.placeMesh(car);
+      this.refreshSeat(car);
+      this.group.add(car.mesh);
+      this.list.push(car);
+    });
+    return this.list;
+  }
+
   clear() {
     for (const car of this.list) {
       car.driver = null;

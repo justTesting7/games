@@ -14,7 +14,7 @@ if (!MAP) throw new Error('usage: bake-dizengoff-nav.mjs <map-folder>');
 const DIR = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', 'public', 'assets', 'maps', MAP);
 const CELL = 0.5;
 const GROUND = /^(asphalt|pavement|ground|lm_grass|kerb|marking|road_marks|road_marks_bus)$/;
-const SOLID = /^(facade_.*|side_.*|blank_.*|ground_.*|bark|carpaint|carglass|railing|netting|hoarding|crates|pais|dt_facade|tt_grid|metal|glass|balcony|parapet|solar|awning|signs|name_boxes|load_signs)$/;
+const SOLID = /^(facade_.*|side_.*|blank_.*|ground_.*|bark|railing|netting|hoarding|crates|pais|dt_facade|tt_grid|metal|glass|balcony|parapet|solar|awning|signs|name_boxes|load_signs)$/;
 const BODY_LO = 0.45, BODY_HI = 2.0, TALL = 6;
 
 await MeshoptDecoder.ready;
@@ -22,13 +22,15 @@ const io = new NodeIO().registerExtensions(ALL_EXTENSIONS).registerDependencies(
 const doc = await io.read(path.join(DIR, 'set.glb'));
 
 const tris = { ground: [], solid: [] };
+const carParts = { carpaint: [], carglass: [] };
 let minX = 1e9, maxX = -1e9, minZ = 1e9, maxZ = -1e9;
 for (const n of doc.getRoot().listNodes()) {
   const mesh = n.getMesh();
   if (!mesh) continue;
   const name = n.getName();
   const kind = GROUND.test(name) ? 'ground' : SOLID.test(name) ? 'solid' : null;
-  if (!kind) continue;
+  const carPart = carParts[name];
+  if (!kind && !carPart) continue;
   const t = n.getTranslation(), s = n.getScale();
   for (const p of mesh.listPrimitives()) {
     const pos = p.getAttribute('POSITION');
@@ -38,6 +40,7 @@ for (const n of doc.getRoot().listNodes()) {
     const get = (i) => { pos.getElement(idx ? idx.getScalar(i) : i, v); return [v[0] * s[0] + t[0], v[1] * s[1] + t[1], v[2] * s[2] + t[2]]; };
     for (let i = 0; i + 2 < count; i += 3) {
       const tri = [get(i), get(i + 1), get(i + 2)];
+      if (carPart) { carPart.push(tri); continue; }
       tris[kind].push(tri);
       if (kind === 'ground') for (const q of tri) { minX = Math.min(minX, q[0]); maxX = Math.max(maxX, q[0]); minZ = Math.min(minZ, q[2]); maxZ = Math.max(maxZ, q[2]); }
     }
@@ -76,6 +79,81 @@ for (const tri of tris.ground) {
   if (nl < 1e-9 || Math.abs(ny) / nl < 0.7) continue;
   sample(tri, CELL * 0.5, (x, y, z) => { const k = cellOf(x, z); if (k >= 0 && y > ground[k]) ground[k] = y; });
 }
+// cars: cluster the paint triangles into vehicles, one drivable car each
+const cars = [];
+{
+  const key = (q) => `${Math.round(q[0] * 50)},${Math.round(q[1] * 50)},${Math.round(q[2] * 50)}`;
+  const par = new Map();
+  const find = (a) => { while (par.get(a) !== a) { par.set(a, par.get(par.get(a))); a = par.get(a); } return a; };
+  for (const t of carParts.carpaint) for (const q of t) { const k = key(q); if (!par.has(k)) par.set(k, k); }
+  for (const t of carParts.carpaint) {
+    const a = find(key(t[0]));
+    for (let i = 1; i < 3; i++) { const b = find(key(t[i])); if (a !== b) par.set(b, a); }
+  }
+  const comps = new Map();
+  carParts.carpaint.forEach((t, i) => { const r = find(key(t[0])); if (!comps.has(r)) comps.set(r, []); comps.get(r).push(i); });
+  let parts = [];
+  for (const ix of comps.values()) {
+    if (ix.length < 20) continue; // lights, mirrors, badges
+    const mn = [1e9, 1e9, 1e9], mx = [-1e9, -1e9, -1e9];
+    for (const i of ix) for (const q of carParts.carpaint[i]) for (let k = 0; k < 3; k++) { mn[k] = Math.min(mn[k], q[k]); mx[k] = Math.max(mx[k], q[k]); }
+    parts.push({ ix, mn, mx, group: parts.length });
+  }
+  // a car is a lower body plus a cabin: join parts that overlap in plan and sit at similar heights
+  const grp = parts.map((_, i) => i);
+  const gf = (a) => { while (grp[a] !== a) { grp[a] = grp[grp[a]]; a = grp[a]; } return a; };
+  for (let i = 0; i < parts.length; i++) for (let j = i + 1; j < parts.length; j++) {
+    const a = parts[i], b = parts[j], pad = 0.3;
+    if (a.mn[0] > b.mx[0] + pad || b.mn[0] > a.mx[0] + pad || a.mn[2] > b.mx[2] + pad || b.mn[2] > a.mx[2] + pad) continue;
+    if (Math.abs((a.mn[1] + a.mx[1]) / 2 - (b.mn[1] + b.mx[1]) / 2) > 1.2) continue;
+    grp[gf(j)] = gf(i);
+  }
+  const clusters = new Map();
+  parts.forEach((p, i) => { const r = gf(i); if (!clusters.has(r)) clusters.set(r, []); clusters.get(r).push(p); });
+  for (const cl of clusters.values()) {
+    // principal axis of the vertices in plan
+    let n = 0, mx_ = 0, mz_ = 0, minY = 1e9;
+    const verts = [];
+    for (const p of cl) for (const i of p.ix) for (const q of carParts.carpaint[i]) { verts.push(q); mx_ += q[0]; mz_ += q[2]; n++; minY = Math.min(minY, q[1]); }
+    mx_ /= n; mz_ /= n;
+    let sxx = 0, szz = 0, sxz = 0;
+    for (const q of verts) { const dx = q[0] - mx_, dz = q[2] - mz_; sxx += dx * dx; szz += dz * dz; sxz += dx * dz; }
+    const ang = 0.5 * Math.atan2(2 * sxz, sxx - szz); // major axis direction (x = cos, z = sin)
+    let ax = Math.cos(ang), az = Math.sin(ang);
+    let lo = 1e9, hi = -1e9, lw = 1e9, hw_ = -1e9;
+    for (const q of verts) {
+      const a = (q[0] - mx_) * ax + (q[2] - mz_) * az, w = (q[0] - mx_) * az - (q[2] - mz_) * ax;
+      lo = Math.min(lo, a); hi = Math.max(hi, a); lw = Math.min(lw, w); hw_ = Math.max(hw_, w);
+    }
+    const len = hi - lo, wid = hw_ - lw;
+    if (len < 3 || len > 6.8 || wid < 1.4 || wid > 3.1) continue;
+    // centre on the body's extent, not the vertex mean
+    const ca = (hi + lo) / 2, cw = (hw_ + lw) / 2;
+    const cx = mx_ + ax * ca + az * cw, cz = mz_ + az * ca - ax * cw;
+    const k = cellOf(cx, cz);
+    if (k < 0 || ground[k] < -1e8) continue;
+    const off = minY - ground[k];
+    if (off < -0.4 || off > 1.7) continue; // parked on a deck or a roof, not on the street
+    // the windows sit behind the middle of the car: the nose points away from them
+    let gs = 0, gn = 0;
+    for (const t of carParts.carglass) {
+      const gx = (t[0][0] + t[1][0] + t[2][0]) / 3, gz = (t[0][2] + t[1][2] + t[2][2]) / 3, gy = (t[0][1] + t[1][1] + t[2][1]) / 3;
+      const dx = gx - cx, dz = gz - cz, a = dx * ax + dz * az, w = dx * az - dz * ax;
+      if (Math.abs(a) < len / 2 + 0.2 && Math.abs(w) < wid / 2 + 0.2 && gy > minY - 0.3 && gy < minY + 2.2) { gs += a; gn++; }
+    }
+    if (gn && gs > 0) { ax = -ax; az = -az; }
+    cars.push({
+      x: +cx.toFixed(2), z: +cz.toFixed(2), y: +ground[k].toFixed(2), yaw: +Math.atan2(ax, az).toFixed(3),
+      hl: +(len / 2).toFixed(2), hw: +(wid / 2).toFixed(2),
+    });
+  }
+}
+console.log('drivable cars', cars.length);
+const inCar = (x, z) => cars.some((c) => {
+  const dx = x - c.x, dz = z - c.z, s = Math.sin(c.yaw), co = Math.cos(c.yaw);
+  return Math.abs(dx * s + dz * co) < c.hl + 0.3 && Math.abs(dx * co - dz * s) < c.hw + 0.3;
+});
+
 // pass 2: things standing on it
 const low = new Uint8Array(W * H), tall = new Uint8Array(W * H);
 for (const tri of tris.solid) {
@@ -83,6 +161,7 @@ for (const tri of tris.solid) {
     const k = cellOf(x, z);
     if (k < 0 || ground[k] < -1e8) return;
     const d = y - ground[k];
+    if (d < 2.4 && inCar(x, z)) return; // part of a drivable car
     if (d > BODY_LO && d < BODY_HI) low[k] = 1;
     if (d > TALL) tall[k] = 1;
   });
@@ -213,6 +292,7 @@ const out = {
   hcell: HC, hw, hh, heights: b64(hs),
   boxes,
   spawn: { x: +sx.toFixed(2), z: +sz.toFixed(2), y: +(ground[best]).toFixed(2), yaw: +yaw.toFixed(3) },
+  cars,
   bounds: { minX, maxX, minZ, maxZ },
 };
 fs.writeFileSync(path.join(DIR, 'nav.json'), JSON.stringify(out));

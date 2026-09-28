@@ -373,6 +373,7 @@ async function init() {
     pipeline.scene.add(city.group);
     cars.spawnMap(mapDef.id);
   }
+  if (studio?.takeCars) cars.spawnCustom(studio.takeCars());
   if (arena && data.layout) {
     arena.build(data.layout);
     pipeline.scene.add(arena.group);

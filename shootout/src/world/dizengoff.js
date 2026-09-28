@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { loadCity } from './loadCity.js';
+import { extractCityCars } from './cityCars.js';
 
 const BASE = import.meta.env?.BASE_URL || '/shootout/';
 export const navUrl = (folder) => `${BASE}assets/maps/${folder}/nav.json`;
@@ -67,6 +68,8 @@ export async function loadDizengoff(renderer, folder = 'dizengoff-center') {
     heightAt,
     cameraFar: FAR_DISTANCE,
     addColliders: (colliders) => addNavColliders(nav, colliders, heightAt),
+    /** Cuts the parked cars out of the map meshes, once, as movable groups. */
+    takeCars: () => extractCityCars(city.set, nav.cars || []),
     /** minutes = 0..1439, night = 0..1 */
     update: city.update,
   };
