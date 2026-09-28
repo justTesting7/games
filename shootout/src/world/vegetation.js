@@ -283,7 +283,8 @@ export class Colliders {
 
   // Keeps a capsule-like character out of trees, rocks and building shells.
   resolveXZ(pos, radius, y0, y1) {
-    for (const c of this.list) {
+    const near = this.query(pos.x, pos.z, radius + 1, this._near || (this._near = []));
+    for (const c of near) {
       if (y0 > c.y1 || y1 < c.y0) continue;
       if (c.box) {
         const inside = pos.x > c.x0 && pos.x < c.x1 && pos.z > c.z0 && pos.z < c.z1;

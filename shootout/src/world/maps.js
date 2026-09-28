@@ -98,6 +98,26 @@ export const MAPS = {
     radarRange: 90,
     glb: true,
   },
+  dizengoff: {
+    id: 'dizengoff',
+    label: 'Dizengoff Center',
+    subtitle: 'Tel Aviv · the shopping district, streets and square',
+    loadLabel: 'Raising Dizengoff Center',
+    plantLabel: 'Loading the district',
+    textures: {
+      sand: 'asphalt_01',
+      grass: 'brushed_concrete_2',
+      forest: 'burned_ground_01',
+      rock: 'broken_brick_wall',
+    },
+    grass: false,
+    vegetation: false,
+    waterCamp: false,
+    timeOfDay: 0.3,
+    fogDensity: 0.0008,
+    radarRange: 100,
+    soloOnly: true,
+  },
 };
 
 export function getMap(id) {

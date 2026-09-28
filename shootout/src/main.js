@@ -11,6 +11,7 @@ import { City } from './world/city.js';
 import { Arena } from './world/arena.js';
 import { arenaHeightAt, standSpawn } from './world/arenaLayout.js';
 import { loadStudioMap, studioRivalSpots, blockedAt } from './world/glbMap.js';
+import { loadDizengoff } from './world/dizengoff.js';
 import { Fish } from './world/fish.js';
 import { Character } from './game/character.js';
 import { Player } from './game/player.js';
@@ -161,8 +162,10 @@ addEventListener('wheel', (e) => {
 }, { passive: true });
 addEventListener('blur', () => { for (const k in input) input[k] = false; });
 
-const mapId = localStorage.getItem('relic-map') || 'island';
+const savedMap = localStorage.getItem('relic-map') || 'island';
+const mapId = mode === 'multi' && getMap(savedMap).soloOnly ? 'island' : savedMap;
 const mapDef = getMap(mapId);
+if (mode === 'multi') $('map').querySelector('option[data-solo]')?.remove();
 $('map').value = mapId;
 $('maptitle').textContent = mapDef.label;
 $('mapsub').textContent = mapDef.subtitle;
@@ -292,7 +295,8 @@ async function init() {
     progress.task('Loading terrain materials', 3, () => loadTerrainTextures(mapDef)),
   ]);
   const garden = mapDef.id === 'garden';
-  const studioMap = mapDef.id === 'studio';
+  const dizengoff = mapDef.id === 'dizengoff';
+  const studioMap = mapDef.id === 'studio' || dizengoff;
   const urban = mapDef.id === 'city' || mapDef.id === 'manhattan' || garden;
   pipeline.indoor = garden;
   let studioHeight = (x, z) => 0;
@@ -337,7 +341,8 @@ async function init() {
     city ? city.load(progress) : Promise.resolve(),
     arena ? arena.load(progress) : Promise.resolve(),
     studioMap ? progress.task(mapDef.plantLabel, 2, async () => {
-      studio = await loadStudioMap();
+      studio = dizengoff ? await loadDizengoff(pipeline.renderer) : await loadStudioMap();
+      if (studio.cameraFar) { camera.far = studio.cameraFar; camera.updateProjectionMatrix(); }
       studioHeight = studio.heightAt;
       studio.addColliders(veg.colliders);
       pipeline.scene.add(studio.group);
@@ -823,6 +828,7 @@ async function init() {
       $('timeofday').value = Math.round(timeOfDay * 1000);
     }
     pipeline.setTimeOfDay(timeOfDay, elapsed);
+    studio?.update?.(((timeOfDay * 1440) + 360) % 1440, pipeline.night);
 
     const locked = inPlay;
     if (mode === 'solo' && (input.restart || (input.reload && round.state === 'over')) && (round.state === 'over' || round.state === 'fight')) {
