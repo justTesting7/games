@@ -184,10 +184,17 @@ for (let s = 0; s < W * H; s++) {
 }
 const main = sizes.indexOf(Math.max(...sizes));
 console.log('open regions', sizes.length, 'largest', sizes[main], 'cells =', (sizes[main] * CELL * CELL).toFixed(0), 'm2');
-const cands = [];
-for (let k = 0; k < W * H; k++) if (comp[k] === main && dist[k] * CELL >= 6) cands.push(k);
-cands.sort((a, b) => dist[b] - dist[a]);
-const best = cands[0];
+// spawn near the middle of the open region, in a spot with room to move
+let cxs = 0, czs = 0, cn = 0;
+for (let k = 0; k < W * H; k++) if (comp[k] === main) { cxs += k % W; czs += (k / W) | 0; cn++; }
+const cx = cxs / cn, cz = czs / cn;
+let best = -1, bestScore = 1e18;
+for (let k = 0; k < W * H; k++) {
+  if (comp[k] !== main || dist[k] * CELL < 10) continue;
+  const score = Math.hypot((k % W) - cx, ((k / W) | 0) - cz);
+  if (score < bestScore) { bestScore = score; best = k; }
+}
+if (best < 0) throw new Error('no open spot with 10 m clearance');
 const sx = X0 + ((best % W) + 0.5) * CELL, sz = Z0 + (((best / W) | 0) + 0.5) * CELL;
 console.log('spawn', sx.toFixed(1), sz.toFixed(1), 'clearance', (dist[best] * CELL).toFixed(1), 'm');
 // face the direction with the longest clear line of sight
