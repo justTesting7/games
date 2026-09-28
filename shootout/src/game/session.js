@@ -312,7 +312,7 @@ export class Session {
     if (this.mapId === 'garden') {
       const s = standSpawn(slot);
       this.player.spawn(s.x, s.z, s.yaw);
-    } else if (this.mapId === 'studio') {
+    } else if (this.mapId === 'dizengoff' || this.mapId === 'square') {
       const s = studioSlotSpawn(this.spawn, slot);
       this.player.spawn(s.x, s.z, s.yaw);
     } else {

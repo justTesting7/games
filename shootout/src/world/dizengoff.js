@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { loadCity } from './loadCity.js';
 
 const BASE = import.meta.env?.BASE_URL || '/shootout/';
-export const DIZENGOFF_NAV = `${BASE}assets/maps/city/nav.json`;
+export const navUrl = (folder) => `${BASE}assets/maps/${folder}/nav.json`;
 const FAR_DISTANCE = 9000; // far.glb spans 8 km
 
 function decodeInt16(b64) {
@@ -45,12 +45,12 @@ export function addNavColliders(nav, colliders, heightAt) {
  * Dizengoff Center: the optimised city set (set.glb) plus its far skyline
  * (far.glb), walked on the baked height/collision grid.
  */
-export async function loadDizengoff(renderer) {
+export async function loadDizengoff(renderer, folder = 'dizengoff-center') {
   const group = new THREE.Group();
-  group.name = 'dizengoff';
+  group.name = `city-${folder}`;
   const [nav, city] = await Promise.all([
-    fetch(DIZENGOFF_NAV).then((r) => { if (!r.ok) throw new Error('nav.json missing'); return r.json(); }),
-    loadCity(group, renderer),
+    fetch(navUrl(folder)).then((r) => { if (!r.ok) throw new Error('nav.json missing'); return r.json(); }),
+    loadCity(group, renderer, folder),
   ]);
   city.set.traverse((o) => {
     if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; }

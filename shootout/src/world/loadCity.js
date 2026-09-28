@@ -5,9 +5,9 @@ import {MeshoptDecoder} from 'three/addons/libs/meshopt_decoder.module.js';
 const BASE = import.meta.env?.BASE_URL || '/shootout/';
 const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
 
-export async function loadCity(scene, renderer) {
+export async function loadCity(scene, renderer, folder = 'dizengoff-center') {
   loader.setKTX2Loader(new KTX2Loader().setTranscoderPath(`${BASE}assets/basis/`).detectSupport(renderer));
-  const [far, set] = await Promise.all([loader.loadAsync(`${BASE}assets/maps/city/far.glb`), loader.loadAsync(`${BASE}assets/maps/city/set.glb`)]);
+  const [far, set] = await Promise.all([loader.loadAsync(`${BASE}assets/maps/${folder}/far.glb`), loader.loadAsync(`${BASE}assets/maps/${folder}/set.glb`)]);
   scene.add(far.scene, set.scene);
   const nightMats = [], shutters = [];
   const max = renderer.capabilities.getMaxAnisotropy();

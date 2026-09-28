@@ -21,7 +21,16 @@ The rivals ask Jev for decisions through the Vite dev server, which proxies `/ap
 never reaches the browser, and `.env` is gitignored. Without a key, or in a static `npm run build`,
 the rivals fall back to a local heuristic, and the HUD shows "Jev offline".
 
-Pick **Relic Isle**, **Dead District**, **Midtown**, **Madison Square Garden**, or **Dizengoff Square** from the menu before you fight; the choice is saved in `localStorage`.
+Pick **Relic Isle**, **Dead District**, **Midtown**, **Madison Square Garden**, **Dizengoff Center** or **Dizengoff Square** from the menu before you fight; the choice is saved in `localStorage`. The two Dizengoff maps are single player only.
+
+### Adding a city-set map
+
+Dizengoff Center and Dizengoff Square are built from `cityset` exports (`set.glb` plus an optional `far.glb` skyline).
+
+1. Put the original, unoptimised exports in `shootout/assets-src/<map-folder>/` (not in `public/`; Workers reject assets over 25 MB).
+2. `node shootout/scripts/build-city-map.mjs <map-folder>` shrinks the textures, encodes them to KTX2 and meshopt-compresses the buffers into `shootout/public/assets/maps/<map-folder>/`. It leaves vertex positions exactly as exported.
+3. `node shootout/scripts/bake-dizengoff-nav.mjs <map-folder>` writes `nav.json`: walk heights, blocking rectangles and a spawn.
+4. Add an entry to `shootout/src/world/maps.js` with `cityFolder: '<map-folder>'` and `soloOnly: true`, and an `<option data-solo>` to `shootout/index.html`.
 
 The first `npm run dev` (or `npm run build`) downloads about 100 MB of third-party assets into
 `shootout/public/assets/vendor`, which is gitignored.

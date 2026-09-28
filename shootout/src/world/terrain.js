@@ -17,7 +17,7 @@ export function generateHeightmap(mapId = 'island') {
 }
 
 export async function loadTerrainTextures(map) {
-  const pre = map?.id === 'city' || map?.id === 'garden' || map?.id === 'manhattan' || map?.id === 'studio' ? 'city_' : '';
+  const pre = map?.id === 'city' || map?.id === 'garden' || map?.id === 'manhattan' || map?.cityFolder ? 'city_' : '';
   const url = (k, t) => `${VENDOR}/textures/${pre}${k}_${t}.jpg`;
   const [albedo, normal, arm] = await Promise.all([
     loadTextureArray(LAYERS.map((k) => url(k, 'diff')), 1024, { srgb: true }),

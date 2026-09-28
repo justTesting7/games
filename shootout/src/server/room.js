@@ -12,7 +12,7 @@ const DAMAGE = {
 };
 const ROSTERS = new Set(['adventurer', 'redpolo', 'greytee', 'checkers', 'denim', 'linen']);
 const WEAPONS = new Set(['pistols', 'rifle', 'grenade', 'drone']);
-const MAPS = new Set(['island', 'city', 'garden', 'manhattan', 'studio']);
+const MAPS = new Set(['island', 'city', 'garden', 'manhattan']);
 const FLEET = 64;
 const clampMin = (v) => {
   const n = Math.round(num(v));

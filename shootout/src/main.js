@@ -10,7 +10,7 @@ import { urbanRivalSpots } from './world/cityLayout.js';
 import { City } from './world/city.js';
 import { Arena } from './world/arena.js';
 import { arenaHeightAt, standSpawn } from './world/arenaLayout.js';
-import { loadStudioMap, studioRivalSpots, blockedAt } from './world/glbMap.js';
+import { studioRivalSpots, blockedAt } from './world/glbMap.js';
 import { loadDizengoff } from './world/dizengoff.js';
 import { Fish } from './world/fish.js';
 import { Character } from './game/character.js';
@@ -295,8 +295,7 @@ async function init() {
     progress.task('Loading terrain materials', 3, () => loadTerrainTextures(mapDef)),
   ]);
   const garden = mapDef.id === 'garden';
-  const dizengoff = mapDef.id === 'dizengoff';
-  const studioMap = mapDef.id === 'studio' || dizengoff;
+  const studioMap = !!mapDef.cityFolder;
   const urban = mapDef.id === 'city' || mapDef.id === 'manhattan' || garden;
   pipeline.indoor = garden;
   let studioHeight = (x, z) => 0;
@@ -341,7 +340,7 @@ async function init() {
     city ? city.load(progress) : Promise.resolve(),
     arena ? arena.load(progress) : Promise.resolve(),
     studioMap ? progress.task(mapDef.plantLabel, 2, async () => {
-      studio = dizengoff ? await loadDizengoff(pipeline.renderer) : await loadStudioMap();
+      studio = await loadDizengoff(pipeline.renderer, mapDef.cityFolder);
       if (studio.cameraFar) { camera.far = studio.cameraFar; camera.updateProjectionMatrix(); }
       studioHeight = studio.heightAt;
       studio.addColliders(veg.colliders);

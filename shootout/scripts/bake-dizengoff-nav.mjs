@@ -1,15 +1,17 @@
 // Bakes walk height + blocking rectangles for Dizengoff Center from set.glb.
 // Every mesh in the set is batched by material (each spans the whole district),
 // so per-mesh boxes are useless. This samples the triangles instead and writes
-// public/assets/maps/city/nav.json.
-//   node shootout/scripts/bake-dizengoff-nav.mjs
+// public/assets/maps/<map-folder>/nav.json.
+//   node shootout/scripts/bake-dizengoff-nav.mjs <map-folder>
 import fs from 'node:fs';
 import path from 'node:path';
 import { NodeIO } from '@gltf-transform/core';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 
-const DIR = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', 'public', 'assets', 'maps', 'city');
+const MAP = process.argv[2];
+if (!MAP) throw new Error('usage: bake-dizengoff-nav.mjs <map-folder>');
+const DIR = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', 'public', 'assets', 'maps', MAP);
 const CELL = 0.5;
 const GROUND = /^(asphalt|pavement|ground|lm_grass|kerb|marking|road_marks|road_marks_bus)$/;
 const SOLID = /^(facade_.*|side_.*|blank_.*|ground_.*|bark|carpaint|carglass|railing|netting|hoarding|crates|pais|dt_facade|tt_grid|metal|glass|balcony|parapet|solar|awning|signs|name_boxes|load_signs)$/;
