@@ -374,6 +374,7 @@ async function init() {
     cars.spawnMap(mapDef.id);
   }
   if (studio?.takeCars) cars.spawnCustom(studio.takeCars());
+  if (studio?.takeScooters) cars.addScooters(studio.takeScooters());
   if (arena && data.layout) {
     arena.build(data.layout);
     pipeline.scene.add(arena.group);
@@ -978,8 +979,8 @@ async function init() {
       const prompt = cars.prompt;
       carEl.classList.toggle('show', alive && !!prompt && !player.swimming);
       carEl.textContent = prompt?.mode === 'drive'
-        ? `E leave · WASD drive · ${Math.abs(prompt.speed).toFixed(0)} m/s`
-        : 'E enter car';
+        ? `E ${prompt.kind === 'scooter' ? 'hop off' : 'leave'} · WASD ${prompt.kind === 'scooter' ? 'ride' : 'drive'} · ${Math.abs(prompt.speed).toFixed(0)} m/s`
+        : `E ${prompt?.car?.kind === 'scooter' ? 'ride scooter' : 'enter car'}`;
     }
     const hp = spec ? spec.fighter.health : player.fighter.health;
     $('hpbar').style.width = `${(hp / MAX_HEALTH) * 100}%`;

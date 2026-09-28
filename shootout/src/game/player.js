@@ -334,10 +334,13 @@ export class Player {
     ch.root.rotation.x = 0;
     ch.root.rotation.y = this.yaw;
     ch.root.rotation.z = 0;
-    ch.root.visible = false;
-    if (ch.rifle) ch.rifle.visible = false;
-    ch.pistols?.forEach((p) => { p.visible = false; });
-    this.updateCamera(dt, false, Math.abs(car.speed) > 14, Math.abs(car.speed));
+    const standing = car.kind === 'scooter'; // a scooter rider is on show, not in a cockpit
+    ch.root.visible = standing;
+    if (!standing) {
+      if (ch.rifle) ch.rifle.visible = false;
+      ch.pistols?.forEach((p) => { p.visible = false; });
+    }
+    this.updateCamera(dt, false, Math.abs(car.speed) > (standing ? 9 : 14), Math.abs(car.speed));
     this.updateAim();
     ch.update(dt, {
       speed: 0, onGround: true, airTime: 0, strafe: false, localDir: this.localDir.set(0, 0, 1),
@@ -352,7 +355,8 @@ export class Player {
     const { terrain, veg } = this.world;
     const k = Math.min(1, dt * 10);
     const scoped = follow ? false : this.scoped;
-    const ride = follow?.vehicle || (!follow && this.vehicle);
+    const rideCar = (v) => (v && v.kind !== 'scooter' ? v : null); // scooters keep the third-person camera
+    const ride = rideCar(follow?.vehicle) || (!follow && rideCar(this.vehicle));
     if (ride) {
       this.updateCockpitCamera(dt, ride, follow, sprinting, speed);
       return;
@@ -372,8 +376,9 @@ export class Player {
     const fovGoal = through ? 7.5 : aiming ? 48 : sprinting ? 66 : 60;
     this.fov += (fovGoal - this.fov) * Math.min(1, dt * (through ? 11 : 6));
     if (Math.abs(cam.fov - this.fov) > 0.01) { cam.fov = this.fov; cam.updateProjectionMatrix(); }
-    if (this.character.root && !this.vehicle) this.character.root.visible = follow ? true : !through;
-    if (this.character.rifle && !this.vehicle) this.character.rifle.visible = follow ? true : !through;
+    const inCockpit = !!rideCar(this.vehicle);
+    if (this.character.root && !inCockpit) this.character.root.visible = follow ? true : !through;
+    if (this.character.rifle && !inCockpit) this.character.rifle.visible = follow ? true : !through;
 
     this.recoilPitch *= Math.exp(-dt * (scoped ? 4.5 : 10));
     // Breathing and heartbeat sway the scope, more when moving or hurt.

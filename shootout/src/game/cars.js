@@ -25,6 +25,36 @@ export const CAR = {
   eyeZ: 0.14,
 };
 
+/** A kick scooter: stand on the deck, third-person camera, slower and tighter than a car. */
+export const SCOOTER = {
+  kind: 'scooter',
+  halfL: 0.62,
+  halfW: 0.3,
+  height: 1.25,
+  enterR: 2.3,
+  seatX: 0,
+  seatY: 0.16,
+  seatZ: -0.08,
+  maxSpeed: 11,
+  boostSpeed: 15,
+  reverse: 2.5,
+  accel: 9,
+  brake: 16,
+  coast: 4.5,
+  steer: 2.7,
+  killSpeed: 6,
+  collideR: 0.42,
+  eyeY: 1.5,
+  eyeZ: 0,
+  wheelR: 0.1,
+  metalBoxes: [
+    { x0: -0.14, x1: 0.14, y0: 0.06, y1: 0.24, z0: -0.62, z1: 0.62 },
+    { x0: -0.05, x1: 0.05, y0: 0.24, y1: 1.2, z0: 0.46, z1: 0.6 },
+  ],
+};
+
+const specOf = (car) => car?.spec || CAR;
+
 export const PANES = ['wind', 'rear', 'leftF', 'rightF', 'leftR', 'rightR'];
 
 export const PANE_BOXES = {
@@ -152,33 +182,33 @@ export function localOffset(px, pz, car) {
 export function seatOf(car) {
   const o = localOffset(car.x, car.z, car);
   return {
-    x: car.x + o.rightX * CAR.seatX + o.fwdX * CAR.seatZ,
-    y: car.y + CAR.seatY,
-    z: car.z + o.rightZ * CAR.seatX + o.fwdZ * CAR.seatZ,
+    x: car.x + o.rightX * specOf(car).seatX + o.fwdX * specOf(car).seatZ,
+    y: car.y + specOf(car).seatY,
+    z: car.z + o.rightZ * specOf(car).seatX + o.fwdZ * specOf(car).seatZ,
   };
 }
 
 export function exitOf(car, side = 1) {
   const o = localOffset(car.x, car.z, car);
-  const lat = (CAR.halfW + 0.85) * side;
+  const lat = (specOf(car).halfW + 0.85) * side;
   return {
-    x: car.x + o.rightX * lat + o.fwdX * CAR.seatZ,
-    z: car.z + o.rightZ * lat + o.fwdZ * CAR.seatZ,
+    x: car.x + o.rightX * lat + o.fwdX * specOf(car).seatZ,
+    z: car.z + o.rightZ * lat + o.fwdZ * specOf(car).seatZ,
   };
 }
 
 export function canEnter(px, pz, car) {
   if (!car || car.driver) return false;
-  return Math.hypot(px - car.x, pz - car.z) < CAR.enterR;
+  return Math.hypot(px - car.x, pz - car.z) < specOf(car).enterR;
 }
 
 export function nearestEnter(px, pz, cars) {
   let best = null;
-  let bestD = CAR.enterR;
+  let bestD = Infinity;
   for (const car of cars) {
     if (car.driver) continue;
     const d = Math.hypot(px - car.x, pz - car.z);
-    if (d < bestD) {
+    if (d < specOf(car).enterR && d < bestD) {
       best = car;
       bestD = d;
     }
@@ -189,13 +219,13 @@ export function nearestEnter(px, pz, cars) {
 export function carOverlap(px, pz, py, car, pad = 0) {
   if (Math.abs((py ?? car.y) - car.y) > 1.35) return false;
   const { along, side } = localOffset(px, pz, car);
-  return Math.abs(along) < CAR.halfL + pad && Math.abs(side) < CAR.halfW + pad;
+  return Math.abs(along) < specOf(car).halfL + pad && Math.abs(side) < specOf(car).halfW + pad;
 }
 
 export function resolveCarBox(pos, radius, car) {
   const { along, side, fwdX, fwdZ, rightX, rightZ } = localOffset(pos.x, pos.z, car);
-  const hl = CAR.halfL + radius;
-  const hw = CAR.halfW + radius;
+  const hl = specOf(car).halfL + radius;
+  const hw = specOf(car).halfW + radius;
   if (Math.abs(along) >= hl || Math.abs(side) >= hw) return false;
   const ol = hl - Math.abs(along);
   const ow = hw - Math.abs(side);
@@ -216,21 +246,22 @@ export function driveSteer(input = {}) {
   return (input.left ? 1 : 0) - (input.right ? 1 : 0) - (input.moveX || 0);
 }
 
-export function stepDrive({ speed, yaw, throttle, steer, dt, sprint = false }) {
-  const max = sprint && throttle > 0 ? CAR.boostSpeed : CAR.maxSpeed;
+export function stepDrive({ speed, yaw, throttle, steer, dt, sprint = false, spec = CAR }) {
+  const S = spec;
+  const max = sprint && throttle > 0 ? S.boostSpeed : S.maxSpeed;
   let next = speed;
   if (throttle > 0) {
-    next = next < 0 ? Math.min(0, next + CAR.brake * dt) : Math.min(max, next + CAR.accel * throttle * dt);
+    next = next < 0 ? Math.min(0, next + S.brake * dt) : Math.min(max, next + S.accel * throttle * dt);
   } else if (throttle < 0) {
-    next = next > 0 ? Math.max(0, next - CAR.brake * dt) : Math.max(-CAR.reverse, next + CAR.accel * throttle * dt);
+    next = next > 0 ? Math.max(0, next - S.brake * dt) : Math.max(-S.reverse, next + S.accel * throttle * dt);
   } else if (next > 0) {
-    next = Math.max(0, next - CAR.coast * dt);
+    next = Math.max(0, next - S.coast * dt);
   } else if (next < 0) {
-    next = Math.min(0, next + CAR.coast * dt);
+    next = Math.min(0, next + S.coast * dt);
   }
   if (Math.abs(next) < 0.08) next = 0;
   const grip = 1 / (1 + Math.abs(next) * 0.055);
-  const turn = Math.abs(next) < 0.25 ? 0 : steer * CAR.steer * grip * Math.sign(next);
+  const turn = Math.abs(next) < 0.25 ? 0 : steer * S.steer * grip * Math.sign(next);
   const heading = wrap(yaw + turn * dt);
   return {
     speed: next,
@@ -291,12 +322,12 @@ export function hitCar(origin, dir, car, maxDist, opts = {}) {
   };
   let best = null;
   if (!opts.glassOnly) {
-    for (const b of METAL_BOXES) {
+    for (const b of car.spec ? car.spec.metalBoxes : METAL_BOXES) {
       const h = rayAABB(o, d, b, best ? best.t : maxDist);
       if (h && (!best || h.t < best.t)) best = { ...h, surface: 'metal' };
     }
   }
-  if (!opts.metalOnly) {
+  if (!opts.metalOnly && !car.spec) {
     const mask = car.glass || 0;
     for (const name of PANES) {
       if (!glassIntact(mask, name)) continue;
@@ -318,7 +349,7 @@ export function hitCar(origin, dir, car, maxDist, opts = {}) {
 }
 
 export function runOverHits(car, fighters, now = 0) {
-  if (!car || Math.abs(car.speed) < CAR.killSpeed) return [];
+  if (!car || Math.abs(car.speed) < specOf(car).killSpeed) return [];
   const hits = [];
   for (const f of fighters) {
     if (!f?.alive || f === car.driver) continue;
@@ -555,6 +586,38 @@ function makeCarMesh(color, variant = 0) {
   return { group: g, wheels, lights: m.light, tails: m.tail, panes, wheelRig, cluster };
 }
 
+const SCOOTER_COLORS = [0x2a9d5c, 0x2b6fd6, 0xd6a02b, 0xd6452b, 0x8a4fd6, 0x1fb5b5, 0xe8e8ea];
+
+function makeScooterMesh(color) {
+  const g = new THREE.Group();
+  g.name = 'scooter';
+  const paint = new THREE.MeshStandardMaterial({ color, metalness: 0.5, roughness: 0.4 });
+  const dark = new THREE.MeshStandardMaterial({ color: 0x17181a, metalness: 0.3, roughness: 0.6 });
+  const grip = new THREE.MeshStandardMaterial({ color: 0x0c0c0d, metalness: 0.1, roughness: 0.9 });
+  const add = (mesh, parent = g) => { mesh.castShadow = mesh.receiveShadow = true; parent.add(mesh); return mesh; };
+  add(new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.05, 0.78), dark)).position.set(0, 0.12, -0.02);
+  add(new THREE.Mesh(new THREE.BoxGeometry(0.21, 0.012, 0.6), grip)).position.set(0, 0.15, -0.06);
+  const wheels = [];
+  for (const z of [-0.42, 0.44]) {
+    const w = add(new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.05, 20).rotateZ(Math.PI / 2), grip));
+    w.position.set(0, 0.1, z);
+    const hub = add(new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.056, 12).rotateZ(Math.PI / 2), paint), w);
+    hub.position.set(0, 0, 0);
+    wheels.push(w);
+  }
+  const fork = new THREE.Group();
+  fork.position.set(0, 0.12, 0.44);
+  g.add(fork);
+  const stem = add(new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.025, 1.05, 10), paint), fork);
+  stem.position.set(0, 0.52, -0.06);
+  stem.rotation.x = -0.12;
+  const bar = add(new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.016, 0.56, 10).rotateZ(Math.PI / 2), paint), fork);
+  bar.position.set(0, 1.04, -0.13);
+  for (const sx of [-1, 1]) add(new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.12, 10).rotateZ(Math.PI / 2), grip), fork).position.set(sx * 0.27, 1.04, -0.13);
+  add(new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.012, 0.22), paint)).position.set(0, 0.2, 0.5);
+  return { group: g, wheels, handle: fork };
+}
+
 export class Cars {
   constructor(world, scene) {
     this.world = world;
@@ -635,6 +698,47 @@ export class Cars {
         steer: 0,
         mesh: s.mesh,
         wheels: [],
+        lights: { emissiveIntensity: 0 },
+        tails: { emissiveIntensity: 0 },
+        panes: null,
+        wheelRig: null,
+        cluster: null,
+        home: { x: s.x, z: s.z, yaw: s.yaw },
+      };
+      this.placeMesh(car);
+      this.refreshSeat(car);
+      this.group.add(car.mesh);
+      this.list.push(car);
+    });
+    return this.list;
+  }
+
+  /** Rideable kick scooters at {x, y, z, yaw}; they take ids after the cars. */
+  addScooters(spots) {
+    const { terrain } = this.world;
+    spots.forEach((s, n) => {
+      const y = terrain.heightAt(s.x, s.z);
+      const built = makeScooterMesh(SCOOTER_COLORS[n % SCOOTER_COLORS.length]);
+      const car = {
+        id: this.list.length,
+        kind: 'scooter',
+        spec: SCOOTER,
+        x: s.x,
+        y,
+        z: s.z,
+        yaw: s.yaw,
+        speed: 0,
+        vel: new THREE.Vector3(),
+        seat: new THREE.Vector3(),
+        driver: null,
+        lastDriver: null,
+        remote: false,
+        squash: {},
+        glass: 0,
+        steer: 0,
+        mesh: built.group,
+        wheels: built.wheels,
+        handle: built.handle,
         lights: { emissiveIntensity: 0 },
         tails: { emissiveIntensity: 0 },
         panes: null,
@@ -882,7 +986,7 @@ export class Cars {
       return null;
     }
     if (player.vehicle) {
-      this.prompt = { mode: 'drive', speed: player.vehicle.speed };
+      this.prompt = { mode: 'drive', speed: player.vehicle.speed, kind: player.vehicle.kind };
       return this.prompt;
     }
     const near = nearestEnter(player.pos.x, player.pos.z, this.list);
@@ -903,6 +1007,7 @@ export class Cars {
         steer: local.steer,
         dt,
         sprint: !!input.sprint,
+        spec: specOf(local),
       });
       local.speed = stepped.speed;
       local.yaw = stepped.yaw;
@@ -920,7 +1025,7 @@ export class Cars {
       if (!car.driver?.isPlayer) {
         if (!car.driver && Math.abs(car.speed) > 0.05) {
           const stepped = stepDrive({
-            speed: car.speed, yaw: car.yaw, throttle: 0, steer: 0, dt,
+            speed: car.speed, yaw: car.yaw, throttle: 0, steer: 0, dt, spec: specOf(car),
           });
           car.speed = stepped.speed;
           car.x += stepped.vx * dt;
@@ -935,10 +1040,13 @@ export class Cars {
           this.placeMesh(car);
         }
       }
-      const spin = car.speed * dt / 0.32;
+      const spin = car.speed * dt / (specOf(car).wheelR || 0.32);
       for (const w of car.wheels) w.rotation.x += spin;
-      if (car.wheels[0]) car.wheels[0].rotation.y = (car.steer || 0) * 0.38;
-      if (car.wheels[1]) car.wheels[1].rotation.y = (car.steer || 0) * 0.38;
+      if (!car.spec) {
+        if (car.wheels[0]) car.wheels[0].rotation.y = (car.steer || 0) * 0.38;
+        if (car.wheels[1]) car.wheels[1].rotation.y = (car.steer || 0) * 0.38;
+      }
+      if (car.handle) car.handle.rotation.y = (car.steer || 0) * 0.5;
       if (car.wheelRig) car.wheelRig.rotation.z = -(car.steer || 0) * 0.65;
       if (car.cluster) paintCluster(car.cluster, car.speed, !!car.driver);
       car.mesh.rotation.z = THREE.MathUtils.clamp(-car.speed * 0.002, -0.06, 0.06);
@@ -967,7 +1075,7 @@ export class Cars {
 
   bumpWorld(car) {
     const next = { x: car.x, y: car.y, z: car.z };
-    this.world.veg?.colliders?.resolveXZ(next, CAR.collideR, car.y, car.y + 1.25);
+    this.world.veg?.colliders?.resolveXZ(next, specOf(car).collideR, car.y, car.y + 1.25);
     if (Math.hypot(next.x - car.x, next.z - car.z) > 1e-4) {
       car.x = next.x;
       car.z = next.z;
@@ -1015,8 +1123,8 @@ export class Cars {
     if (this._dust < 0.08) return;
     this._dust = 0;
     for (const car of this.list) {
-      if (Math.abs(car.speed) < 7) continue;
-      const back = -CAR.halfL * 0.7;
+      if (Math.abs(car.speed) < (car.spec ? 5 : 7)) continue;
+      const back = -specOf(car).halfL * 0.7;
       const o = localOffset(car.x, car.z, car);
       fx.alpha.spawn({
         pos: new THREE.Vector3(car.x + o.fwdX * back, car.y + 0.12, car.z + o.fwdZ * back),

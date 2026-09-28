@@ -94,3 +94,34 @@ export function extractCityCars(root, cars) {
   });
   return out;
 }
+
+/**
+ * Removes the triangles whose centre lies inside any of the boxes ([minx, miny, minz, maxx, maxy, maxz])
+ * from the shared paint/metal meshes: the original parked scooters, which get rideable replacements.
+ */
+export function removeInBoxes(root, boxes, pad = 0.04) {
+  root.updateMatrixWorld(true);
+  const va = new THREE.Vector3(), vb = new THREE.Vector3(), vc = new THREE.Vector3();
+  let removed = 0;
+  root.traverse((o) => {
+    if (!o.isMesh || !CAR_MESHES.has(o.name)) return;
+    const g = o.geometry, pos = g.attributes.position, index = g.index;
+    const count = index ? index.count : pos.count;
+    const id = (i) => (index ? index.getX(i) : i);
+    const keep = [];
+    for (let t = 0; t + 2 < count; t += 3) {
+      const a = id(t), b = id(t + 1), c = id(t + 2);
+      va.fromBufferAttribute(pos, a).applyMatrix4(o.matrixWorld);
+      vb.fromBufferAttribute(pos, b).applyMatrix4(o.matrixWorld);
+      vc.fromBufferAttribute(pos, c).applyMatrix4(o.matrixWorld);
+      const x = (va.x + vb.x + vc.x) / 3, y = (va.y + vb.y + vc.y) / 3, z = (va.z + vb.z + vc.z) / 3;
+      let hit = false;
+      for (const bx of boxes) {
+        if (x > bx[0] - pad && x < bx[3] + pad && y > bx[1] - pad && y < bx[4] + pad && z > bx[2] - pad && z < bx[5] + pad) { hit = true; break; }
+      }
+      if (hit) removed++; else keep.push(a, b, c);
+    }
+    g.setIndex(new THREE.BufferAttribute(new Uint32Array(keep), 1));
+  });
+  return removed;
+}

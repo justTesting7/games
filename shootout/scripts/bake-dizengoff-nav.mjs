@@ -24,6 +24,7 @@ const doc = await io.read(path.join(DIR, 'set.glb'));
 
 const tris = { ground: [], solid: [] };
 const carParts = { carpaint: [], carglass: [] };
+const scooterParts = { paint: [], metal: [] };
 const wallCells = new Set();
 const seatTris = [];
 const pitchVerts = [];
@@ -35,6 +36,7 @@ for (const n of doc.getRoot().listNodes()) {
   const kind = GROUND.test(name) ? 'ground' : SOLID.test(name) ? 'solid' : null;
   const carPart = carParts[name];
   const isSeats = name === 'st_seats';
+  const scooterPart = scooterParts[name];
   if (name === 'st_pitch') {
     const t = n.getTranslation(), s = n.getScale();
     for (const p of mesh.listPrimitives()) {
@@ -43,7 +45,7 @@ for (const n of doc.getRoot().listNodes()) {
     }
     continue;
   }
-  if (!kind && !carPart && !isSeats) continue;
+  if (!kind && !carPart && !isSeats && !scooterPart) continue;
   const t = n.getTranslation(), s = n.getScale();
   for (const p of mesh.listPrimitives()) {
     const pos = p.getAttribute('POSITION');
@@ -53,8 +55,10 @@ for (const n of doc.getRoot().listNodes()) {
     const get = (i) => { pos.getElement(idx ? idx.getScalar(i) : i, v); return [v[0] * s[0] + t[0], v[1] * s[1] + t[1], v[2] * s[2] + t[2]]; };
     for (let i = 0; i + 2 < count; i += 3) {
       const tri = [get(i), get(i + 1), get(i + 2)];
+      if (scooterPart) scooterPart.push(tri);
       if (isSeats) { seatTris.push(tri); continue; }
       if (carPart) { carPart.push(tri); continue; }
+      if (!kind) continue;
       tris[kind].push(tri);
       if (kind === 'ground') for (const q of tri) { minX = Math.min(minX, q[0]); maxX = Math.max(maxX, q[0]); minZ = Math.min(minZ, q[2]); maxZ = Math.max(maxZ, q[2]); }
     }
@@ -221,6 +225,63 @@ const inCar = (x, z) => cars.some((c) => {
   return Math.abs(dx * s + dz * co) < c.hl + 0.3 && Math.abs(dx * co - dz * s) < c.hw + 0.3;
 });
 
+// scooters: each parked scooter has one handlebar mast piece (~1.2 m tall) beside a deck piece.
+// Find the masts, aim each scooter from its deck to its mast, and note the original parts to
+// remove so a rideable scooter can take their place.
+const scooters = [];
+{
+  const key = (q) => `${Math.round(q[0] * 50)},${Math.round(q[1] * 50)},${Math.round(q[2] * 50)}`;
+  const comps = [];
+  for (const list of Object.values(scooterParts)) {
+    const par = new Map();
+    const find = (a) => { while (par.get(a) !== a) { par.set(a, par.get(par.get(a))); a = par.get(a); } return a; };
+    for (const t of list) for (const q of t) { const k = key(q); if (!par.has(k)) par.set(k, k); }
+    for (const t of list) { const a = find(key(t[0])); for (let i = 1; i < 3; i++) { const b = find(key(t[i])); if (a !== b) par.set(b, a); } }
+    const groups = new Map();
+    list.forEach((t, i) => { const r = find(key(t[0])); if (!groups.has(r)) groups.set(r, []); groups.get(r).push(i); });
+    for (const ix of groups.values()) {
+      if (ix.length < 50 || ix.length > 400) continue;
+      const mn = [1e9, 1e9, 1e9], mx = [-1e9, -1e9, -1e9];
+      for (const i of ix) for (const q of list[i]) for (let k = 0; k < 3; k++) { mn[k] = Math.min(mn[k], q[k]); mx[k] = Math.max(mx[k], q[k]); }
+      const sy = mx[1] - mn[1], plan = Math.max(mx[0] - mn[0], mx[2] - mn[2]);
+      if (sy < 1.1 || sy > 1.3 || plan > 1.8) continue;
+      const k0 = cellOf((mn[0] + mx[0]) / 2, (mn[2] + mx[2]) / 2);
+      if (k0 < 0 || ground[k0] < -1e8 || mn[1] - ground[k0] > 0.8) continue;
+      // principal axis of the piece in plan
+      let cx = 0, cz = 0, cn = 0;
+      for (const i of ix) for (const q of list[i]) { cx += q[0]; cz += q[2]; cn++; }
+      cx /= cn; cz /= cn;
+      let sxx = 0, szz = 0, sxz = 0;
+      for (const i of ix) for (const q of list[i]) { const dx = q[0] - cx, dz = q[2] - cz; sxx += dx * dx; szz += dz * dz; sxz += dx * dz; }
+      const ang = 0.5 * Math.atan2(2 * sxz, sxx - szz);
+      comps.push({ n: ix.length, mn, mx, plan, narrow: Math.min(mx[0] - mn[0], mx[2] - mn[2]), c: [(mn[0] + mx[0]) / 2, (mn[2] + mx[2]) / 2], y: ground[k0], axis: [Math.cos(ang), Math.sin(ang)] });
+    }
+  }
+  const masts = comps.filter((c) => c.n <= 70 && c.plan >= 0.4 && c.plan < 0.6);
+  const decks = comps.filter((c) => c.n > 70 && c.plan >= 0.55);
+  // one scooter per deck piece (a blob of about two decks counts as two); the nose points at
+  // the nearest handlebar mast
+  const remove = new Set();
+  for (const d of decks) {
+    let mast = null, best = 1.5;
+    for (const m of masts) { const dd = Math.hypot(m.c[0] - d.c[0], m.c[1] - d.c[1]); if (dd < best) { best = dd; mast = m; } }
+    let [ax, az] = d.axis;
+    if (d.narrow > 0.9) { // two scooters side by side: lay the axis along the longer side
+      if (d.mx[0] - d.mn[0] < d.mx[2] - d.mn[2]) { ax = 0; az = 1; } else { ax = 1; az = 0; }
+    }
+    if (mast && (mast.c[0] - d.c[0]) * ax + (mast.c[1] - d.c[1]) * az < 0) { ax = -ax; az = -az; }
+    const copies = d.n > 200 && d.narrow > 0.9 ? 2 : 1;
+    for (let k = 0; k < copies; k++) {
+      const off = copies === 2 ? (k === 0 ? -0.3 : 0.3) : 0;
+      scooters.push({ x: +(d.c[0] - az * off).toFixed(2), z: +(d.c[1] + ax * off).toFixed(2), y: +d.y.toFixed(2), yaw: +Math.atan2(ax, az).toFixed(3) });
+    }
+    remove.add(d);
+  }
+  for (const m of masts) remove.add(m); // every handlebar mast is part of a scooter being replaced
+  var scooterRemove = [...remove].map((c) => [c.mn, c.mx].flat().map((v) => +v.toFixed(2)));
+  console.log('rideable scooters', scooters.length, 'parts to replace', scooterRemove.length);
+}
+
 // pass 2: things standing on it
 const low = new Uint8Array(W * H), tall = new Uint8Array(W * H);
 for (const tri of tris.solid) {
@@ -370,6 +431,8 @@ const out = {
   boxes,
   spawn: { x: +sx.toFixed(2), z: +sz.toFixed(2), y: +(ground[best]).toFixed(2), yaw: +yaw.toFixed(3) },
   cars,
+  scooters,
+  scooterRemove,
   spots,
   stadium,
   bounds: { minX, maxX, minZ, maxZ },

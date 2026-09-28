@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { loadCity } from './loadCity.js';
-import { extractCityCars } from './cityCars.js';
+import { extractCityCars, removeInBoxes } from './cityCars.js';
 import { buildStadium } from './stadium.js';
 import { buildPitchProps } from './pitchProps.js';
 import { pickRivalSpots } from './rivalSpots.js';
@@ -81,6 +81,12 @@ export async function loadDizengoff(renderer, folder = 'dizengoff-center') {
     },
     /** Cuts the parked cars out of the map meshes, once, as movable groups. */
     takeCars: () => extractCityCars(city.set, nav.cars || []),
+    /** Replaces the parked scooters with rideable ones: removes the originals and returns their spots. */
+    takeScooters: () => {
+      if (!nav.scooters?.length) return [];
+      removeInBoxes(city.set, nav.scooterRemove || []);
+      return nav.scooters;
+    },
     /** minutes = 0..1439, night = 0..1 */
     update: city.update,
   };
