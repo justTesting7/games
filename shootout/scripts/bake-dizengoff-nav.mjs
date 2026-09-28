@@ -26,6 +26,7 @@ const tris = { ground: [], solid: [] };
 const carParts = { carpaint: [], carglass: [] };
 const wallCells = new Set();
 const seatTris = [];
+const pitchVerts = [];
 let minX = 1e9, maxX = -1e9, minZ = 1e9, maxZ = -1e9;
 for (const n of doc.getRoot().listNodes()) {
   const mesh = n.getMesh();
@@ -34,6 +35,14 @@ for (const n of doc.getRoot().listNodes()) {
   const kind = GROUND.test(name) ? 'ground' : SOLID.test(name) ? 'solid' : null;
   const carPart = carParts[name];
   const isSeats = name === 'st_seats';
+  if (name === 'st_pitch') {
+    const t = n.getTranslation(), s = n.getScale();
+    for (const p of mesh.listPrimitives()) {
+      const pos = p.getAttribute('POSITION'), uv = p.getAttribute('TEXCOORD_0'), q = [0, 0, 0], w2 = [0, 0];
+      for (let i = 0; i < pos.getCount(); i++) { pos.getElement(i, q); uv.getElement(i, w2); pitchVerts.push({ x: q[0] * s[0] + t[0], y: q[1] * s[1] + t[1], z: q[2] * s[2] + t[2], u: w2[0], v: w2[1] }); }
+    }
+    continue;
+  }
   if (!kind && !carPart && !isSeats) continue;
   const t = n.getTranslation(), s = n.getScale();
   for (const p of mesh.listPrimitives()) {
@@ -116,6 +125,13 @@ if (seatTris.length) {
   outside.sort((a, b) => a - b);
   const floorY = +(outside.length ? outside[outside.length >> 1] : 0.6).toFixed(2);
   stadium = { ...profile, floorY };
+  // the pitch quad and, from its line art, the middle of each goal line (2.6 m and 3.3 m in from the ends)
+  if (pitchVerts.length >= 4) {
+    const corner = (u, v) => pitchVerts.reduce((a, b) => (Math.hypot(b.u - u, b.v - v) < Math.hypot(a.u - u, a.v - v) ? b : a));
+    const A = corner(0, 0), B = corner(1, 0), D = corner(0, 1);
+    const at = (u, v) => [A.x + u * (B.x - A.x) + v * (D.x - A.x), A.z + u * (B.z - A.z) + v * (D.z - A.z)].map((n) => +n.toFixed(2));
+    stadium.pitch = { y: +A.y.toFixed(2), center: at(0.5, 0.5), goals: [at(0.5, 0.026), at(0.5, 0.968)] };
+  }
   stadiumCell = (x, z) => classifyStadium(profile, x, z);
   stadiumDoor = (x, z) => inGateDoor(profile, x, z);
   let stamped = 0;
