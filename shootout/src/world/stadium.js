@@ -214,7 +214,12 @@ export function buildStadium(THREE, root, p, floorY) {
       w: STADIUM.gateHalf + 0.3, depth: 5, h: floorY + STADIUM.gateH + 0.6,
     };
   });
-  root.traverse((o) => { if (o.isMesh && o.name === STADIUM.glassMesh) cutDoorways(THREE, o, doors); });
+  root.traverse((o) => {
+    if (!o.isMesh || o.name !== STADIUM.glassMesh) return;
+    cutDoorways(THREE, o, doors);
+    // the wall blocks bullets and walkers, so it must be visible from the inside too
+    (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) => { m.side = THREE.DoubleSide; });
+  });
 
   const concrete = new THREE.MeshStandardMaterial({ color: 0xcfcfca, roughness: 0.92, metalness: 0, side: THREE.DoubleSide });
   const floor = new THREE.MeshStandardMaterial({ color: 0x8c8c88, roughness: 0.95, metalness: 0 });
