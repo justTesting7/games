@@ -1285,6 +1285,8 @@ export class Rival {
     this.lookPitch = Math.atan2(ldy, Math.hypot(ldx, ldz) || 1e-6);
     ch.root.position.copy(this.pos);
     ch.root.rotation.y = this.yaw;
+    const cam = this.world.player?.camera?.position;
+    ch.detail = cam && cam.distanceToSquared(this.pos) > 35 * 35 ? 0 : 1;
     ch.update(dt, {
       speed, onGround: this.onGround, airTime: this.airTime, strafe: wish.aim, localDir: this.localDir,
       jumpStarted, predictedAir: (2 * JUMP_V) / GRAVITY, aiming: wish.aim, aimPoint: this.lookPoint,

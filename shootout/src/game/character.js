@@ -854,10 +854,12 @@ export class Character {
     this.mixer.update(dt);
     this.root.updateMatrixWorld(true);
     this.seated = !!s.seat;
+    // far away (detail 0): skip the touches nobody can see at that range
+    const near = this.detail !== 0;
     if (s.seat) this.applySeated(s.seat);
-    else this.applyLean(dt, s);
+    else if (near) this.applyLean(dt, s);
     this.applyCrouch(s.crouch || 0);
-    this.applyFootIK(dt, s);
+    if (near) this.applyFootIK(dt, s);
 
     this.updateEquip(dt);
     const act = this.action;
@@ -884,7 +886,7 @@ export class Character {
       rotateBoneWorld(this.bones.Spine1, this.tmp.q.setFromAxisAngle(this.flinchAxis, this.flinch * 0.32), this.tmp);
       this.flinch *= Math.exp(-dt * 9);
     }
-    this.updateGunBlock(dt);
+    if (near) this.updateGunBlock(dt); else this.gunBlock = 0;
     this.applyAim(s);
     if (this.limbHit && this.limbHit.k > 0.02) {
       rotateBoneWorld(this.limbHit.bone, this.tmp.q.setFromAxisAngle(this.limbHit.axis, this.limbHit.k * 0.6), this.tmp);
@@ -896,7 +898,7 @@ export class Character {
     this.placeRifle(dt);
     this.placeGrenade();
     this.updateFeet(dt, s);
-    this.updateBraid(dt);
+    if (near) this.updateBraid(dt);
     this.updatePistols(dt);
   }
 

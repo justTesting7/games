@@ -15,7 +15,7 @@ the whole district, so frustum culling never skips any of it, and the shadow pas
       car x 200 cars; a car being driven or knocked leaves the batch or updates its instance.
 - [~] 3. Shadow casters: skip tiny/flat meshes (road marks, kerbs, glass), limit far skyline.
 - [ ] 4. Per-frame allocations in hot paths (raycasts, colliders, character IK) -> scratch objects.
-- [ ] 5. Distance fade / LOD for rivals' expensive per-frame work (IK, braid) when far away.
+- [x] 5. Distance fade / LOD for rivals' expensive per-frame work (IK, braid) when far away.
 
 ## Shooting accuracy
 - [x] 6. Hit boxes per bone (capsules for head, chest, pelvis, upper/lower arms and legs) instead
@@ -36,3 +36,5 @@ the whole district, so frustum culling never skips any of it, and the shadow pas
 ## Log
 - Tel Aviv frame, same view: 10.4 ms / 1684 calls (baseline) -> 6.0 ms / 1078 calls after
   chunking (256 m cells), car batching and no shadows from flat ground.
+- CPU per step (Tel Aviv): parked cars 2.9 -> 0.1 ms (sleep when settled); rival characters
+  skip lean / foot IK / gun probe / braid beyond 35 m.
