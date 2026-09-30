@@ -1311,6 +1311,35 @@ export class Cars {
     }
   }
 
+  // An explosion: empty cars and scooters nearby are thrown away from it and spun, and
+  // the windows facing the blast shatter. Every client runs grenades itself, so only the
+  // thrower's client (report) tells the room about the slides.
+  blast(pos, radius, { report = false } = {}) {
+    for (const car of this.list) {
+      const dx = car.x - pos.x, dz = car.z - pos.z;
+      const d = Math.hypot(dx, dz);
+      if (d > radius || Math.abs(car.y - pos.y) > 4) continue;
+      const k = Math.pow(1 - d / radius, 1.3);
+      if (!car.driver) {
+        const push = (car.spec ? 11 : 4.5) * k;
+        const nx = d > 1e-3 ? dx / d : 1, nz = d > 1e-3 ? dz / d : 0;
+        const s = car.slide || (car.slide = { x: 0, z: 0, spin: 0 });
+        s.x += nx * push; s.z += nz * push;
+        s.spin += (Math.random() - 0.5) * 2.4 * k;
+        if (car.body) { car.body.rest = false; car.body.pv -= 0.8 * k; } // the body bucks
+        car.shoved = report ? 1.5 : 0;
+      }
+      if (k > 0.25 && car.panes) {
+        for (const name of PANES) {
+          if (!car.panes[name] || !glassIntact(car.glass || 0, name)) continue;
+          const from = new THREE.Vector3(pos.x, pos.y + 0.5, pos.z);
+          const dir = new THREE.Vector3(car.x - pos.x, 0.1, car.z - pos.z).normalize();
+          this.breakGlass(car, name, from, dir, { t: Math.max(0.5, d - 1) }, { silent: !report });
+        }
+      }
+    }
+  }
+
   // A shoved car slides and turns until its tyres scrub the motion off.
   slideFree(car, dt) {
     const s = car.slide;

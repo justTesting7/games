@@ -36,6 +36,7 @@ the whole district, so frustum culling never skips any of it, and the shadow pas
 - [x] 16. Sound occlusion: gunshots behind buildings are muffled (shot BVH ray to the listener).
 - [~] 17. Shadows reach further: Medium 2048 over 64 m, High/Ultra 4096 over 90/110 m (was 40-58 m);
       a real second cascade would still help the far streets.
+- [x] 19. Explosions shove nearby cars and scooters and shatter their windows.
 - [ ] 18. Rival drivers: rivals take cars to close distance / flee.
 
 ## Log

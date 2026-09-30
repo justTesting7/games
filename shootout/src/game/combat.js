@@ -220,6 +220,8 @@ export class Combat {
       this.damage(f, attacker, Math.round(maxDamage * k), to, { weapon: opts.weapon || 'grenade', knock });
     }
     if (netHits.length) world.weapons?.session?.reportBlast(netHits, opts.weapon || 'grenade');
+    // the blast also shoves cars and scooters and blows their windows in
+    world.cars?.blast?.(pos, radius * 1.3, { report: !!attacker?.isPlayer });
   }
 
   // Whether `f` is currently pointing its guns at `other`.
