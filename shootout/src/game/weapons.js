@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { hasSea } from './swim.js';
 import { Character } from './character.js';
 import { SuicideDrone } from './drone.js';
 
@@ -441,7 +442,7 @@ export class Weapons {
     p.addScaledVector(v, dt);
     let bounced = 0;
     const h = terrain.heightAt(p.x, p.z);
-    if (p.y < 0.03 && h < 0) {
+    if (hasSea() && p.y < 0.03 && h < 0) {
       if (p.y < 0) { v.multiplyScalar(Math.exp(-dt * 8)); bounced = -1; }
     } else if (p.y < h + 0.035) {
       const n = terrain.normalAt(p.x, p.z);
@@ -483,7 +484,8 @@ export class Weapons {
         g.water = true;
         this.fx.impact(g.pos.clone().setY(0.02), new THREE.Vector3(0, 1, 0), 'water', new THREE.Vector3(0, -1, 0));
       }
-      const onGround = g.pos.y - Math.max(0, this.world.terrain.heightAt(g.pos.x, g.pos.z)) < 0.05;
+      const gh = this.world.terrain.heightAt(g.pos.x, g.pos.z);
+      const onGround = g.pos.y - (hasSea() ? Math.max(0, gh) : gh) < 0.05;
       if (onGround) g.spin.multiplyScalar(Math.exp(-dt * 6));
       const w = g.spin.length();
       if (w > 1e-3) g.quat.premultiply(new THREE.Quaternion().setFromAxisAngle(tmp.copy(g.spin).divideScalar(w), w * dt));

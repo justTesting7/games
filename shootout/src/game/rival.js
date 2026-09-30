@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { hasSea } from './swim.js';
 import { Loadout, WEAPONS, Weapons } from './weapons.js';
 import { bowlWaypoint } from '../world/arenaLayout.js';
 
@@ -200,7 +201,7 @@ export class Rival {
     const t = this.world.terrain;
     if (!t.inBounds(sx, sz)) return null;
     const h = t.heightAt(sx, sz);
-    if (h < 0.15) return null;
+    if (hasSea() && h < 0.15) return null;
     return new THREE.Vector3(sx, h, sz);
   }
 
@@ -1138,7 +1139,7 @@ export class Rival {
     const n = terrain.normalAt(next.x, next.z);
     const uphill = n.x * this.vel.x + n.z * this.vel.z < 0;
     let blocked = false;
-    if ((n.y < 0.62 && uphill && ground > this.pos.y + 0.05) || ground < 0.1 || !terrain.inBounds(next.x, next.z)) {
+    if ((n.y < 0.62 && uphill && ground > this.pos.y + 0.05) || (hasSea() && ground < 0.1) || !terrain.inBounds(next.x, next.z)) {
       next.x = this.pos.x;
       next.z = this.pos.z;
       this.vel.x *= 0.2;

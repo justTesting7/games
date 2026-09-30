@@ -13,6 +13,7 @@ import { arenaHeightAt, standSpawn } from './world/arenaLayout.js';
 import { studioRivalSpots, blockedAt } from './world/glbMap.js';
 import { loadDizengoff } from './world/dizengoff.js';
 import { buildLab } from './world/lab.js';
+import { setSea, hasSea } from './game/swim.js';
 import { Fish } from './world/fish.js';
 import { Character } from './game/character.js';
 import { Player } from './game/player.js';
@@ -76,7 +77,7 @@ const progress = new Progress((p) => {
 
 const world = {};
 const surfaceAt = (x, z, y) => {
-  if (y !== undefined && y < 0.02 && world.terrain.heightAt(x, z) < 0) return 'water';
+  if (hasSea() && y !== undefined && y < 0.02 && world.terrain.heightAt(x, z) < 0) return 'water';
   const b = world.terrain.biomeAt(x, z);
   const best = Object.entries(b).sort((a, c) => c[1] - a[1])[0][0];
   return best;
@@ -91,7 +92,7 @@ world.raycast = (o, d, maxDist, ignore) => {
     const p = o.clone().addScaledVector(d, tt);
     best = { t: tt, normal: world.terrain.normalAt(p.x, p.z), surface: surfaceAt(p.x, p.z) };
   }
-  if (o.y > 0 && d.y < 0) {
+  if (hasSea() && o.y > 0 && d.y < 0) {
     const tw = -o.y / d.y;
     if (tw < (best ? best.t : maxDist)) best = { t: tw, normal: new THREE.Vector3(0, 1, 0), surface: 'water' };
   }
@@ -182,6 +183,7 @@ addEventListener('blur', () => { for (const k in input) input[k] = false; });
 
 const mapId = bootMap || localStorage.getItem('relic-map') || 'island';
 const mapDef = getMap(mapId);
+setSea(!mapDef.cityFolder && !mapDef.lab);
 $('map').value = mapId;
 $('maptitle').textContent = mapDef.label;
 $('mapsub').textContent = mapDef.subtitle;
@@ -758,8 +760,9 @@ async function init() {
 
   character.onFootstep = (i, speed) => {
     const p = player.pos;
-    audio.footstep(p.y < 0.05 ? 'water' : surfaceAt(p.x, p.z), speed);
-    if (p.y < 0.05) fx.impact(p.clone().setY(0.02), new THREE.Vector3(0, 1, 0), 'water', new THREE.Vector3(0, -1, 0));
+    const wet = hasSea() && p.y < 0.05;
+    audio.footstep(wet ? 'water' : surfaceAt(p.x, p.z), speed);
+    if (wet) fx.impact(p.clone().setY(0.02), new THREE.Vector3(0, 1, 0), 'water', new THREE.Vector3(0, -1, 0));
   };
   player.onLand = (v) => audio.land(v);
 

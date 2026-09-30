@@ -2,8 +2,14 @@ export const WATER_Y = 0;
 export const FLOAT_Y = -1.08;
 export const SWIM_SPEED = { surface: 2.35, sprint: 3.55, dive: 2.7, diveSprint: 4.15 };
 
+// Maps with a sea (the island) float y = 0 as water. The city maps have no sea: their
+// streets sit around and below y = 0, which used to make players swim down the road.
+let sea = true;
+export function setSea(on) { sea = !!on; }
+export const hasSea = () => sea;
+
 export function waterColumn(floor) {
-  return floor < -0.28;
+  return sea && floor < -0.28;
 }
 
 export function shouldSwim(y, floor, already = false) {

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { hasSea } from './swim.js';
 
 export const DRONE = {
   key: 'drone',
@@ -335,7 +336,7 @@ export class SuicideDrone {
   crashOut() {
     const d = this.live;
     const pos = d.pos.clone();
-    const underwater = pos.y < 0.15;
+    const underwater = hasSea() && pos.y < 0.15;
     this.fx.explosion(pos, underwater ? 'water' : 'ground');
     this.audio.explosion?.(pos.distanceTo(this.world.player.pos), 0, underwater);
     this.world.weapons?.onExplosion?.(pos, pos.distanceTo(this.world.player.pos));
@@ -404,7 +405,7 @@ export class SuicideDrone {
     const owner = this.live.owner;
     const shotDown = reason === 'shot';
     this.clear();
-    const underwater = pos.y < 0.15;
+    const underwater = hasSea() && pos.y < 0.15;
     this.fx.explosion(pos, underwater ? 'water' : 'ground');
     const dist = pos.distanceTo(this.world.player.pos);
     this.audio.explosion?.(dist, 0, underwater);
@@ -528,16 +529,18 @@ export class RemoteDrone {
   explode() {
     if (!this.live) return;
     const pos = this.pos.clone();
-    this.fx.explosion(pos, pos.y < 0.15 ? 'water' : 'ground');
-    this.audio.explosion?.(pos.length(), 0, pos.y < 0.15);
+    const wet = hasSea() && pos.y < 0.15;
+    this.fx.explosion(pos, wet ? 'water' : 'ground');
+    this.audio.explosion?.(pos.length(), 0, wet);
     this.dispose();
   }
 
   crash() {
     if (!this.live) return;
     const pos = this.pos.clone();
-    this.fx.explosion(pos, pos.y < 0.15 ? 'water' : 'ground');
-    this.audio.explosion?.(8, 0, pos.y < 0.15);
+    const wet = hasSea() && pos.y < 0.15;
+    this.fx.explosion(pos, wet ? 'water' : 'ground');
+    this.audio.explosion?.(8, 0, wet);
     this.dispose();
   }
 

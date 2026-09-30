@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { FLOAT_Y, canExitWater, shouldSwim, stepSwim, swimSpeed } from './swim.js';
+import { FLOAT_Y, canExitWater, shouldSwim, stepSwim, swimSpeed, hasSea } from './swim.js';
 import { cockpitEye } from './cars.js';
 
 const GRAVITY = 16;
@@ -509,5 +509,5 @@ export class Player {
     if (block && block.fighter !== this.aimHit.fighter) this.aimHit = null;
   }
 
-  get underwater() { return this.camera.position.y < 0.02 || (this.diving && this.pos.y < FLOAT_Y - 0.2); }
+  get underwater() { return hasSea() && (this.camera.position.y < 0.02 || (this.diving && this.pos.y < FLOAT_Y - 0.2)); }
 }
