@@ -221,8 +221,8 @@ export class Pipeline {
       tDepth: { value: null },
       uRes: { value: new THREE.Vector2(1, 1) },
       uProj: { value: new THREE.Vector2(1, 1) },
-      uRadius: { value: 0.9 },
-      uIntensity: { value: 0.3 },
+      uRadius: { value: 1.3 },
+      uIntensity: { value: 0.6 },
       uMaxDist: { value: 140 },
     }, { defines: { AO_SAMPLES: 8 } });
     this.aoBlurMaterial = fsMaterial(S.aoBlurFrag, { tAO: { value: null }, uStep: { value: new THREE.Vector2() } });
