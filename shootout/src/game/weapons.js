@@ -256,7 +256,8 @@ export class Weapons {
       if (dir.lengthSq() < 1e-8) dir.copy(look);
       else dir.normalize();
     } else {
-      from = rifle ? ch.rifleMuzzle() : ch.muzzleWorld(side);
+      // From the chest, not the muzzle: a barrel against a wall must not fire from its far side.
+      from = this.combat.chest(shooter);
       const target = aimPoint.clone();
       const r = spread * target.distanceTo(from);
       target.add(new THREE.Vector3().randomDirection().multiplyScalar(r * Math.random()));

@@ -814,6 +814,7 @@ export class Character {
       rotateBoneWorld(this.bones.Spine1, this.tmp.q.setFromAxisAngle(this.flinchAxis, this.flinch * 0.32), this.tmp);
       this.flinch *= Math.exp(-dt * 9);
     }
+    this.updateGunBlock(dt);
     this.applyAim(s);
     if (s.swimming) this.applySwim(s, dt);
     if (this.weapon === 'grenade') this.applyThrow(dt);
@@ -873,7 +874,7 @@ export class Character {
       const a = this.action;
       const w = this.aimWeight;
       const butt1 = sh.clone().addScaledVector(left, 0.07).addScaledVector(UP, -0.06).addScaledVector(fwd, 0.04);
-      const f1 = this.aimFrom(butt1);
+      const f1 = this.gunFrom(butt1);
       const butt0 = sh.clone().addScaledVector(UP, -0.3).addScaledVector(fwd, 0.14).addScaledVector(left, 0.04);
       const f0 = fwd.clone().multiplyScalar(0.82).addScaledVector(UP, -0.45).addScaledVector(left, 0.35).normalize();
       const butt = butt0.lerp(butt1, w);
@@ -1006,6 +1007,32 @@ export class Character {
 
   // Direction the guns and arms should take. Follow the mouse look so the
   // pose matches the reticle; a nearby floor hit would yank the barrels down.
+  // Where the guns point: the aim, tipped up to a high ready when a wall is
+  // closer than the barrel so it never pokes through (see updateGunBlock).
+  gunFrom(from, out = new THREE.Vector3()) {
+    this.aimFrom(from, out);
+    const b = this.gunBlock || 0;
+    if (b < 1e-3) return out;
+    const up = V[7].set(0, 1, 0).addScaledVector(out, 0.35).normalize();
+    return out.lerp(up, b * 0.85).normalize();
+  }
+
+  // Probe along the aim from the chest; Character.wallProbe(o, d, len) -> distance | null
+  // is set by the game to trace static geometry only.
+  updateGunBlock(dt) {
+    let goal = 0;
+    const probe = Character.wallProbe;
+    if (probe && this.aimWeight > 0.05 && (this.weapon === 'rifle' || this.weapon === 'pistols') && this.bones.Spine2) {
+      const chest = this.bones.Spine2.getWorldPosition(V[5]);
+      const dir = this.aimFrom(chest, V[6]);
+      const reach = this.weapon === 'rifle' ? 1.05 : 0.7;
+      const t = probe(chest, dir, reach);
+      if (t !== null && t !== undefined) goal = THREE.MathUtils.clamp((reach - t) / (reach * 0.55), 0, 1);
+    }
+    const k = 1 - Math.exp(-dt * (goal > (this.gunBlock || 0) ? 18 : 8));
+    this.gunBlock = (this.gunBlock || 0) + (goal - (this.gunBlock || 0)) * k;
+  }
+
   aimFrom(_from, out = new THREE.Vector3()) {
     if (this.lookDir.lengthSq() > 1e-6) return out.copy(this.lookDir).normalize();
     out.subVectors(this.aimTarget, this.root.position);
@@ -1241,10 +1268,10 @@ export class Character {
       const upper = B[`${side}Arm`], fore = B[`${side}ForeArm`], hand = B[`${side}Hand`];
       const finger = B[`${side}HandMiddle1`];
       const sh = upper.getWorldPosition(t.a);
-      const d = this.aimFrom(sh);
+      const d = this.gunFrom(sh);
       rotateBoneToward(upper, fore, d, w, t);
       const fp = fore.getWorldPosition(t.a);
-      const d2 = this.aimFrom(fp);
+      const d2 = this.gunFrom(fp);
       rotateBoneToward(fore, hand, d2, w, t);
       if (finger) rotateBoneToward(hand, finger, d2, w, t);
       const r = this.recoil[i] * w;

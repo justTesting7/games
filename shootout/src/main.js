@@ -114,6 +114,15 @@ world.raycast = (o, d, maxDist, ignore) => {
 };
 const combat = new Combat();
 world.combat = combat;
+// Static geometry only (walls, props, parked cars): keeps gun barrels out of walls.
+Character.wallProbe = (o, d, len) => {
+  let t = world.shots?.raycast(o, d, len)?.t ?? null;
+  const c = world.veg?.colliders.raycast(o, d, t ?? len);
+  if (c) t = c.t;
+  const car = world.cars?.raycast(o, d, t ?? len, null);
+  if (car) t = car.t;
+  return t;
+};
 const mode = resolveMode();
 const roomCode = resolveRoom();
 persistMode(mode);
