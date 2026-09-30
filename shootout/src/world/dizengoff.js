@@ -10,6 +10,7 @@ import { pickRivalSpots, slotSpawns } from './rivalSpots.js';
 const BASE = import.meta.env?.BASE_URL || '/shootout/';
 export const navUrl = (folder) => `${BASE}assets/maps/${folder}/nav.json`;
 const FAR_DISTANCE = 9000; // far.glb spans 8 km
+const NO_CAST = /^(asphalt|pavement|ground|lm_grass|kerb|marking|road_marks.*|lamp_glow|house_numbers|name_plates|lm_glass|glass|carglass)$/;
 
 function decodeInt16(b64) {
   const bin = atob(b64);
@@ -63,8 +64,12 @@ export async function loadDizengoff(renderer, folder = 'dizengoff-center', { sta
     fetch(navUrl(folder)).then((r) => { if (!r.ok) throw new Error('nav.json missing'); return r.json(); }),
     loadCity(group, renderer, folder),
   ]);
+  // Streets, kerbs, markings and grass are flat: they receive shadows but casting only
+  // adds draw calls to the shadow pass. Glow cards and decals don't cast either.
   city.set.traverse((o) => {
-    if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; }
+    if (!o.isMesh) return;
+    o.receiveShadow = true;
+    o.castShadow = !NO_CAST.test(o.name);
   });
   city.far.traverse((o) => { if (o.isMesh) o.frustumCulled = false; });
   const stadium = nav.stadium ? buildStadium(THREE, city.set, nav.stadium, nav.stadium.floorY) : null;

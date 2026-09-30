@@ -8,7 +8,7 @@ import * as THREE from 'three';
 
 const tmp = new THREE.Vector3();
 
-export function chunkMeshes(root, { cell = 128, minTris = 3000 } = {}) {
+export function chunkMeshes(root, { cell = 256, minTris = 3000 } = {}) {
   root.updateMatrixWorld(true);
   const list = [];
   root.traverse((o) => {

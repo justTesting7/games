@@ -9,11 +9,11 @@ per frame, 10.4 ms render, 1 GB JS heap. The city is 2.9 M triangles in 424 mesh
 the whole district, so frustum culling never skips any of it, and the shadow pass draws it again.
 
 ## Rendering efficiency
-- [ ] 1. Split the city meshes into spatial chunks (shared vertex buffers, one index range per
+- [x] 1. Split the city meshes into spatial chunks (shared vertex buffers, one index range per
       cell, own bounding sphere) so the camera and the 48 m shadow frustum cull most of the city.
-- [ ] 2. Parked city cars as a few BatchedMesh draws (one per material) instead of ~9 meshes per
+- [x] 2. Parked city cars as a few BatchedMesh draws (one per material) instead of ~9 meshes per
       car x 200 cars; a car being driven or knocked leaves the batch or updates its instance.
-- [ ] 3. Shadow casters: skip tiny/flat meshes (road marks, kerbs, glass), limit far skyline.
+- [~] 3. Shadow casters: skip tiny/flat meshes (road marks, kerbs, glass), limit far skyline.
 - [ ] 4. Per-frame allocations in hot paths (raycasts, colliders, character IK) -> scratch objects.
 - [ ] 5. Distance fade / LOD for rivals' expensive per-frame work (IK, braid) when far away.
 
@@ -34,3 +34,5 @@ the whole district, so frustum culling never skips any of it, and the shadow pas
 - [ ] 15. Hit reactions by bone (stagger, limb flinch) and knockback from explosions.
 
 ## Log
+- Tel Aviv frame, same view: 10.4 ms / 1684 calls (baseline) -> 6.0 ms / 1078 calls after
+  chunking (256 m cells), car batching and no shadows from flat ground.
