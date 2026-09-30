@@ -171,7 +171,18 @@ export function extractCityCars(root, cars) {
         paneBoxes[name] = boxOf(q.pos);
       }
     }
-    out.push({ x: car.x, z: car.z, yaw: car.yaw, y: car.y, mesh: group, panes, paneBoxes });
+    // metal to stop rounds: the body up to the bottom of the side windows, and the roof
+    let metalBoxes = null;
+    if (paneBoxes) {
+      const sides = ['leftF', 'rightF', 'leftR', 'rightR'].map((k) => paneBoxes[k]).filter(Boolean);
+      const sill = sides.length ? Math.min(...sides.map((b) => b.y0)) : 0.9;
+      const top = Math.max(...Object.values(paneBoxes).map((b) => b.y1));
+      metalBoxes = [
+        { x0: -car.hw, x1: car.hw, y0: 0.12, y1: sill, z0: -car.hl, z1: car.hl },
+        { x0: -car.hw * 0.85, x1: car.hw * 0.85, y0: top - 0.04, y1: top + 0.05, z0: -car.hl * 0.35, z1: car.hl * 0.3 },
+      ];
+    }
+    out.push({ x: car.x, z: car.z, yaw: car.yaw, y: car.y, hl: car.hl, hw: car.hw, mesh: group, panes, paneBoxes, metalBoxes });
   });
   return out;
 }

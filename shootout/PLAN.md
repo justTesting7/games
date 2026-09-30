@@ -26,7 +26,7 @@ the whole district, so frustum culling never skips any of it, and the shadow pas
 - [ ] 9. Recoil pattern and first-shot accuracy; crosshair shows the real spread.
 
 ## Physics and interactions
-- [ ] 10. Per-car footprint from the bake (hl/hw) for walking, driving and car-car collision.
+- [x] 10. Per-car footprint from the bake (hl/hw) for walking, driving and car-car collision.
 - [ ] 11. Grenades bounce off the real city geometry (shot BVH) instead of the walking grid.
 - [ ] 12. Rammed parked cars shove (mass-based impulse, settle), with network sync.
 - [ ] 13. Ragdoll deaths (verlet on the skeleton, collide with ground and walls).

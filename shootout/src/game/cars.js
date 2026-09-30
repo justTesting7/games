@@ -56,6 +56,9 @@ export const SCOOTER = {
 };
 
 const specOf = (car) => car?.spec || CAR;
+// a city car's own footprint (from the bake), else its spec's
+const sizeOf = (car) => (car?.hl ? { halfL: car.hl, halfW: car.hw } : specOf(car));
+export { sizeOf };
 
 export const PANES = ['wind', 'rear', 'leftF', 'rightF', 'leftR', 'rightR'];
 
@@ -193,7 +196,7 @@ export function seatOf(car) {
 
 export function exitOf(car, side = 1) {
   const o = localOffset(car.x, car.z, car);
-  const lat = (specOf(car).halfW + 0.85) * side;
+  const lat = (sizeOf(car).halfW + 0.85) * side;
   return {
     x: car.x + o.rightX * lat + o.fwdX * specOf(car).seatZ,
     z: car.z + o.rightZ * lat + o.fwdZ * specOf(car).seatZ,
@@ -222,13 +225,13 @@ export function nearestEnter(px, pz, cars) {
 export function carOverlap(px, pz, py, car, pad = 0) {
   if (Math.abs((py ?? car.y) - car.y) > 1.35) return false;
   const { along, side } = localOffset(px, pz, car);
-  return Math.abs(along) < specOf(car).halfL + pad && Math.abs(side) < specOf(car).halfW + pad;
+  return Math.abs(along) < sizeOf(car).halfL + pad && Math.abs(side) < sizeOf(car).halfW + pad;
 }
 
 export function resolveCarBox(pos, radius, car) {
   const { along, side, fwdX, fwdZ, rightX, rightZ } = localOffset(pos.x, pos.z, car);
-  const hl = specOf(car).halfL + radius;
-  const hw = specOf(car).halfW + radius;
+  const hl = sizeOf(car).halfL + radius;
+  const hw = sizeOf(car).halfW + radius;
   if (Math.abs(along) >= hl || Math.abs(side) >= hw) return false;
   const ol = hl - Math.abs(along);
   const ow = hw - Math.abs(side);
@@ -249,7 +252,7 @@ export function resolveCarBox(pos, radius, car) {
  * Returns the smallest push { nx, nz, depth } that moves `a` out of `b`, or null.
  */
 export function carPush(a, b) {
-  const A = specOf(a), B = specOf(b);
+  const A = sizeOf(a), B = sizeOf(b);
   if (Math.abs((a.y ?? 0) - (b.y ?? 0)) > 1.5) return null;
   const dx = a.x - b.x, dz = a.z - b.z;
   const reach = Math.hypot(A.halfL, A.halfW) + Math.hypot(B.halfL, B.halfW);
@@ -408,7 +411,7 @@ export function hitCar(origin, dir, car, maxDist, opts = {}) {
   };
   let best = null;
   if (!opts.glassOnly) {
-    for (const b of car.spec ? car.spec.metalBoxes : METAL_BOXES) {
+    for (const b of car.metalBoxes || (car.spec ? car.spec.metalBoxes : METAL_BOXES)) {
       const h = rayAABB(o, d, b, best ? best.t : maxDist);
       if (h && (!best || h.t < best.t)) best = { ...h, surface: 'metal' };
     }
@@ -801,6 +804,8 @@ export class Cars {
         tails: { emissiveIntensity: 0 },
         panes: s.panes || null,
         paneBoxes: s.paneBoxes || null,
+        hl: s.hl, hw: s.hw, // measured footprint (city cars)
+        metalBoxes: s.metalBoxes || null,
         wheelRig: null,
         cluster: null,
         home: { x: s.x, z: s.z, yaw: s.yaw },
@@ -914,7 +919,7 @@ export class Cars {
     b.speed = car.speed;
     b.yaw = car.yaw;
     const fx = Math.sin(car.yaw), fz = Math.cos(car.yaw);
-    const L = S.halfL * 0.8, W = S.halfW * 0.8;
+    const L = sizeOf(car).halfL * 0.8, W = sizeOf(car).halfW * 0.8;
     const hF = t.heightAt(car.x + fx * L, car.z + fz * L), hB = t.heightAt(car.x - fx * L, car.z - fz * L);
     const hL = t.heightAt(car.x + fz * W, car.z - fx * W), hR = t.heightAt(car.x - fz * W, car.z + fx * W); // local +x is left
     const clamp = THREE.MathUtils.clamp;
@@ -1222,8 +1227,9 @@ export class Cars {
     const cols = this.world.veg?.colliders;
     if (!cols) return;
     const S = specOf(car);
-    const r = car.spec ? S.collideR : S.halfW * 0.95;
-    const reach = Math.max(0, S.halfL - r);
+    const size = sizeOf(car);
+    const r = car.spec ? S.collideR : size.halfW * 0.95;
+    const reach = Math.max(0, size.halfL - r);
     const offs = reach > 0.05 ? [-reach, 0, reach] : [0];
     let pushX = 0, pushZ = 0;
     for (let pass = 0; pass < 2; pass++) {
@@ -1321,7 +1327,7 @@ export class Cars {
     this._dust = 0;
     for (const car of this.list) {
       if (Math.abs(car.speed) < (car.spec ? 5 : 7)) continue;
-      const back = -specOf(car).halfL * 0.7;
+      const back = -sizeOf(car).halfL * 0.7;
       const o = localOffset(car.x, car.z, car);
       fx.alpha.spawn({
         pos: new THREE.Vector3(car.x + o.fwdX * back, car.y + 0.12, car.z + o.fwdZ * back),
