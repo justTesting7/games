@@ -181,21 +181,52 @@ const cars = [];
   }
   const clusters = new Map();
   parts.forEach((p, i) => { const r = gf(i); if (!clusters.has(r)) clusters.set(r, []); clusters.get(r).push(p); });
-  for (const cl of clusters.values()) {
-    // principal axis of the vertices in plan
-    let n = 0, mx_ = 0, mz_ = 0, minY = 1e9;
-    const verts = [];
-    for (const p of cl) for (const i of p.ix) for (const q of carParts.carpaint[i]) { verts.push(q); mx_ += q[0]; mz_ += q[2]; n++; minY = Math.min(minY, q[1]); }
-    mx_ /= n; mz_ /= n;
+  // principal axis in plan of a set of vertices, and its extent along and across it
+  const measure = (verts) => {
+    let mx_ = 0, mz_ = 0, minY = 1e9;
+    for (const q of verts) { mx_ += q[0]; mz_ += q[2]; minY = Math.min(minY, q[1]); }
+    mx_ /= verts.length; mz_ /= verts.length;
     let sxx = 0, szz = 0, sxz = 0;
     for (const q of verts) { const dx = q[0] - mx_, dz = q[2] - mz_; sxx += dx * dx; szz += dz * dz; sxz += dx * dz; }
     const ang = 0.5 * Math.atan2(2 * sxz, sxx - szz); // major axis direction (x = cos, z = sin)
-    let ax = Math.cos(ang), az = Math.sin(ang);
+    const ax = Math.cos(ang), az = Math.sin(ang);
     let lo = 1e9, hi = -1e9, lw = 1e9, hw_ = -1e9;
     for (const q of verts) {
       const a = (q[0] - mx_) * ax + (q[2] - mz_) * az, w = (q[0] - mx_) * az - (q[2] - mz_) * ax;
       lo = Math.min(lo, a); hi = Math.max(hi, a); lw = Math.min(lw, w); hw_ = Math.max(hw_, w);
     }
+    return { mx_, mz_, minY, ax, az, lo, hi, lw, hw_ };
+  };
+  // Cars parked bumper to bumper cluster into one long row: cut it at the thinnest
+  // points of its vertex profile, near every ~4.6 m, into single cars.
+  const splitRow = (verts) => {
+    const m = measure(verts);
+    const len = m.hi - m.lo, wid = m.hw_ - m.lw;
+    if (len <= 6.8 || wid < 1.4 || wid > 3.1) return [verts];
+    const n = Math.max(2, Math.min(12, Math.round(len / 4.6)));
+    const BIN = 0.1, bins = new Int32Array(Math.ceil(len / BIN) + 1);
+    const proj = verts.map((q) => (q[0] - m.mx_) * m.ax + (q[2] - m.mz_) * m.az - m.lo);
+    for (const a of proj) bins[Math.min(bins.length - 1, Math.floor(a / BIN))]++;
+    const cuts = [];
+    for (let k = 1; k < n; k++) {
+      const target = (k * len) / n;
+      let best = -1, bestC = Infinity;
+      for (let b = Math.floor((target - 1.1) / BIN); b <= Math.ceil((target + 1.1) / BIN); b++) {
+        if (b < 0 || b >= bins.length) continue;
+        const c = bins[b] + Math.abs(b * BIN - target) * 0.5;
+        if (c < bestC) { bestC = c; best = b; }
+      }
+      cuts.push((best + 0.5) * BIN);
+    }
+    const out = Array.from({ length: n }, () => []);
+    verts.forEach((q, i) => { let s = 0; while (s < cuts.length && proj[i] > cuts[s]) s++; out[s].push(q); });
+    return out.filter((v) => v.length > 30);
+  };
+  for (const cl of clusters.values()) {
+    const all = [];
+    for (const p of cl) for (const i of p.ix) for (const q of carParts.carpaint[i]) all.push(q);
+    for (const verts of splitRow(all)) {
+    let { mx_, mz_, minY, ax, az, lo, hi, lw, hw_ } = measure(verts);
     const len = hi - lo, wid = hw_ - lw;
     if (len < 3 || len > 6.8 || wid < 1.4 || wid > 3.1) continue;
     // centre on the body's extent, not the vertex mean
@@ -217,6 +248,7 @@ const cars = [];
       x: +cx.toFixed(2), z: +cz.toFixed(2), y: +ground[k].toFixed(2), yaw: +Math.atan2(ax, az).toFixed(3),
       hl: +(len / 2).toFixed(2), hw: +(wid / 2).toFixed(2),
     });
+    }
   }
 }
 console.log('drivable cars', cars.length);
@@ -282,7 +314,8 @@ const scooters = [];
   console.log('rideable scooters', scooters.length, 'parts to replace', scooterRemove.length);
 }
 
-// pass 2: things standing on it
+// pass 2: things standing on it (car bodies too: inCar() lets the drivable ones through)
+tris.solid.push(...carParts.carpaint);
 const low = new Uint8Array(W * H), tall = new Uint8Array(W * H);
 for (const tri of tris.solid) {
   sample(tri, CELL * 0.5, (x, y, z) => {

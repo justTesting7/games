@@ -13,7 +13,7 @@ const DAMAGE = {
 const ROSTERS = new Set(['adventurer', 'redpolo', 'greytee', 'checkers', 'denim', 'linen']);
 const WEAPONS = new Set(['pistols', 'rifle', 'grenade', 'drone']);
 const MAPS = new Set(['island', 'city', 'garden', 'manhattan', 'dizengoff', 'square', 'bloomfield']);
-const FLEET = 160; // the Tel Aviv maps park about a hundred cars and scooters
+const FLEET = 256; // the Tel Aviv maps park up to ~180 cars and scooters
 const clampMin = (v) => {
   const n = Math.round(num(v));
   return Number.isFinite(n) ? Math.max(2, Math.min(12, n)) : 2;

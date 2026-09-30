@@ -4,7 +4,7 @@ import { HALF_WORLD } from '../world/constants.js';
 
 export const CAR = {
   count: 8,
-  fleetMax: 160,
+  fleetMax: 256,
   halfL: 2.25,
   halfW: 1.02,
   height: 1.18,
