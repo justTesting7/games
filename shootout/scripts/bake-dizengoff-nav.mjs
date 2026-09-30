@@ -25,12 +25,15 @@ const io = new NodeIO().registerExtensions(ALL_EXTENSIONS).registerDependencies(
 // a single set, or every set of a stitched map at its offset (src/world/cityParts.js)
 const partsDef = cityPartsOf(MAP);
 const sources = [];
+// a set over the asset size limit is built in chunks: set.glb, set-2.glb, ...
+const chunksOf = (dir) => fs.readdirSync(dir).filter((f) => /^set(-\d+)?\.glb$/.test(f)).sort();
 if (partsDef) {
   fs.mkdirSync(DIR, { recursive: true });
   for (const [own, part] of partsDef.sets.entries()) {
-    sources.push({ doc: await io.read(path.join(DIR, '..', part.folder, 'set.glb')), off: part.offset, own });
+    const dir = path.join(DIR, '..', part.folder);
+    for (const f of chunksOf(dir)) sources.push({ doc: await io.read(path.join(dir, f)), off: part.offset, own });
   }
-} else sources.push({ doc: await io.read(path.join(DIR, 'set.glb')), off: [0, 0, 0], own: 0 });
+} else for (const f of chunksOf(DIR)) sources.push({ doc: await io.read(path.join(DIR, f)), off: [0, 0, 0], own: 0 });
 
 const tris = { ground: [], solid: [] };
 const carParts = { carpaint: [], carglass: [] };

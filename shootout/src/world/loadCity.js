@@ -63,9 +63,12 @@ export async function loadCity(scene, renderer, folder = 'dizengoff-center') {
   // a stitched map loads every set at its offset and the skyline of one of them
   const def = cityPartsOf(folder);
   const sets = def ? def.sets : [{ folder, offset: [0, 0, 0] }];
+  // a set over the 25 MiB asset limit is built as chunks (set.glb, set-2.glb, ...)
+  const chunks = (p) => Promise.all((p.files || ['set.glb']).map((f) => loader.loadAsync(`${BASE}assets/maps/${p.folder}/${f}`)))
+    .then((list) => { const scene = new THREE.Group(); list.forEach((g) => scene.add(g.scene)); return { scene }; });
   const [far, ...loaded] = await Promise.all([
     loader.loadAsync(`${BASE}assets/maps/${def ? def.far : folder}/far.glb`),
-    ...sets.map((p) => loader.loadAsync(`${BASE}assets/maps/${p.folder}/set.glb`)),
+    ...sets.map(chunks),
   ]);
   const set = { scene: new THREE.Group() };
   set.scene.name = `set-${folder}`;

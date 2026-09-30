@@ -11,12 +11,14 @@
 export const CITY_PARTS = {
   'tel-aviv': {
     far: 'dizengoff-square', // skyline ring; its buildings over the other sets are removed
-    // half = half the side of the set's square ground tile (from each export's ground bounds)
+    // half = half the side of the set's square ground tile (from each export's ground bounds);
+    // files = the chunks of a set built over the 25 MiB asset limit (build-city-map.mjs)
     sets: [
       { folder: 'dizengoff-square', offset: [0, 0, 0], half: 180 },
       { folder: 'dizengoff-center', offset: [97.0, -1.01, 275.22], half: 200 },
       { folder: 'haneviim', offset: [334.04, 7.12, 222.35], half: 200 },
       { folder: 'masrik', offset: [419.12, 7.13, -57.9], half: 220 },
+      { folder: 'sderot-hen', offset: [567.03, 8.88, 238.47], half: 300, files: ['set.glb', 'set-2.glb'] },
     ],
     spill: 35, // buildings reach this far past the tile edge
   },

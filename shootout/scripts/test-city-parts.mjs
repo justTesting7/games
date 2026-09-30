@@ -1,4 +1,4 @@
-// Tel Aviv is stitched from four exports: every point belongs to exactly one set,
+// Tel Aviv is stitched from five exports: every point belongs to exactly one set,
 // always one whose ground tile covers it, and the seams sit well inside both tiles.
 import { CITY_PARTS, ownerOf, underSets } from '../src/world/cityParts.js';
 import { getMap } from '../src/world/maps.js';
@@ -10,7 +10,7 @@ const inTile = (i, x, z, pad = 0) => {
   return Math.abs(x - ox) <= half - pad && Math.abs(z - oz) <= half - pad;
 };
 let covered = 0;
-for (let x = -200; x <= 660; x += 2) for (let z = -300; z <= 500; z += 2) {
+for (let x = -200; x <= 880; x += 2) for (let z = -300; z <= 560; z += 2) {
   const inAny = def.sets.some((_, i) => inTile(i, x, z));
   if (!inAny) continue;
   covered++;
@@ -21,7 +21,7 @@ for (let x = -200; x <= 660; x += 2) for (let z = -300; z <= 500; z += 2) {
 // building: an export holds every building centred on its tile, so a building cut by
 // the seam is whole in both files (Square and HaNevi'im only overlap by 26 m)
 let seam = 0, tight = 0;
-for (let x = -200; x <= 660; x += 2) for (let z = -300; z <= 500; z += 2) {
+for (let x = -200; x <= 880; x += 2) for (let z = -300; z <= 560; z += 2) {
   const o = ownerOf(def, x, z), n = ownerOf(def, x + 2, z), m = ownerOf(def, x, z + 2);
   if (o === n && o === m) continue;
   const other = o !== n ? n : m;
