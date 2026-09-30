@@ -361,9 +361,24 @@ export class Rival {
   findCover(threat, { mustHide = true } = {}) {
     if (!threat) return null;
     const cols = this.world.veg.colliders.query(this.pos.x, this.pos.z, SEARCH_R, this.cols);
-    let best = null, bestS = Infinity;
+    // City maps put well over a thousand boxes in range. Walk them nearest first and
+    // stop once even the biggest size bonus can't beat the best spot found (the score
+    // is distance minus at most 8 * 2.1): a full scan used to stall the frame 35 ms.
+    const cand = this.coverCand || (this.coverCand = []);
+    cand.length = 0;
     for (const c of cols) {
-      if (!this.coverUsable(c)) continue;
+      if (c.coverOk === undefined) c.coverOk = this.coverUsable(c); // static
+      if (!c.coverOk) continue;
+      const near = c.box
+        ? Math.hypot(this.pos.x - Math.max(c.x0, Math.min(this.pos.x, c.x1)), this.pos.z - Math.max(c.z0, Math.min(this.pos.z, c.z1)))
+        : Math.max(0, Math.hypot(this.pos.x - c.x, this.pos.z - c.z) - c.r);
+      if (near > 32 + COVER_PAD) continue;
+      cand.push({ near, c });
+    }
+    cand.sort((a, b) => a.near - b.near);
+    let best = null, bestS = Infinity;
+    for (const { near, c } of cand) {
+      if (near - COVER_PAD - 8 * 2.1 >= bestS) break;
       const spot = this.coverSpot(c, threat);
       if (!spot) continue;
       const d = spot.distanceTo(this.pos);

@@ -124,9 +124,12 @@ Character.wallProbe = (o, d, len) => {
   if (car) t = car.t;
   return t;
 };
-// /shootout/?lab opens the debug range and starts playing without the menu.
-const labBoot = new URLSearchParams(location.search).has('lab');
-const labCalm = labBoot && new URLSearchParams(location.search).has('calm'); // rivals stand still as targets
+// /shootout/?lab opens the debug range and starts playing without the menu;
+// ?play=<map id> does the same for any map. &calm keeps the rivals still as targets.
+const bootQuery = new URLSearchParams(location.search);
+const bootMap = bootQuery.has('lab') ? 'lab' : bootQuery.get('play');
+const labBoot = !!bootMap;
+const labCalm = labBoot && bootQuery.has('calm');
 const mode = labBoot ? 'solo' : resolveMode();
 const roomCode = resolveRoom();
 persistMode(mode);
@@ -177,7 +180,7 @@ addEventListener('wheel', (e) => {
 }, { passive: true });
 addEventListener('blur', () => { for (const k in input) input[k] = false; });
 
-const mapId = labBoot ? 'lab' : localStorage.getItem('relic-map') || 'island';
+const mapId = bootMap || localStorage.getItem('relic-map') || 'island';
 const mapDef = getMap(mapId);
 $('map').value = mapId;
 $('maptitle').textContent = mapDef.label;

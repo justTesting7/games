@@ -258,6 +258,7 @@ export class Colliders {
   constructor(cell = 16) {
     this.cell = cell;
     this.map = new Map();
+    this.rayMap = new Map(); // only colliders that stop rays (city walking boxes don't)
     this.list = [];
   }
   key(i, j) { return i * 73856093 ^ j * 19349663; }
@@ -269,6 +270,9 @@ export class Colliders {
       const k = this.key(i, j);
       if (!this.map.has(k)) this.map.set(k, []);
       this.map.get(k).push(c);
+      if (c.noRay) continue;
+      if (!this.rayMap.has(k)) this.rayMap.set(k, []);
+      this.rayMap.get(k).push(c);
     }
   }
 
@@ -319,13 +323,14 @@ export class Colliders {
       if (pos.y > c.y1 - 0.5) pos.y = Math.max(pos.y, c.y1);
     }
   }
-  query(x, z, r, out = []) {
+  query(x, z, r, out = [], map = this.map) {
     out.length = 0;
     const i0 = Math.floor((x - r) / this.cell), i1 = Math.floor((x + r) / this.cell);
     const j0 = Math.floor((z - r) / this.cell), j1 = Math.floor((z + r) / this.cell);
+    const stamp = (this.stamp = (this.stamp || 0) + 1); // dedupe without an O(n^2) includes()
     for (let i = i0; i <= i1; i++) for (let j = j0; j <= j1; j++) {
-      const l = this.map.get(this.key(i, j));
-      if (l) for (const c of l) if (!out.includes(c)) out.push(c);
+      const l = map.get(this.key(i, j));
+      if (l) for (const c of l) if (c.seen !== stamp) { c.seen = stamp; out.push(c); }
     }
     return out;
   }
@@ -333,12 +338,12 @@ export class Colliders {
   raycast(o, d, maxDist) {
     let best = null;
     const step = this.cell;
-    const tmp = [];
+    const tmp = this._rayTmp || (this._rayTmp = []);
+    if (!this.rayMap.size) return null;
     for (let t = 0; t < maxDist + step; t += step * 0.5) {
       const x = o.x + d.x * t, z = o.z + d.z * t;
-      this.query(x, z, step, tmp);
+      this.query(x, z, step, tmp, this.rayMap);
       for (const c of tmp) {
-        if (c.noRay) continue;
         const hit = c.box ? rayBox(o, d, c, maxDist) : rayCylinder(o, d, c, maxDist);
         if (hit && (!best || hit.t < best.t)) best = hit;
       }
