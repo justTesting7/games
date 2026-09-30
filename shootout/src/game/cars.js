@@ -442,11 +442,15 @@ function paintCluster(cluster, speed, on) {
   tex.needsUpdate = true;
 }
 
+// Metallic base under a glossy clear coat, like real car paint.
 function paintMat(color) {
-  return new THREE.MeshStandardMaterial({
+  return new THREE.MeshPhysicalMaterial({
     color,
-    metalness: 0.68,
-    roughness: 0.34,
+    metalness: 0.55,
+    roughness: 0.38,
+    clearcoat: 1,
+    clearcoatRoughness: 0.05,
+    envMapIntensity: 1.2,
   });
 }
 
