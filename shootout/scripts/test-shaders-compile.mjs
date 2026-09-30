@@ -5,7 +5,9 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import * as S from '../src/engine/shaders.js';
+import * as S0 from '../src/engine/shaders.js';
+import { FXAAShader } from 'three/addons/shaders/FXAAShader.js';
+const S = { ...S0, fxaaFrag: FXAAShader.fragmentShader };
 
 try { execFileSync('glslangValidator', ['--version'], { stdio: 'ignore' }); } catch {
   console.log('skip: glslangValidator not installed');

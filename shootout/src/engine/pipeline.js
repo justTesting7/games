@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import * as S from './shaders.js';
 import { patchShaderChunks } from './patch.js';
+import { FXAAShader } from 'three/addons/shaders/FXAAShader.js';
 
 const R0 = 6372e3, R_PLANET = 6371e3, R_ATMOS = 6471e3;
 const K_RLH = [5.5e-6, 13.0e-6, 22.4e-6], K_MIE = 21e-6;
@@ -95,10 +96,10 @@ function fsMaterial(frag, uniforms, extra = {}) {
 }
 
 export const QUALITY = {
-  low: { label: 'Low', shadow: 512, shadowDist: 28, ssr: 0, msaa: 0, ao: 0, pixelRatio: 0.7, grass: 0.3, trees: 0.45 },
-  medium: { label: 'Medium', shadow: 1024, shadowDist: 40, ssr: 8, msaa: 0, ao: 8, pixelRatio: 1, grass: 0.55, trees: 0.7 },
-  high: { label: 'High', shadow: 2048, shadowDist: 48, ssr: 16, msaa: 0, ao: 12, pixelRatio: 1, grass: 0.85, trees: 0.9 },
-  ultra: { label: 'Ultra', shadow: 2048, shadowDist: 58, ssr: 24, msaa: 2, ao: 16, pixelRatio: 1.25, grass: 1.1, trees: 1.05 },
+  low: { label: 'Low', shadow: 512, shadowDist: 28, ssr: 0, msaa: 0, ao: 0, fxaa: false, pixelRatio: 0.7, grass: 0.3, trees: 0.45 },
+  medium: { label: 'Medium', shadow: 1024, shadowDist: 40, ssr: 8, msaa: 0, ao: 8, fxaa: true, pixelRatio: 1, grass: 0.55, trees: 0.7 },
+  high: { label: 'High', shadow: 2048, shadowDist: 48, ssr: 16, msaa: 0, ao: 12, fxaa: true, pixelRatio: 1, grass: 0.85, trees: 0.9 },
+  ultra: { label: 'Ultra', shadow: 2048, shadowDist: 58, ssr: 24, msaa: 2, ao: 16, fxaa: true, pixelRatio: 1.25, grass: 1.1, trees: 1.05 },
 };
 
 export class Pipeline {
@@ -225,6 +226,9 @@ export class Pipeline {
       uIntensity: { value: 0.6 },
       uMaxDist: { value: 140 },
     }, { defines: { AO_SAMPLES: 8 } });
+    this.fxaaMaterial = fsMaterial(FXAAShader.fragmentShader, {
+      tDiffuse: { value: null }, resolution: { value: new THREE.Vector2(1, 1) },
+    });
     this.aoBlurMaterial = fsMaterial(S.aoBlurFrag, { tAO: { value: null }, uStep: { value: new THREE.Vector2() } });
     this.bloomDown = fsMaterial(S.bloomDownFrag, {
       tSrc: { value: null }, uTexel: { value: new THREE.Vector2() }, uFirst: { value: false },
@@ -340,6 +344,10 @@ export class Pipeline {
       this.blackRT = hdrTarget(2, 2, this.hdrType);
     }
     this.waterMaterial.uniforms.uResolution.value.set(W, H);
+    // tonemapped frame for the FXAA pass (the composite already writes display values)
+    if (!this.ldrRT) this.ldrRT = new THREE.WebGLRenderTarget(W, H, { depthBuffer: false, generateMipmaps: false, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter });
+    else this.ldrRT.setSize(W, H);
+    this.fxaaMaterial.uniforms.resolution.value.set(1 / W, 1 / H);
     const aw = Math.max(1, W >> 1), ah = Math.max(1, H >> 1);
     for (const k of ['aoRT', 'aoBlurRT']) {
       if (!this[k]) this[k] = hdrTarget(aw, ah, this.hdrType, { minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter });
@@ -551,12 +559,17 @@ export class Pipeline {
     const amb = new THREE.Vector3(0.02, 0.1, 0.13).multiplyScalar(0.4 + this.lightColor.y * 0.08 + (1 - this.night) * 0.4);
     cu.uWaterAmbient.value.copy(amb);
     const splitVp = opts.outViewport;
+    const fxaa = this.quality.fxaa;
+    if (fxaa) this.quad.render(r, this.compositeMaterial, this.ldrRT);
     if (splitVp) {
       r.setViewport(splitVp[0], splitVp[1], splitVp[2], splitVp[3]);
       r.setScissor(splitVp[0], splitVp[1], splitVp[2], splitVp[3]);
       r.setScissorTest(true);
     }
-    this.quad.render(r, this.compositeMaterial, null);
+    if (fxaa) {
+      this.fxaaMaterial.uniforms.tDiffuse.value = this.ldrRT.texture;
+      this.quad.render(r, this.fxaaMaterial, null);
+    } else this.quad.render(r, this.compositeMaterial, null);
     if (splitVp) {
       r.setViewport(0, 0, r.domElement.clientWidth, r.domElement.clientHeight);
       r.setScissorTest(false);
