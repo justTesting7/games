@@ -1181,6 +1181,8 @@ export class Cars {
           this.bumpCars(car);
           this.refreshSeat(car);
           this.placeMesh(car);
+        } else if (!car.driver && car.slide && (Math.abs(car.slide.x) + Math.abs(car.slide.z) > 0.03 || Math.abs(car.slide.spin) > 0.02)) {
+          this.slideFree(car, dt);
         } else {
           this.refreshSeat(car);
           this.placeMesh(car);
@@ -1276,13 +1278,52 @@ export class Cars {
       const vx = fx * car.speed, vz = fz * car.speed;
       const into = vx * hit.nx + vz * hit.nz;
       if (into < 0) {
-        const rx = vx - hit.nx * into * 1.25, rz = vz - hit.nz * into * 1.25;
-        car.speed = (rx * fx + rz * fz) * 0.8;
+        // an empty car or scooter takes a share of the momentum and slides off, spinning
+        // by how far off its middle it was struck; the rammer keeps the rest
+        const free = !other.driver;
+        const share = free ? (other.spec ? 0.8 : 0.45) : 0;
+        if (free) {
+          const J = -into * share * 1.2;
+          const s = other.slide || (other.slide = { x: 0, z: 0, spin: 0 });
+          s.x -= hit.nx * J;
+          s.z -= hit.nz * J;
+          // lever arm: from the struck car's middle to the contact, across the push
+          const cx = car.x - hit.nx * sizeOf(car).halfW - other.x, cz = car.z - hit.nz * sizeOf(car).halfW - other.z;
+          s.spin += THREE.MathUtils.clamp((cx * -hit.nz - cz * -hit.nx) * J * 0.25, -2.5, 2.5);
+          other.shoved = car.driver?.isPlayer ? 1.5 : 0; // seconds to keep telling the room
+        }
+        const rx = vx - hit.nx * into * (1.25 - share), rz = vz - hit.nz * into * (1.25 - share);
+        car.speed = (rx * fx + rz * fz) * (0.8 + share * 0.25);
         car.vel.set(fx * car.speed, 0, fz * car.speed);
         if (-into > 2.5 && car.driver?.isPlayer) {
           this.world.audio?.impact?.('metal', 0);
           this.world.player?.kick?.(0, Math.min(3, -into * 0.25));
         }
+      }
+    }
+  }
+
+  // A shoved car slides and turns until its tyres scrub the motion off.
+  slideFree(car, dt) {
+    const s = car.slide;
+    car.x += s.x * dt;
+    car.z += s.z * dt;
+    car.yaw += s.spin * dt;
+    const scrub = Math.exp(-dt * (car.spec ? 2.5 : 3.8));
+    s.x *= scrub; s.z *= scrub; s.spin *= Math.exp(-dt * 3.2);
+    this.groundCar(car);
+    const x0 = car.x, z0 = car.z;
+    this.bumpWorld(car);
+    if (Math.abs(car.x - x0) + Math.abs(car.z - z0) > 1e-4) { s.x *= 0.3; s.z *= 0.3; s.spin *= 0.5; }
+    this.bumpCars(car);
+    this.refreshSeat(car);
+    this.placeMesh(car);
+    if (car.shoved > 0) {
+      car.shoved -= dt;
+      this.shoveSync = (this.shoveSync || 0) + dt;
+      if (this.shoveSync > 0.1 || car.shoved <= 0) {
+        this.shoveSync = 0;
+        this.world.session?.reportCar?.('shove', { ...this.pack(car), spd: 0 });
       }
     }
   }

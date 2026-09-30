@@ -354,6 +354,8 @@ export class GameRoom extends DurableObject {
       if (mine.car === i) mine.car = null;
     } else if (act === 'pose') {
       if (this.seats[i] !== mine.id) return;
+    } else if (act === 'shove') {
+      if (this.seats[i]) return; // only an empty car can be knocked about
     } else {
       return;
     }
