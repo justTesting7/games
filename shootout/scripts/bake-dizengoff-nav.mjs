@@ -16,7 +16,8 @@ if (!MAP) throw new Error('usage: bake-dizengoff-nav.mjs <map-folder>');
 const DIR = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', 'public', 'assets', 'maps', MAP);
 const CELL = 0.5;
 const GROUND = /^(asphalt|pavement|ground|lm_grass|kerb|marking|road_marks|road_marks_bus)$/;
-const SOLID = /^(facade_.*|side_.*|blank_.*|ground_.*|bark|railing|netting|hoarding|crates|pais|dt_facade|tt_grid|metal|glass|balcony|parapet|solar|awning|signs|name_boxes|load_signs)$/;
+// paint: bollards (about 600 a map), posts and car underbodies; the drivable cars are let through below
+const SOLID = /^(facade_.*|side_.*|blank_.*|ground_.*|bark|railing|netting|hoarding|crates|pais|dt_facade|tt_grid|metal|paint|glass|balcony|parapet|solar|awning|signs|name_boxes|load_signs)$/;
 const BODY_LO = 0.45, BODY_HI = 2.0, TALL = 6;
 
 await MeshoptDecoder.ready;
@@ -70,6 +71,7 @@ for (const { doc, off, own } of sources) for (const n of doc.getRoot().listNodes
       if (isSeats) { seatTris.push(tri); continue; }
       if (carPart) { carPart.push(tri); continue; }
       if (!kind) continue;
+      if (name === 'paint') tri.paint = true;
       tris[kind].push(tri);
       if (kind === 'ground') for (const q of tri) { minX = Math.min(minX, q[0]); maxX = Math.max(maxX, q[0]); minZ = Math.min(minZ, q[2]); maxZ = Math.max(maxZ, q[2]); }
     }
@@ -375,15 +377,20 @@ const scooters = [];
   console.log('rideable scooters', scooters.length, 'parts to replace', scooterRemove.length);
 }
 
+const inScooter = (x, y, z) => scooterRemove.some((b) => x > b[0] - 0.1 && x < b[3] + 0.1 && y > b[1] - 0.1 && y < b[4] + 0.1 && z > b[2] - 0.1 && z < b[5] + 0.1);
+
 // pass 2: things standing on it (car bodies too: inCar() lets the drivable ones through)
 tris.solid.push(...carParts.carpaint);
 const low = new Uint8Array(W * H), tall = new Uint8Array(W * H);
 for (const tri of tris.solid) {
+  const paint = tri.paint;
   sample(tri, CELL * 0.5, (x, y, z) => {
+    if (paint && stadiumCell(x, z)) return; // the stadium's walls and gates are laid out by stadium.js
     const k = cellOf(x, z);
     if (k < 0 || ground[k] < -1e8) return;
     const d = y - ground[k];
     if (d < 2.4 && inCar(x, z)) return; // part of a drivable car
+    if (inScooter(x, y, z)) return; // replaced by a rideable scooter
     if (d < 4.5 && stadiumDoor(x, z)) return; // a gate cut through the stadium's glass wall
     if (d > BODY_LO && d < BODY_HI) low[k] = 1;
     if (d > TALL) tall[k] = 1;
@@ -491,6 +498,11 @@ const main = sizes.indexOf(Math.max(...sizes));
 if (process.env.DBG) {
   const top = sizes.map((n, i) => [n, i]).sort((a, b) => b[0] - a[0]).slice(0, 4);
   console.log('top regions m2', top.map(([n, i]) => `${i}:${(n * CELL * CELL).toFixed(0)}`).join(' '));
+  for (const [, id] of top.slice(1, 2)) {
+    let sx = 0, sz = 0, c = 0, x0 = 1e9, x1 = -1e9, z0 = 1e9, z1 = -1e9;
+    for (let k = 0; k < W * H; k++) if (comp[k] === id) { const x = X0 + (k % W) * CELL, z = Z0 + ((k / W) | 0) * CELL; sx += x; sz += z; c++; x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z); }
+    console.log(`region ${id} centre ${(sx / c).toFixed(0)},${(sz / c).toFixed(0)} spans x ${x0.toFixed(0)}..${x1.toFixed(0)} z ${z0.toFixed(0)}..${z1.toFixed(0)}`);
+  }
 }
 console.log('open regions', sizes.length, 'largest', sizes[main], 'cells =', (sizes[main] * CELL * CELL).toFixed(0), 'm2');
 // spawn near the middle of the open region, in a spot with room to move
