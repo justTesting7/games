@@ -243,6 +243,36 @@ export function resolveCarBox(pos, radius, car) {
   return true;
 }
 
+/**
+ * Separating-axis test between two vehicles' footprints (oriented rectangles).
+ * Returns the smallest push { nx, nz, depth } that moves `a` out of `b`, or null.
+ */
+export function carPush(a, b) {
+  const A = specOf(a), B = specOf(b);
+  if (Math.abs((a.y ?? 0) - (b.y ?? 0)) > 1.5) return null;
+  const dx = a.x - b.x, dz = a.z - b.z;
+  const reach = Math.hypot(A.halfL, A.halfW) + Math.hypot(B.halfL, B.halfW);
+  if (dx * dx + dz * dz > reach * reach) return null;
+  const axesOf = (c) => {
+    const s = Math.sin(c.yaw), co = Math.cos(c.yaw);
+    return [[s, co], [co, -s]]; // forward, right
+  };
+  const ea = axesOf(a), eb = axesOf(b);
+  const half = (e, S, ax) => Math.abs(e[0][0] * ax[0] + e[0][1] * ax[1]) * S.halfL
+    + Math.abs(e[1][0] * ax[0] + e[1][1] * ax[1]) * S.halfW;
+  let best = null;
+  for (const ax of [...ea, ...eb]) {
+    const d = dx * ax[0] + dz * ax[1];
+    const overlap = half(ea, A, ax) + half(eb, B, ax) - Math.abs(d);
+    if (overlap <= 0) return null;
+    if (!best || overlap < best.depth) {
+      const sgn = d < 0 ? -1 : 1;
+      best = { nx: ax[0] * sgn, nz: ax[1] * sgn, depth: overlap };
+    }
+  }
+  return best;
+}
+
 /** A = left, D = right. Sign is opposite walk-strafe because +yaw turns the nose left on screen. */
 export function driveSteer(input = {}) {
   return (input.left ? 1 : 0) - (input.right ? 1 : 0) - (input.moveX || 0);
@@ -1022,6 +1052,7 @@ export class Cars {
       local.vel.set(stepped.vx, 0, stepped.vz);
       this.groundCar(local);
       this.bumpWorld(local);
+      this.bumpCars(local);
       this.refreshSeat(local);
       this.placeMesh(local);
       this.syncPose(dt, local);
@@ -1039,6 +1070,7 @@ export class Cars {
           car.vel.set(stepped.vx, 0, stepped.vz);
           this.groundCar(car);
           this.bumpWorld(car);
+          this.bumpCars(car);
           this.refreshSeat(car);
           this.placeMesh(car);
         } else {
@@ -1087,6 +1119,30 @@ export class Cars {
       car.z = next.z;
       car.speed *= 0.28;
       car.vel.multiplyScalar(0.28);
+    }
+  }
+
+  // Vehicles are solid to each other: push out of any overlap and lose the speed
+  // going into it (a glancing hit scrapes along, a head-on one stops dead).
+  bumpCars(car) {
+    for (const other of this.list) {
+      if (other === car) continue;
+      const hit = carPush(car, other);
+      if (!hit) continue;
+      car.x += hit.nx * hit.depth;
+      car.z += hit.nz * hit.depth;
+      const fx = Math.sin(car.yaw), fz = Math.cos(car.yaw);
+      const vx = fx * car.speed, vz = fz * car.speed;
+      const into = vx * hit.nx + vz * hit.nz;
+      if (into < 0) {
+        const rx = vx - hit.nx * into * 1.25, rz = vz - hit.nz * into * 1.25;
+        car.speed = (rx * fx + rz * fz) * 0.8;
+        car.vel.set(fx * car.speed, 0, fz * car.speed);
+        if (-into > 2.5 && car.driver?.isPlayer) {
+          this.world.audio?.impact?.('metal', 0);
+          this.world.player?.kick?.(0, Math.min(3, -into * 0.25));
+        }
+      }
     }
   }
 
