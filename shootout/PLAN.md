@@ -30,7 +30,7 @@ the whole district, so frustum culling never skips any of it, and the shadow pas
 - [x] 11. Grenades bounce off the real city geometry (shot BVH) instead of the walking grid.
 - [x] 12. Rammed parked cars shove (mass-based impulse, settle), with network sync.
 - [x] 13. Ragdoll deaths (verlet on the skeleton, collide with ground and walls).
-- [ ] 14. Characters step up kerbs smoothly (height smoothing) and feet plant on slopes (foot IK).
+- [x] 14. Characters step up kerbs smoothly (height smoothing) and feet plant on slopes (foot IK).
 - [x] 15. Hit reactions by bone (stagger, limb flinch) and knockback from explosions.
 
 ## Log

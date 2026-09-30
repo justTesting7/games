@@ -285,6 +285,29 @@ function solveArm(B, side, target, pole, finger, lateral, w, tmp) {
   rotateBoneWorld(hand, tmp.q.setFromAxisAngle(fd, ang * w), tmp);
 }
 
+// Two-bone leg: thigh and shin bend so the foot reaches `target`, knee toward `pole`.
+function solveLeg(B, side, target, pole, tmp) {
+  const upper = B[`${side}UpLeg`], lower = B[`${side}Leg`], foot = B[`${side}Foot`];
+  if (!upper || !lower || !foot) return;
+  const a = upper.getWorldPosition(V[0]);
+  const b = lower.getWorldPosition(V[1]);
+  const c = foot.getWorldPosition(V[2]);
+  const l1 = a.distanceTo(b), l2 = b.distanceTo(c);
+  const toT = V[3].subVectors(target, a);
+  const len = toT.length() || 1e-4;
+  const dir = toT.divideScalar(len);
+  const d = THREE.MathUtils.clamp(len, Math.abs(l1 - l2) + 0.01, (l1 + l2) * 0.999);
+  const cosA = THREE.MathUtils.clamp((l1 * l1 + d * d - l2 * l2) / (2 * l1 * d), -1, 1);
+  const sinA = Math.sqrt(1 - cosA * cosA);
+  const pn = V[4].subVectors(pole, a);
+  pn.addScaledVector(dir, -pn.dot(dir)).normalize();
+  const knee = V[5].copy(a).addScaledVector(dir, cosA * l1).addScaledVector(pn, sinA * l1);
+  rotateBoneToward(upper, lower, V[6].subVectors(knee, a).normalize(), 1, tmp);
+  const kb = lower.getWorldPosition(V[1]);
+  const reach = V[7].copy(upper.getWorldPosition(V[0])).addScaledVector(dir, d);
+  rotateBoneToward(lower, foot, V[6].subVectors(reach, kb).normalize(), 1, tmp);
+}
+
 function attachSniperScope(rifle) {
   const box = new THREE.Box3().setFromObject(rifle);
   const size = box.getSize(new THREE.Vector3());
@@ -834,6 +857,7 @@ export class Character {
     if (s.seat) this.applySeated(s.seat);
     else this.applyLean(dt, s);
     this.applyCrouch(s.crouch || 0);
+    this.applyFootIK(dt, s);
 
     this.updateEquip(dt);
     const act = this.action;
@@ -1161,6 +1185,36 @@ export class Character {
     turn(B.Spine, right, -m.pitch * 0.55 * keep);
     turn(B.Spine1, right, -m.pitch * 0.45 * keep);
     turn(B.Hips, fwd, -m.roll * keep);
+  }
+
+  // Feet on uneven ground: the animation assumes flat ground at the root, so on a kerb
+  // or a slope one foot floats and the other sinks. Measure the ground under each foot,
+  // drop the pelvis by what the lower foot needs, and bend each leg onto its own ground.
+  applyFootIK(dt, s) {
+    const P = Character.physics, B = this.bones;
+    const off = this.footOff || (this.footOff = [0, 0]);
+    const goal = [0, 0];
+    if (P && B.LeftFoot && !s.seat && !s.swimming && s.onGround !== false && (s.crouch || 0) < 0.3) {
+      const rootY = this.root.position.y;
+      ['Left', 'Right'].forEach((side, i) => {
+        const f = B[`${side}Foot`].getWorldPosition(V[0]);
+        goal[i] = THREE.MathUtils.clamp(P.heightAt(f.x, f.z) - rootY, -0.3, 0.3);
+      });
+    }
+    const k = 1 - Math.exp(-dt * 14);
+    off[0] += (goal[0] - off[0]) * k;
+    off[1] += (goal[1] - off[1]) * k;
+    if (Math.abs(off[0]) < 0.004 && Math.abs(off[1]) < 0.004) return;
+    const drop = Math.min(0, off[0], off[1]);
+    if (drop < 0) { B.Hips.position.y += drop; B.Hips.updateMatrixWorld(true); }
+    const { fwd } = this.bodyAxes();
+    ['Left', 'Right'].forEach((side, i) => {
+      const lift = off[i] - drop;
+      if (lift < 0.004) return;
+      const foot = B[`${side}Foot`].getWorldPosition(new THREE.Vector3());
+      const knee = B[`${side}Leg`].getWorldPosition(new THREE.Vector3());
+      solveLeg(B, side, foot.addScaledVector(UP, lift), knee.addScaledVector(fwd, 0.6), this.tmp);
+    });
   }
 
   // Every weighted gait loop plays at one blended stride rate, on the stride phase of
