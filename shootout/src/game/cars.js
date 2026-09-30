@@ -833,6 +833,39 @@ export class Cars {
     car.mesh.rotation.y = car.yaw;
   }
 
+  // The body has weight: it squats under throttle, dives under braking, rolls out of a
+  // turn and sits on the slope of the road, each on a damped spring.
+  bodyMotion(car, dt) {
+    if (!(dt > 0)) return;
+    const S = specOf(car), t = this.world.terrain;
+    const b = car.body || (car.body = { speed: car.speed, yaw: car.yaw, p: 0, pv: 0, r: 0, rv: 0 });
+    const accel = (car.speed - b.speed) / dt;
+    const yawRate = Math.atan2(Math.sin(car.yaw - b.yaw), Math.cos(car.yaw - b.yaw)) / dt;
+    b.speed = car.speed;
+    b.yaw = car.yaw;
+    const fx = Math.sin(car.yaw), fz = Math.cos(car.yaw);
+    const L = S.halfL * 0.8, W = S.halfW * 0.8;
+    const hF = t.heightAt(car.x + fx * L, car.z + fz * L), hB = t.heightAt(car.x - fx * L, car.z - fz * L);
+    const hL = t.heightAt(car.x + fz * W, car.z - fx * W), hR = t.heightAt(car.x - fz * W, car.z + fx * W); // local +x is left
+    const clamp = THREE.MathUtils.clamp;
+    // rotation.x > 0 dips the nose; rotation.z > 0 tips the roof to the right (local +x is the left side)
+    const slopeP = clamp(Math.atan2(hB - hF, 2 * L), -0.25, 0.25);
+    const slopeR = clamp(Math.atan2(hL - hR, 2 * W), -0.2, 0.2); // higher left side tips the roof right
+    const scooter = !!car.spec;
+    const pitchGoal = slopeP + (scooter ? 0 : clamp(-accel * 0.0045, -0.045, 0.06));
+    // cars roll out of a turn; a scooter rider leans into it
+    // (+yaw turns left: a car's roof swings out to the right, a scooter leans left into it)
+    const lean = yawRate * car.speed;
+    const rollGoal = slopeR + (scooter ? clamp(-lean * 0.02, -0.3, 0.3) : clamp(lean * 0.006, -0.08, 0.08));
+    const w = scooter ? 7 : 6.5, z = 0.55, step = Math.min(dt, 0.05);
+    b.pv += (w * w * (pitchGoal - b.p) - 2 * z * w * b.pv) * step;
+    b.p += b.pv * step;
+    b.rv += (w * w * (rollGoal - b.r) - 2 * z * w * b.rv) * step;
+    b.r += b.rv * step;
+    car.mesh.rotation.x = b.p;
+    car.mesh.rotation.z = b.r;
+  }
+
   localCar() {
     return this.list.find((c) => c.driver?.isPlayer) || null;
   }
@@ -1087,7 +1120,7 @@ export class Cars {
       if (car.handle) car.handle.rotation.y = (car.steer || 0) * 0.5;
       if (car.wheelRig) car.wheelRig.rotation.z = -(car.steer || 0) * 0.65;
       if (car.cluster) paintCluster(car.cluster, car.speed, !!car.driver);
-      car.mesh.rotation.z = THREE.MathUtils.clamp(-car.speed * 0.002, -0.06, 0.06);
+      this.bodyMotion(car, dt);
       car.lights.emissiveIntensity = car.driver ? 1.15 : 0.45;
       car.tails.emissiveIntensity = car.speed < -0.4 || (car.driver?.isPlayer && input?.back) ? 1.2 : 0.4;
     }

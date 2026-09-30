@@ -105,6 +105,7 @@ export class Player {
   }
 
   look(dx, dy) {
+    this.lookIdle = 0;
     this.camYaw -= dx;
     this.camPitch = THREE.MathUtils.clamp(this.camPitch - dy, -1.25, 0.95);
   }
@@ -311,6 +312,7 @@ export class Player {
 
   updateInCar(dt, input) {
     const car = this.vehicle;
+    if (input.toggleWalk) this.cockpitView = !this.cockpitView;
     const dyaw = wrapAngle(car.yaw - (this._carYaw ?? car.yaw));
     this.camYaw += dyaw;
     this._carYaw = car.yaw;
@@ -330,11 +332,11 @@ export class Player {
     this.time = (this.time || 0) + dt;
     const ch = this.character;
     ch.root.position.copy(this.pos);
+    const standing = car.kind === 'scooter'; // a scooter rider is on show, not in a cockpit
     ch.root.rotation.order = 'YXZ';
     ch.root.rotation.x = 0;
     ch.root.rotation.y = this.yaw;
-    ch.root.rotation.z = 0;
-    const standing = car.kind === 'scooter'; // a scooter rider is on show, not in a cockpit
+    ch.root.rotation.z = standing ? car.body?.r || 0 : 0; // lean with the deck
     ch.root.visible = standing;
     if (!standing) {
       if (ch.rifle) ch.rifle.visible = false;
@@ -358,9 +360,12 @@ export class Player {
     const rideCar = (v) => (v && v.kind !== 'scooter' ? v : null); // scooters keep the third-person camera
     const ride = rideCar(follow?.vehicle) || (!follow && rideCar(this.vehicle));
     if (ride) {
+      // Chase camera by default; V switches to the cockpit in cars that have an interior.
+      if (!(this.cockpitView && ride.panes)) { this.updateChaseCamera(dt, ride, follow); return; }
       this.updateCockpitCamera(dt, ride, follow, sprinting, speed);
       return;
     }
+    this.chasePos = null;
     if (this._cockpitHide?.root) this._cockpitHide.root.visible = true;
     this._cockpitHide = null;
     const body = follow?.pos || this.pos;
@@ -423,6 +428,60 @@ export class Player {
     cam.position.copy(this.camPos).addScaledVector(right, this.shake * this.shakeSide * 0.04);
     cam.lookAt(cam.position.clone().add(dir));
     cam.rotateZ(this.shake * this.shakeSide * 0.06);
+  }
+
+  // Third person behind the car: trails into turns, sits back and widens with speed, and
+  // swings back behind the car a moment after the mouse stops moving.
+  updateChaseCamera(dt, car, follow) {
+    const cam = this.camera;
+    const spd = Math.abs(car.speed || 0);
+    this.lookIdle = (this.lookIdle || 0) + dt;
+    if (follow) {
+      const look = spectateLook(follow);
+      this.camYaw = look.yaw;
+      this.camPitch = THREE.MathUtils.clamp(look.pitch, -0.6, 0.35);
+    } else if (this.lookIdle > 0.8 && spd > 1.5) {
+      this.camYaw += wrapAngle(car.yaw - this.camYaw) * (1 - Math.exp(-dt * 2.2)); // behind the nose, reversing too
+      this.camPitch += (-0.06 - this.camPitch) * (1 - Math.exp(-dt * 1.5));
+    }
+    const fovGoal = 62 + Math.min(spd, 30) * 0.4;
+    this.fov += (fovGoal - this.fov) * Math.min(1, dt * 4);
+    if (Math.abs(cam.fov - this.fov) > 0.01) { cam.fov = this.fov; cam.updateProjectionMatrix(); }
+    if (this.character.root) this.character.root.visible = false;
+    if (this.character.rifle) this.character.rifle.visible = false;
+    if (follow?.character?.root) { follow.character.root.visible = false; this._cockpitHide = follow.character; }
+
+    const yaw = this.camYaw;
+    const pitch = THREE.MathUtils.clamp(this.camPitch - 0.14, -0.7, 0.3);
+    const dir = new THREE.Vector3(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch));
+    const lead = Math.min(spd, 25) * 0.04 * Math.sign(car.speed || 0);
+    const target = new THREE.Vector3(car.x + Math.sin(car.yaw) * lead, car.y + 1.3, car.z + Math.cos(car.yaw) * lead);
+    let dist = 5.4 + Math.min(spd, 30) * 0.05;
+    const back = dir.clone().negate();
+    const up = 0.5;
+    const probe = back.clone().multiplyScalar(dist).setY(back.y * dist + up).normalize();
+    const hit = this.world.shots?.raycast(target, probe, dist + 0.5);
+    const tHit = this.world.terrain.raycast(target, probe, dist + 0.5);
+    const near = Math.min(hit ? hit.t : Infinity, tHit ?? Infinity);
+    if (near < dist + 0.3) dist = Math.max(1.2, near - 0.35);
+    const desired = target.clone().addScaledVector(probe, dist);
+    const minY = this.world.terrain.heightAt(desired.x, desired.z) + 0.4;
+    if (desired.y < minY) desired.y = minY;
+    if (!this.chasePos || this.chasePos.distanceTo(desired) > 25) this.chasePos = desired.clone();
+    else this.chasePos.lerp(desired, 1 - Math.exp(-dt * 12));
+    // never let the smoothing drag the camera through a wall the probe just found
+    if (near < Infinity && this.chasePos.distanceTo(target) > dist + 0.2) {
+      this.chasePos.sub(target).setLength(dist).add(target);
+    }
+    this.camDist = dist;
+    this.smoothDist = dist;
+    this.camPos.copy(this.chasePos);
+    this.smoothPivot = target.clone();
+    this.shake *= Math.exp(-dt * 18);
+    const right = new THREE.Vector3(-Math.cos(yaw), 0, Math.sin(yaw));
+    cam.position.copy(this.chasePos).addScaledVector(right, this.shake * this.shakeSide * 0.03);
+    cam.lookAt(target.clone().addScaledVector(dir, 4));
+    cam.rotateZ(this.shake * this.shakeSide * 0.02);
   }
 
   updateCockpitCamera(dt, ride, follow, sprinting, speed = 0) {
