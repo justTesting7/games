@@ -337,10 +337,10 @@ export class Weapons {
       return hit;
     }
     if (hit.fighter?.net) {
-      this.combat.damage(hit.fighter, shooter, shotDamage(def, hit), dir, { head: hit.head, limb: hit.limb, weapon: def.key, at: end });
+      this.combat.damage(hit.fighter, shooter, shotDamage(def, hit), dir, { head: hit.head, limb: hit.limb, part: hit.part, weapon: def.key, at: end });
       return hit;
     }
-    if (hit.fighter) this.combat.damage(hit.fighter, shooter, shotDamage(def, hit), dir, { head: hit.head, limb: hit.limb, weapon: def.key, at: end });
+    if (hit.fighter) this.combat.damage(hit.fighter, shooter, shotDamage(def, hit), dir, { head: hit.head, limb: hit.limb, part: hit.part, weapon: def.key, at: end });
     else if (hit.body || hit.target) hit.scored = this.world.props.hit(hit, end, dir, def.force);
     return hit;
   }

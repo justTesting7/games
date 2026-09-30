@@ -31,7 +31,7 @@ the whole district, so frustum culling never skips any of it, and the shadow pas
 - [x] 12. Rammed parked cars shove (mass-based impulse, settle), with network sync.
 - [x] 13. Ragdoll deaths (verlet on the skeleton, collide with ground and walls).
 - [ ] 14. Characters step up kerbs smoothly (height smoothing) and feet plant on slopes (foot IK).
-- [ ] 15. Hit reactions by bone (stagger, limb flinch) and knockback from explosions.
+- [x] 15. Hit reactions by bone (stagger, limb flinch) and knockback from explosions.
 
 ## Log
 - Tel Aviv frame, same view: 10.4 ms / 1684 calls (baseline) -> 6.0 ms / 1078 calls after

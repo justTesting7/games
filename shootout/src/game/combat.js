@@ -178,7 +178,8 @@ export class Combat {
       if (attacker && attacker !== victim) attacker.kills++;
       this.onKill?.(victim, attacker, { ...info, dir });
     } else {
-      victim.character.hitReact(dir);
+      victim.character.hitReact(dir, info.part);
+      if (info.knock) (victim.knock || (victim.knock = new THREE.Vector3())).add(info.knock);
       this.onDamage?.(victim, attacker, amount, dir, info);
     }
   }
@@ -214,7 +215,9 @@ export class Combat {
         }
         continue;
       }
-      this.damage(f, attacker, Math.round(maxDamage * k), to, { weapon: opts.weapon || 'grenade' });
+      // survivors are thrown back by the blast (the controllers take it as a velocity kick)
+      const knock = to.clone().setY(0).normalize().multiplyScalar(7 * k).setY(2.5 * k);
+      this.damage(f, attacker, Math.round(maxDamage * k), to, { weapon: opts.weapon || 'grenade', knock });
     }
     if (netHits.length) world.weapons?.session?.reportBlast(netHits, opts.weapon || 'grenade');
   }

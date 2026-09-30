@@ -642,9 +642,14 @@ export class Character {
   }
 
   // A bullet from direction `dir` knocks the upper body back.
-  hitReact(dir) {
+  // `part` is the bone the round hit (see Combat hit capsules): an arm is knocked back,
+  // a leg buckles (stagger slows the controller for a moment), the torso flinches.
+  hitReact(dir, part) {
     this.flinchAxis.set(dir.z, 0, -dir.x).normalize();
-    this.flinch = Math.min(1, this.flinch + 0.7);
+    const limb = part && part !== 'Hips' && part !== 'Spine2';
+    this.flinch = Math.min(1, this.flinch + (limb ? 0.25 : 0.7));
+    if (limb && this.bones[part]) this.limbHit = { bone: this.bones[part], axis: this.flinchAxis.clone(), k: 1 };
+    if (part && /Leg/.test(part)) this.stagger = 0.45;
   }
 
   // Goes limp: a ragdoll carries the body's own momentum and the killing blow into
@@ -857,6 +862,11 @@ export class Character {
     }
     this.updateGunBlock(dt);
     this.applyAim(s);
+    if (this.limbHit && this.limbHit.k > 0.02) {
+      rotateBoneWorld(this.limbHit.bone, this.tmp.q.setFromAxisAngle(this.limbHit.axis, this.limbHit.k * 0.6), this.tmp);
+      this.limbHit.k *= Math.exp(-dt * 7);
+    }
+    if (this.stagger > 0) this.stagger = Math.max(0, this.stagger - dt);
     if (s.swimming) this.applySwim(s, dt);
     if (this.weapon === 'grenade') this.applyThrow(dt);
     this.placeRifle(dt);

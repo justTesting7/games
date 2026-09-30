@@ -154,6 +154,7 @@ export class Player {
       else if (aiming) target = input.sprint ? SPEED.aim : (this.walkMode ? SPEED.aimWalk : SPEED.aim * 0.85);
       else target = input.sprint ? SPEED.sprint : this.walkMode ? SPEED.walk : SPEED.jog;
       if (stick < 0.98) target *= stick;
+      if (this.character.stagger > 0) target *= 0.45; // shot in the leg
     }
 
     // Face the mouse look so the body points where the reticle goes.
@@ -221,6 +222,12 @@ export class Player {
       horiz.lerp(desired, Math.min(1, dt * accel));
       this.vel.x = horiz.x;
       this.vel.z = horiz.z;
+      const knock = this.fighter?.knock;
+      if (knock && knock.lengthSq() > 1e-6) { // a blast throws you
+        this.vel.add(knock);
+        if (knock.y > 0.3) this.onGround = false;
+        knock.set(0, 0, 0);
+      }
 
       if (input.jump && this.onGround) {
         this.vel.y = JUMP_V;

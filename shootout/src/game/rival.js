@@ -1162,11 +1162,17 @@ export class Rival {
   move(dt, wish) {
     const { terrain } = this.world;
     const horiz = new THREE.Vector3(this.vel.x, 0, this.vel.z);
-    const desired = wish.dir.clone().multiplyScalar(wish.speed);
+    const desired = wish.dir.clone().multiplyScalar(wish.speed * (this.character.stagger > 0 ? 0.45 : 1));
     const accel = this.onGround ? (wish.speed >= SHELTER_SPRINT - 0.05 ? 8 : wish.speed > horiz.length() ? 6 : 8) : 1.5;
     horiz.lerp(desired, Math.min(1, dt * accel));
     this.vel.x = horiz.x;
     this.vel.z = horiz.z;
+    const knock = this.fighter.knock;
+    if (knock && knock.lengthSq() > 1e-6) {
+      this.vel.add(knock);
+      if (knock.y > 0.3) this.onGround = false;
+      knock.set(0, 0, 0);
+    }
 
     let jumpStarted = false;
     if (wish.jump && this.onGround) {
