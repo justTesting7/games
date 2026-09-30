@@ -1,5 +1,10 @@
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { buildShotMesh } from './shotMesh.js';
+import { extractCityCars } from './cityCars.js';
+import { upgradeCityMaterials } from './loadCity.js';
+
+const BASE = import.meta.env?.BASE_URL || '/shootout/';
 
 // A tiny debug range: open it with /shootout/?lab and it drops straight into play.
 // Everything here is a test fixture for physics, shots and animation:
@@ -46,7 +51,36 @@ export function labHeightAt(x, z) {
   return 0;
 }
 
-export function buildLab() {
+/**
+ * The Lab's cars are the Tel Aviv ones: scripts/bake-lab-cars.mjs cuts a few out of a
+ * city set, each in its own frame. They are set down on the Lab spots and cut into
+ * drivable cars by the same code as on the city maps (glass panes and all).
+ */
+function labCars(gltf) {
+  const variants = gltf.scene.children.filter((c) => c.name.startsWith('car-'));
+  const root = new THREE.Group();
+  const spots = LAB.cars.map((s, i) => {
+    const v = variants[i % variants.length];
+    const copy = v.clone(true);
+    copy.position.set(s.x, labHeightAt(s.x, s.z), s.z);
+    copy.rotation.set(0, s.yaw, 0);
+    root.add(copy);
+    return { x: s.x, z: s.z, y: copy.position.y, yaw: s.yaw, hl: v.userData.hl ?? 2.3, hw: v.userData.hw ?? 0.9 };
+  });
+  upgradeCityMaterials(root);
+  root.updateMatrixWorld(true);
+  // clone() shares geometry: give each copy its own so cutting one leaves the others whole.
+  // GLTFLoader makes repeated node names unique (carpaint_1 ...): the cutter matches the part names.
+  root.traverse((o) => {
+    if (!o.isMesh) return;
+    o.geometry = o.geometry.clone();
+    o.name = o.name.replace(/_\d+$/, '');
+  });
+  return extractCityCars(root, spots);
+}
+
+export async function buildLab() {
+  const carsGltf = await new GLTFLoader().loadAsync(`${BASE}assets/maps/lab/cars.glb`).catch(() => null);
   const group = new THREE.Group();
   group.name = 'lab';
   const walls = []; // walking boxes
@@ -116,6 +150,7 @@ export function buildLab() {
       return walls.length;
     },
     buildShots: () => buildShotMesh([group]),
+    takeCars: () => (carsGltf ? labCars(carsGltf) : []),
     update: () => {},
   };
 }

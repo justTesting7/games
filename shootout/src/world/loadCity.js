@@ -48,6 +48,16 @@ function keepTriangles(root, keep, skip = null) {
   });
 }
 
+/** Swaps the exported car paint, glass and metal for the physical versions (see UPGRADE). */
+export function upgradeCityMaterials(root) {
+  const done = new Map();
+  root.traverse((o) => {
+    if (!o.isMesh || !UPGRADE[o.material.name]) return;
+    if (!done.has(o.material)) done.set(o.material, UPGRADE[o.material.name](o.material));
+    o.material = done.get(o.material);
+  });
+}
+
 export async function loadCity(scene, renderer, folder = 'dizengoff-center') {
   loader.setKTX2Loader(new KTX2Loader().setTranscoderPath(`${BASE}assets/basis/`).detectSupport(renderer));
   // a stitched map loads every set at its offset and the skyline of one of them

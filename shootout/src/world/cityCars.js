@@ -93,7 +93,7 @@ export function extractCityCars(root, cars) {
   root.traverse((o) => {
     if (!o.isMesh || !CAR_MESHES.has(o.name)) return;
     const g = o.geometry;
-    const pos = g.attributes.position, nor = g.attributes.normal, uv = g.attributes.uv;
+    const pos = g.attributes.position, nor = g.attributes.normal, uv = g.attributes.uv, col = g.attributes.color;
     const index = g.index;
     const count = index ? index.count : pos.count;
     const id = (i) => (index ? index.getX(i) : i);
@@ -120,7 +120,7 @@ export function extractCityCars(root, cars) {
       if (hit < 0) { keep.push(a, b, c); continue; }
       const car = cars[hit], { s, c: co } = trig[hit];
       let p = parts[hit].get(o);
-      if (!p) { p = { pos: [], nor: [], uv: [] }; parts[hit].set(o, p); }
+      if (!p) { p = { pos: [], nor: [], uv: [], col: [], colSize: col?.itemSize || 0 }; parts[hit].set(o, p); }
       [[a, va], [b, vb], [c, vc]].forEach(([vi, v]) => {
         const dx = v.x - car.x, dz = v.z - car.z;
         p.pos.push(dx * co - dz * s, v.y - car.y, dx * s + dz * co);
@@ -129,6 +129,8 @@ export function extractCityCars(root, cars) {
           p.nor.push(nv.x * co - nv.z * s, nv.y, nv.x * s + nv.z * co);
         }
         if (uv) p.uv.push(uv.getX(vi), uv.getY(vi));
+        // the paint colour of every car is in its vertex colours
+        if (col) for (let e = 0; e < p.colSize; e++) p.col.push(col.getComponent(vi, e));
       });
     }
     g.setIndex(new THREE.BufferAttribute(new Uint32Array(keep), 1));
@@ -148,6 +150,7 @@ export function extractCityCars(root, cars) {
       geo.setAttribute('position', new THREE.Float32BufferAttribute(p.pos, 3));
       if (p.nor.length) geo.setAttribute('normal', new THREE.Float32BufferAttribute(p.nor, 3));
       if (p.uv.length) geo.setAttribute('uv', new THREE.Float32BufferAttribute(p.uv, 2));
+      if (p.col?.length) geo.setAttribute('color', new THREE.Float32BufferAttribute(p.col, p.colSize));
       geo.computeBoundingSphere();
       const mesh = new THREE.Mesh(geo, material);
       mesh.name = name;

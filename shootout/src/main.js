@@ -358,7 +358,7 @@ async function init() {
     city ? city.load(progress) : Promise.resolve(),
     arena ? arena.load(progress) : Promise.resolve(),
     studioMap ? progress.task(mapDef.plantLabel, 2, async () => {
-      studio = mapDef.lab ? buildLab()
+      studio = mapDef.lab ? await buildLab()
         : await loadDizengoff(pipeline.renderer, mapDef.cityFolder, { stadiumStart: !!mapDef.stadiumStart });
       if (studio.cameraFar) { camera.far = studio.cameraFar; camera.updateProjectionMatrix(); }
       studioHeight = studio.heightAt;
@@ -392,7 +392,6 @@ async function init() {
     pipeline.scene.add(city.group);
     cars.spawnMap(mapDef.id);
   }
-  if (mapDef.lab) cars.spawnMap('lab');
   if (studio?.takeCars) cars.spawnCustom(studio.takeCars());
   if (studio?.takeScooters) cars.addScooters(studio.takeScooters());
   if (studio?.buildShots) world.shots = studio.buildShots();
