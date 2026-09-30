@@ -945,6 +945,14 @@ async function init() {
     if (!draw) return;
 
     $('crosshair').classList.toggle('idle', !state.aiming && !flying);
+    { // the gap shows how far shots can stray right now
+      const L = player.fighter.loadout;
+      const def = L && WEAPONS[L.current];
+      const base = def ? (L.current === 'rifle' ? def.hipSpread : def.spread) || 0 : 0;
+      const rad = base * weapons.spreadScale();
+      const px = rad / Math.tan((camera.fov * Math.PI) / 360) * (innerHeight / 2);
+      $('crosshair').style.setProperty('--gap', `${Math.min(60, 5 + px).toFixed(1)}px`);
+    }
     $('crosshair').classList.toggle('enemy', !!player.aimHit?.fighter);
     $('crosshair').classList.toggle('hidden', !alive || player.scopeT > 0.35 || dying || driving);
     $('crosshair').classList.toggle('drone', flying && !dying);

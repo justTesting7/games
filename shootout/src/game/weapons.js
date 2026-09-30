@@ -546,7 +546,18 @@ export class Weapons {
 
   // --- The player's controls --------------------------------------------------
 
+  // How far the player's shots stray right now, as a multiple of the gun's base spread:
+  // sustained fire blooms, moving and jumping throw the aim off, crouching steadies it.
+  spreadScale() {
+    const p = this.player;
+    const speed = Math.hypot(p.vel.x, p.vel.z);
+    let k = 1 + (this.bloom || 0) * 2.2 + Math.min(speed / 6, 1) * 1.6 + (p.onGround ? 0 : 2.5);
+    if (p.crouching) k *= 0.6;
+    return k;
+  }
+
   update(dt, input) {
+    this.bloom = Math.max(0, (this.bloom || 0) - dt * 2.4);
     const f = this.player.fighter;
     const L = f.loadout;
     const ch = this.character;
@@ -642,9 +653,10 @@ export class Weapons {
         const ready = scopedShot
           ? ch.weapon === 'rifle' && ch.equipT >= 1
           : ch.aimWeight > 0.8 && this.player.facingError < 0.35;
-        const spread = L.current === 'rifle' ? (scopedShot ? 0 : def.hipSpread) : def.spread;
+        const spread = (L.current === 'rifle' ? (scopedShot ? 0 : def.hipSpread) : def.spread) * this.spreadScale();
         const side = L.side;
         if (ready && this.trigger(f, this.player.aimPoint, spread)) {
+          this.bloom = Math.min(1.5, (this.bloom || 0) + (L.current === 'rifle' ? 1.2 : 0.3));
           this.queued = 0;
           this.sniperWasScoped = false;
           this.player.sniperPending = false;

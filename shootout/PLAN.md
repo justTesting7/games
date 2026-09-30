@@ -23,7 +23,7 @@ the whole district, so frustum culling never skips any of it, and the shadow pas
       they are; limb shots do less damage.
 - [x] 7. Bullet holes / impact decals on walls and cars (pooled, fading).
 - [ ] 8. Rifle rounds travel (fast projectile with drop) so long shots lead the target a little.
-- [ ] 9. Recoil pattern and first-shot accuracy; crosshair shows the real spread.
+- [x] 9. Recoil pattern and first-shot accuracy; crosshair shows the real spread.
 
 ## Physics and interactions
 - [x] 10. Per-car footprint from the bake (hl/hw) for walking, driving and car-car collision.

@@ -100,6 +100,8 @@ export class Player {
 
   kick(side, strength = 1) {
     this.recoilPitch += 0.018 * strength;
+    // and a little sideways: sustained fire wanders, it doesn't only climb
+    this.camYaw += (Math.random() - 0.5) * 0.005 * strength;
     this.shake = Math.max(this.shake, 0.12 * Math.sqrt(strength));
     this.shakeSide = side ? -1 : 1;
   }
