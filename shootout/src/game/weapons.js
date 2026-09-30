@@ -294,8 +294,8 @@ export class Weapons {
       ch.fired(side);
     }
     shooter.lastShotT = this.combat.time;
-    const { dist, pan } = this.listen(flashAt);
-    this.audio.gunshot(side < 0 ? 0 : side, shooter.isPlayer ? 0 : dist, shooter.isPlayer ? null : pan, rifle);
+    const { dist, pan, occluded } = this.listen(flashAt);
+    this.audio.gunshot(side < 0 ? 0 : side, shooter.isPlayer ? 0 : dist, shooter.isPlayer ? null : pan, rifle, occluded && !shooter.isPlayer);
 
     const end = hit ? from.clone().addScaledVector(dir, hit.t) : from.clone().addScaledVector(dir, 500);
     this.fx.tracer(flashAt, end);
@@ -392,7 +392,10 @@ export class Weapons {
     const to = pos.clone().sub(cam.position);
     const dist = to.length();
     const right = tmp.setFromMatrixColumn(cam.matrixWorld, 0);
-    return { dist, pan: to.normalize().dot(right) };
+    const dir = to.normalize();
+    // a wall between the sound and the listener muffles it (city maps: the shot BVH)
+    const occluded = dist > 3 && !!this.world.shots?.raycast(cam.position, dir, dist - 1);
+    return { dist, pan: dir.dot(right), occluded };
   }
 
   sound(f, kind) {

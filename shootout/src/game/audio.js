@@ -97,10 +97,10 @@ export class Audio {
 
   // `distance` is 0 for the player's own guns; others are delayed by the
   // speed of sound, quieter, duller and panned to where they came from.
-  gunshot(side, distance = 0, panDir = null, rifle = false) {
+  gunshot(side, distance = 0, panDir = null, rifle = false, occluded = false) {
     if (!this.ctx) return;
     if (distance > 1) {
-      setTimeout(() => this.gunshotNow(side, distance, panDir, rifle), (distance / 343) * 1000);
+      setTimeout(() => this.gunshotNow(side, distance, panDir, rifle, occluded), (distance / 343) * 1000);
       return;
     }
     this.gunshotNow(side, 0, null, rifle);
@@ -150,7 +150,8 @@ export class Audio {
     return b;
   }
 
-  gunshotNow(side, distance, panDir, rifle) {
+  // occluded: heard through or around a building: dull, quieter, mostly reverb
+  gunshotNow(side, distance, panDir, rifle, occluded = false) {
     const ctx = this.ctx;
     const t = ctx.currentTime;
     const far = distance > 1;
@@ -162,10 +163,10 @@ export class Audio {
     src.playbackRate.value = 0.95 + Math.random() * 0.1;
     const f = ctx.createBiquadFilter();
     f.type = 'lowpass';
-    f.frequency.value = far ? Math.max(900, 9000 - distance * 90) : 16000;
+    f.frequency.value = far ? Math.max(900, 9000 - distance * 90) * (occluded ? 0.3 : 1) : 16000;
     f.Q.value = 0.5;
     const g = ctx.createGain();
-    g.gain.value = far ? 0.9 * att * Math.sqrt(att) : 1;
+    g.gain.value = (far ? 0.9 * att * Math.sqrt(att) : 1) * (occluded ? 0.45 : 1);
     const p = ctx.createStereoPanner();
     p.pan.value = pan;
     src.connect(f).connect(g).connect(p).connect(this.master);

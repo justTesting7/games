@@ -33,6 +33,10 @@ the whole district, so frustum culling never skips any of it, and the shadow pas
 - [x] 14. Characters step up kerbs smoothly (height smoothing) and feet plant on slopes (foot IK).
 - [x] 15. Hit reactions by bone (stagger, limb flinch) and knockback from explosions.
 
+- [x] 16. Sound occlusion: gunshots behind buildings are muffled (shot BVH ray to the listener).
+- [ ] 17. Cascaded shadows (a second, coarse cascade so distant streets get shadows).
+- [ ] 18. Rival drivers: rivals take cars to close distance / flee.
+
 ## Log
 - Tel Aviv frame, same view: 10.4 ms / 1684 calls (baseline) -> 6.0 ms / 1078 calls after
   chunking (256 m cells), car batching and no shadows from flat ground.
