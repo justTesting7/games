@@ -411,6 +411,9 @@ export class Player {
     if (tHit !== null) dist = Math.min(dist, Math.max(0.4, tHit - 0.3));
     const cHit = veg.colliders.raycast(shoulderPt, back, dist + 0.2);
     if (cHit) dist = Math.min(dist, Math.max(0.4, cHit.t - 0.2));
+    // City maps: walls are the real triangles (the walking boxes skip rays there).
+    const sHit = this.world.shots?.raycast(shoulderPt, back, dist + 0.2);
+    if (sHit) dist = Math.min(dist, Math.max(0.4, sHit.t - 0.2));
     if (this.smoothDist === undefined || dist < this.smoothDist) this.smoothDist = dist;
     else this.smoothDist += (dist - this.smoothDist) * Math.min(1, dt * 5);
     this.camPos.copy(shoulderPt).addScaledVector(back, this.smoothDist);
