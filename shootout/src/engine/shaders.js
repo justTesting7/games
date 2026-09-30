@@ -405,10 +405,17 @@ uniform vec3 uLightColor;
 uniform float uFogDensity;
 uniform float uFogFalloff;
 uniform float uUnderwater;
+uniform sampler2D tAO;
+uniform float uAO;
 
 void main() {
   vec4 s = texture(tScene, vUv);
   float viewZ = s.a;
+  if (uAO > 0.0) {
+    // Obscurance was taken before water and effects were drawn: skip pixels they cover.
+    vec2 ao = texture(tAO, vUv).rg;
+    if (abs(ao.y - viewZ) < 0.06 * viewZ + 0.25) s.rgb *= mix(1.0, ao.x, uAO);
+  }
   if (viewZ >= 9000.0 || uUnderwater > 0.5) { gl_FragColor = s; return; }
   vec4 far = uInvViewProj * vec4(vUv * 2.0 - 1.0, 1.0, 1.0);
   vec3 dir = normalize(far.xyz / far.w - uCamPos);
@@ -590,5 +597,85 @@ void main() {
   col = pow(max(col, 0.0), vec3(1.0 / 2.2));
   col += (ign(gl_FragCoord.xy) - 0.5) / 255.0;
   gl_FragColor = vec4(col, 1.0);
+}
+`;
+
+// Scalable ambient obscurance (McGuire et al.) at half resolution. tDepth.a is the
+// view distance every opaque material writes (see engine/patch.js); normals come
+// from the depth itself, picking the flatter neighbour on each axis so edges stay crisp.
+export const aoFrag = /* glsl */ `
+varying vec2 vUv;
+uniform sampler2D tDepth;
+uniform vec2 uRes;
+uniform vec2 uProj;
+uniform float uRadius;
+uniform float uIntensity;
+uniform float uMaxDist;
+
+float ign(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715)))); }
+vec3 viewPos(vec2 uv, float d) {
+  vec2 ndc = uv * 2.0 - 1.0;
+  return vec3(ndc.x / uProj.x * d, ndc.y / uProj.y * d, -d);
+}
+float depthAt(vec2 uv) { return texture(tDepth, uv).a; }
+
+void main() {
+  float d = depthAt(vUv);
+  if (d <= 0.05 || d > uMaxDist) { gl_FragColor = vec4(1.0, d, 0.0, 1.0); return; }
+  vec3 P = viewPos(vUv, d);
+  vec2 px = 1.0 / uRes;
+  vec2 ox = vec2(px.x, 0.0), oy = vec2(0.0, px.y);
+  vec3 pr = viewPos(vUv + ox, depthAt(vUv + ox)), pl = viewPos(vUv - ox, depthAt(vUv - ox));
+  vec3 pu = viewPos(vUv + oy, depthAt(vUv + oy)), pd = viewPos(vUv - oy, depthAt(vUv - oy));
+  vec3 dx = abs(pr.z - P.z) < abs(P.z - pl.z) ? pr - P : P - pl;
+  vec3 dy = abs(pu.z - P.z) < abs(P.z - pd.z) ? pu - P : P - pd;
+  vec3 N = normalize(cross(dx, dy));
+  if (dot(N, -P) < 0.0) N = -N;
+
+  float rPx = min(uRadius * uProj.y * 0.5 * uRes.y / d, 96.0);
+  if (rPx < 1.5) { gl_FragColor = vec4(1.0, d, 0.0, 1.0); return; }
+  float r2 = uRadius * uRadius;
+  float bias = 0.012 + d * 0.0016;
+  float ang = ign(gl_FragCoord.xy) * 6.2831853;
+  float occ = 0.0;
+  for (int i = 0; i < AO_SAMPLES; i++) {
+    float a = (float(i) + 0.5) / float(AO_SAMPLES);
+    float th = ang + float(i) * 2.3999632;
+    vec2 suv = vUv + vec2(cos(th), sin(th)) * (a * rPx) * px;
+    float sd = depthAt(suv);
+    if (sd <= 0.05) continue;
+    vec3 v = viewPos(suv, sd) - P;
+    float vv = dot(v, v);
+    float vn = dot(v, N);
+    float f = max(r2 - vv, 0.0);
+    occ += f * f * f * max((vn - bias) / (0.01 + vv), 0.0);
+  }
+  float ao = max(0.0, 1.0 - occ * uIntensity / (r2 * r2 * r2) * (5.0 / float(AO_SAMPLES)));
+  // fade out with distance, where depth precision can't carry it
+  ao = mix(ao, 1.0, smoothstep(uMaxDist * 0.6, uMaxDist, d));
+  gl_FragColor = vec4(ao, d, 0.0, 1.0);
+}
+`;
+
+// Depth-aware separable blur of the obscurance (r = ao, g = depth).
+export const aoBlurFrag = /* glsl */ `
+varying vec2 vUv;
+uniform sampler2D tAO;
+uniform vec2 uStep;
+
+void main() {
+  vec4 c = texture(tAO, vUv);
+  float d = c.g;
+  float sum = c.r * 0.2270270, wsum = 0.2270270;
+  const float W[4] = float[4](0.1945946, 0.1216216, 0.0540540, 0.0162162);
+  for (int i = 1; i <= 4; i++) {
+    for (int s = -1; s <= 1; s += 2) {
+      vec4 t = texture(tAO, vUv + uStep * float(i * s));
+      float w = W[i - 1] * max(0.0, 1.0 - abs(t.g - d) / (0.04 * d + 0.08));
+      sum += t.r * w;
+      wsum += w;
+    }
+  }
+  gl_FragColor = vec4(sum / wsum, d, 0.0, 1.0);
 }
 `;

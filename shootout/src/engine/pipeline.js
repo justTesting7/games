@@ -95,10 +95,10 @@ function fsMaterial(frag, uniforms, extra = {}) {
 }
 
 export const QUALITY = {
-  low: { label: 'Low', shadow: 512, shadowDist: 28, ssr: 0, msaa: 0, pixelRatio: 0.7, grass: 0.3, trees: 0.45 },
-  medium: { label: 'Medium', shadow: 1024, shadowDist: 40, ssr: 8, msaa: 0, pixelRatio: 1, grass: 0.55, trees: 0.7 },
-  high: { label: 'High', shadow: 2048, shadowDist: 48, ssr: 16, msaa: 0, pixelRatio: 1, grass: 0.85, trees: 0.9 },
-  ultra: { label: 'Ultra', shadow: 2048, shadowDist: 58, ssr: 24, msaa: 2, pixelRatio: 1.25, grass: 1.1, trees: 1.05 },
+  low: { label: 'Low', shadow: 512, shadowDist: 28, ssr: 0, msaa: 0, ao: 0, pixelRatio: 0.7, grass: 0.3, trees: 0.45 },
+  medium: { label: 'Medium', shadow: 1024, shadowDist: 40, ssr: 8, msaa: 0, ao: 8, pixelRatio: 1, grass: 0.55, trees: 0.7 },
+  high: { label: 'High', shadow: 2048, shadowDist: 48, ssr: 16, msaa: 0, ao: 12, pixelRatio: 1, grass: 0.85, trees: 0.9 },
+  ultra: { label: 'Ultra', shadow: 2048, shadowDist: 58, ssr: 24, msaa: 2, ao: 16, pixelRatio: 1.25, grass: 1.1, trees: 1.05 },
 };
 
 export class Pipeline {
@@ -214,7 +214,18 @@ export class Pipeline {
       uFogDensity: { value: 0.0016 },
       uFogFalloff: { value: 0.012 },
       uUnderwater: { value: 0 },
+      tAO: { value: null },
+      uAO: { value: 0 },
     });
+    this.aoMaterial = fsMaterial(S.aoFrag, {
+      tDepth: { value: null },
+      uRes: { value: new THREE.Vector2(1, 1) },
+      uProj: { value: new THREE.Vector2(1, 1) },
+      uRadius: { value: 0.9 },
+      uIntensity: { value: 0.3 },
+      uMaxDist: { value: 140 },
+    }, { defines: { AO_SAMPLES: 8 } });
+    this.aoBlurMaterial = fsMaterial(S.aoBlurFrag, { tAO: { value: null }, uStep: { value: new THREE.Vector2() } });
     this.bloomDown = fsMaterial(S.bloomDownFrag, {
       tSrc: { value: null }, uTexel: { value: new THREE.Vector2() }, uFirst: { value: false },
     });
@@ -274,6 +285,12 @@ export class Pipeline {
       q.ssr = 0;
       q.msaa = 0;
       q.pixelRatio = Math.min(q.pixelRatio, 0.7);
+      q.ao = 0; // 8-bit targets carry no depth in alpha
+    }
+    if (this.hdrType === THREE.UnsignedByteType) q.ao = 0;
+    if (q.ao && this.aoMaterial.defines.AO_SAMPLES !== q.ao) {
+      this.aoMaterial.defines.AO_SAMPLES = q.ao;
+      this.aoMaterial.needsUpdate = true;
     }
     this.qualityName = name;
     const changedMsaa = !this.quality || this.quality.msaa !== q.msaa;
@@ -323,6 +340,29 @@ export class Pipeline {
       this.blackRT = hdrTarget(2, 2, this.hdrType);
     }
     this.waterMaterial.uniforms.uResolution.value.set(W, H);
+    const aw = Math.max(1, W >> 1), ah = Math.max(1, H >> 1);
+    for (const k of ['aoRT', 'aoBlurRT']) {
+      if (!this[k]) this[k] = hdrTarget(aw, ah, this.hdrType, { minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter });
+      else this[k].setSize(aw, ah);
+    }
+  }
+
+  // Half-resolution obscurance from the opaque scene's depth, blurred across and down.
+  renderAO(camera) {
+    const r = this.renderer;
+    const au = this.aoMaterial.uniforms;
+    au.tDepth.value = this.copyRT.texture;
+    au.uRes.value.set(this.aoRT.width, this.aoRT.height);
+    au.uProj.value.set(camera.projectionMatrix.elements[0], camera.projectionMatrix.elements[5]);
+    this.quad.render(r, this.aoMaterial, this.aoRT);
+    const bu = this.aoBlurMaterial.uniforms;
+    bu.tAO.value = this.aoRT.texture;
+    bu.uStep.value.set(1 / this.aoRT.width, 0);
+    this.quad.render(r, this.aoBlurMaterial, this.aoBlurRT);
+    bu.tAO.value = this.aoBlurRT.texture;
+    bu.uStep.value.set(0, 1 / this.aoRT.height);
+    this.quad.render(r, this.aoBlurMaterial, this.aoRT);
+    return this.aoRT.texture;
   }
 
   setTimeOfDay(t, elapsed) {
@@ -428,6 +468,7 @@ export class Pipeline {
 
     this.copyMaterial.uniforms.tDiffuse.value = this.sceneRT.texture;
     this.quad.render(r, this.copyMaterial, this.copyRT);
+    const aoTex = this.quality.ao ? this.renderAO(camera) : null;
     this.waterMaterial.uniforms.uSceneTex.value = this.copyRT.texture;
     this.waterMaterial.uniforms.uProj.value.copy(camera.projectionMatrix);
     r.setRenderTarget(this.sceneRT);
@@ -440,6 +481,8 @@ export class Pipeline {
     fu.uCamPos.value.copy(camera.position);
     camera.getWorldDirection(fu.uCamForward.value);
     fu.uUnderwater.value = opts.underwater ? 1 : 0;
+    fu.tAO.value = aoTex;
+    fu.uAO.value = aoTex ? 0.85 : 0;
     this.quad.render(r, this.fogMaterial, this.fogRT);
     const sceneTex = this.fogRT.texture;
 
