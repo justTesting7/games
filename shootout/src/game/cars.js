@@ -1207,15 +1207,46 @@ export class Cars {
     if (n.y < 0.55) car.speed *= 0.4;
   }
 
+  // The body against walls, railings, posts and parked obstacles: a row of circles from
+  // bumper to bumper (one circle round the middle let the nose and tail through). Only the
+  // speed going into the obstacle is lost, so a glancing scrape keeps you moving.
   bumpWorld(car) {
-    const next = { x: car.x, y: car.y, z: car.z };
-    this.world.veg?.colliders?.resolveXZ(next, specOf(car).collideR, car.y, car.y + 1.25);
-    if (Math.hypot(next.x - car.x, next.z - car.z) > 1e-4) {
-      car.x = next.x;
-      car.z = next.z;
-      car.speed *= 0.28;
-      car.vel.multiplyScalar(0.28);
+    const cols = this.world.veg?.colliders;
+    if (!cols) return;
+    const S = specOf(car);
+    const r = car.spec ? S.collideR : S.halfW * 0.95;
+    const reach = Math.max(0, S.halfL - r);
+    const offs = reach > 0.05 ? [-reach, 0, reach] : [0];
+    let pushX = 0, pushZ = 0;
+    for (let pass = 0; pass < 2; pass++) {
+      const fx = Math.sin(car.yaw), fz = Math.cos(car.yaw);
+      let moved = false;
+      for (const off of offs) {
+        const c = { x: car.x + fx * off, y: car.y, z: car.z + fz * off };
+        const x0 = c.x, z0 = c.z;
+        cols.resolveXZ(c, r, car.y + 0.15, car.y + 1.25);
+        const dx = c.x - x0, dz = c.z - z0;
+        if (dx * dx + dz * dz < 1e-8) continue;
+        car.x += dx; car.z += dz;
+        pushX += dx; pushZ += dz;
+        moved = true;
+      }
+      if (!moved) break;
     }
+    const len = Math.hypot(pushX, pushZ);
+    if (len < 1e-4) return;
+    const nx = pushX / len, nz = pushZ / len;
+    const fx = Math.sin(car.yaw), fz = Math.cos(car.yaw);
+    const into = -(fx * nx + fz * nz) * Math.sign(car.speed || 1); // 1 = head-on
+    if (into > 0) {
+      const hard = Math.abs(car.speed) * into;
+      car.speed *= Math.max(0.15, 1 - into * 0.9);
+      if (hard > 4 && car.driver?.isPlayer) {
+        this.world.audio?.impact?.('metal', 0);
+        this.world.player?.kick?.(0, Math.min(3, hard * 0.2));
+      }
+    }
+    car.vel.set(fx * car.speed, 0, fz * car.speed);
   }
 
   // Vehicles are solid to each other: push out of any overlap and lose the speed
