@@ -21,7 +21,7 @@ the whole district, so frustum culling never skips any of it, and the shadow pas
 - [x] 6. Hit boxes per bone (capsules for head, chest, pelvis, upper/lower arms and legs) instead
       of one body cylinder + head sphere: arms held out, crouching and seated targets hit where
       they are; limb shots do less damage.
-- [ ] 7. Bullet holes / impact decals on walls and cars (pooled, fading).
+- [x] 7. Bullet holes / impact decals on walls and cars (pooled, fading).
 - [ ] 8. Rifle rounds travel (fast projectile with drop) so long shots lead the target a little.
 - [ ] 9. Recoil pattern and first-shot accuracy; crosshair shows the real spread.
 

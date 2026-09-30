@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { BulletHoles } from './bulletHoles.js';
 import { BloodDecals } from './blood.js';
 
 const particleVert = /* glsl */ `
@@ -202,6 +203,7 @@ export class Effects {
     this.blood = new ParticlePool(1500, false, uniforms, { BLOOD: 1 });
     pipeline.fxScene.add(this.add.mesh, this.alpha.mesh, this.blood.mesh);
     this.decals = new BloodDecals(pipeline.scene, terrain);
+    this.holes = new BulletHoles(pipeline.scene);
     this.blood.ground = (x, z) => terrain.heightAt(x, z);
     this.blood.onLand = (p, h) => {
       if (h > 0.02 && Math.random() < 0.5) this.decals.drop(p.x, h, p.z, Math.min(0.22, Math.max(0.035, p.size * 9)));
@@ -464,6 +466,11 @@ export class Effects {
       p: pos.clone(), v, rot: new THREE.Vector3(Math.random() * 6, Math.random() * 6, Math.random() * 6),
       w: new THREE.Vector3().randomDirection().multiplyScalar(25), age: 0, rest: false, bounces: 0,
     });
+  }
+
+  /** A hole where a round struck a wall, the ground or a prop (not a moving car or a body). */
+  bulletHole(at, normal, surface) {
+    this.holes.add(at, normal, surface);
   }
 
   update(dt) {

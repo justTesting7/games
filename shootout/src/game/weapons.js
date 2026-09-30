@@ -318,6 +318,7 @@ export class Weapons {
       this.sprayBehind(end, dir, hit.fighter, (hit.head ? 1 : 0.6) * (rifle ? 1.25 : 1));
     } else {
       this.fx.impact(end, hit.normal, hit.surface, dir);
+      if (!hit.car && !hit.drone) this.fx.bulletHole?.(end, hit.normal, hit.surface);
       this.audio.impact(hit.surface, hitDist);
       if (hit.surface !== 'water') this.bounceOff(shooter, end, dir, hit);
     }
