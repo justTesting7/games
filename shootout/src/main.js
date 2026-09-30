@@ -162,10 +162,8 @@ addEventListener('wheel', (e) => {
 }, { passive: true });
 addEventListener('blur', () => { for (const k in input) input[k] = false; });
 
-const savedMap = localStorage.getItem('relic-map') || 'island';
-const mapId = mode === 'multi' && getMap(savedMap).soloOnly ? 'island' : savedMap;
+const mapId = localStorage.getItem('relic-map') || 'island';
 const mapDef = getMap(mapId);
-if (mode === 'multi') $('map').querySelector('option[data-solo]')?.remove();
 $('map').value = mapId;
 $('maptitle').textContent = mapDef.label;
 $('mapsub').textContent = mapDef.subtitle;
@@ -404,7 +402,7 @@ async function init() {
   const you = byId(selection.player);
   session = new Session({
     net, world, combat, weapons, player, rivals, charAssets,
-    scene: pipeline.scene, spawn, facing, mapId: mapDef.id,
+    scene: pipeline.scene, spawn, facing, mapId: mapDef.id, slotSpawn: studio?.slotSpawn,
     onRoster: () => rebuildTags(),
     onRound: (msg) => applyNetRound(msg),
     onSettings: (s) => {

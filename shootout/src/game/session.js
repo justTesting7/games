@@ -138,7 +138,7 @@ class Remote {
 }
 
 export class Session {
-  constructor({ net, world, combat, weapons, player, rivals, charAssets, scene, spawn, facing, mapId, onRoster, onRound, onSettings, onHost }) {
+  constructor({ net, world, combat, weapons, player, rivals, charAssets, scene, spawn, facing, mapId, slotSpawn, onRoster, onRound, onSettings, onHost }) {
     this.net = net;
     this.world = world;
     this.combat = combat;
@@ -150,6 +150,7 @@ export class Session {
     this.spawn = spawn;
     this.facing = facing;
     this.mapId = mapId;
+    this.slotSpawn = slotSpawn;
     this.onRoster = onRoster;
     this.onRound = onRound;
     this.onSettings = onSettings;
@@ -314,7 +315,7 @@ export class Session {
       const s = standSpawn(slot);
       this.player.spawn(s.x, s.z, s.yaw);
     } else if (getMap(this.mapId).cityFolder) {
-      const s = studioSlotSpawn(this.spawn, slot);
+      const s = this.slotSpawn?.(slot) || studioSlotSpawn(this.spawn, slot);
       this.player.spawn(s.x, s.z, s.yaw);
     } else {
       const ang = slot * 2.15;

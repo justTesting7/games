@@ -75,7 +75,15 @@ if (!room.includes("t === 'runover'")) throw new Error('room must accept run-ove
 if (!room.includes("t === 'car'")) throw new Error('room must sync enter/leave/drive');
 if (!room.includes("act === 'glass'")) throw new Error('room must sync broken glass');
 if (!room.includes("'manhattan'")) throw new Error('room must accept the midtown map');
-if (!room.includes('const FLEET = 64')) throw new Error('room fleet must cover midtown cars');
+const fleet = Number(/const FLEET = (\d+)/.exec(room)?.[1]);
+const { readFileSync } = await import('node:fs');
+let needed = manhattanCarSpots().length;
+for (const map of ['dizengoff-center', 'dizengoff-square', 'bloomfield']) {
+  const nav = JSON.parse(readFileSync(new URL(`../public/assets/maps/${map}/nav.json`, import.meta.url), 'utf8'));
+  needed = Math.max(needed, (nav.cars?.length || 0) + (nav.scooters?.length || 0));
+}
+if (!(fleet >= needed)) throw new Error(`room fleet (${fleet}) must cover the most cars and scooters on any map (${needed})`);
+for (const id of ['dizengoff', 'square', 'bloomfield']) if (!room.includes(`'${id}'`)) throw new Error(`room must accept the ${id} map`);
 
 const maps = await import('node:fs').then((fs) => fs.readFileSync(new URL('../src/world/maps.js', import.meta.url), 'utf8'));
 if (!maps.includes("id: 'manhattan'")) throw new Error('maps must expose Midtown');

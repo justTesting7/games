@@ -97,7 +97,6 @@ export const MAPS = {
     timeOfDay: 0.3,
     fogDensity: 0.0008,
     radarRange: 100,
-    soloOnly: true,
   },
   square: {
     id: 'square',
@@ -118,7 +117,6 @@ export const MAPS = {
     timeOfDay: 0.3,
     fogDensity: 0.0008,
     radarRange: 100,
-    soloOnly: true,
   },
   bloomfield: {
     id: 'bloomfield',
@@ -139,7 +137,6 @@ export const MAPS = {
     timeOfDay: 0.3,
     fogDensity: 0.0008,
     radarRange: 100,
-    soloOnly: true,
   },
 };
 

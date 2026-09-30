@@ -18,3 +18,33 @@ export function pickRivalSpots(spots, origin, count, rand = Math.random) {
   }
   return null;
 }
+
+/**
+ * Multiplayer start positions, the same on every client: the open spot nearest the middle
+ * of the baked spots first, then each next one the nearest spot that is 110 m or more from all
+ * chosen so far (the farthest one once the map is crowded). Players
+ * take them by slot, so a full room starts spread across the whole map.
+ */
+export function slotSpawns(spots, count = 16) {
+  if (!spots.length) return [];
+  const sorted = spots.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  let cx = 0, cz = 0;
+  for (const [x, z] of sorted) { cx += x; cz += z; }
+  cx /= sorted.length; cz /= sorted.length;
+  let first = sorted[0], bd = Infinity;
+  for (const p of sorted) { const d = Math.hypot(p[0] - cx, p[1] - cz); if (d < bd) { bd = d; first = p; } }
+  const chosen = [first];
+  const minD = sorted.map((p) => Math.hypot(p[0] - first[0], p[1] - first[1]));
+  const TARGET = 110; // far enough to start with a hunt, not so far that two players never meet
+  while (chosen.length < Math.min(count, sorted.length)) {
+    let bi = -1;
+    for (let i = 0; i < sorted.length; i++) {
+      if (minD[i] >= TARGET && (bi < 0 || minD[i] < minD[bi])) bi = i; // the nearest spot that is far enough
+    }
+    if (bi < 0) { bi = 0; for (let i = 1; i < sorted.length; i++) if (minD[i] > minD[bi]) bi = i; } // crowded: farthest
+    const p = sorted[bi];
+    chosen.push(p);
+    for (let i = 0; i < sorted.length; i++) minD[i] = Math.min(minD[i], Math.hypot(sorted[i][0] - p[0], sorted[i][1] - p[1]));
+  }
+  return chosen.map(([x, z]) => ({ x, z, yaw: Math.atan2(cx - x, cz - z) }));
+}

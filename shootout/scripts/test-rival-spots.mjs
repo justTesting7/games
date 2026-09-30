@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { pickRivalSpots } from '../src/world/rivalSpots.js';
+import { pickRivalSpots, slotSpawns } from '../src/world/rivalSpots.js';
 
 const fail = (m) => { console.error('FAIL:', m); process.exit(1); };
 let seed = 7;
@@ -28,5 +28,20 @@ for (const map of ['dizengoff-center', 'dizengoff-square', 'bloomfield']) {
   }
   const spots = pickRivalSpots(nav.spots, origin, 3, rand);
   console.log(map, 'rivals start', spots.map((s) => Math.hypot(s.x - origin.x, s.z - origin.z).toFixed(0)).join(', '), 'm from the player');
+}
+// multiplayer slots: deterministic, spread over the map, every spot inside the open area
+for (const map of ['dizengoff-center', 'dizengoff-square', 'bloomfield']) {
+  const nav = JSON.parse(readFileSync(new URL(`../public/assets/maps/${map}/nav.json`, import.meta.url), 'utf8'));
+  const a = slotSpawns(nav.spots, 16), b = slotSpawns(nav.spots.slice().reverse(), 16);
+  if (a.length !== 16) fail(`${map}: expected 16 slot spawns, got ${a.length}`);
+  if (JSON.stringify(a) !== JSON.stringify(b)) fail(`${map}: slot spawns must not depend on the order of the spots`);
+  const pairs = [];
+  for (const [i, p] of a.entries()) for (const q of a.slice(i + 1)) pairs.push(Math.hypot(p.x - q.x, p.z - q.z));
+  const closest = Math.min(...pairs);
+  if (closest < 10) fail(`${map}: two slots start only ${closest.toFixed(0)} m apart`);
+  const two = Math.hypot(a[0].x - a[1].x, a[0].z - a[1].z);
+  if (two < 100 || two > 130) fail(`${map}: the first two players start ${two.toFixed(0)} m apart, wanted about 110`);
+  for (const p of a) if (!nav.spots.some(([x, z]) => x === p.x && z === p.z)) fail(`${map}: slot spawn is not a baked open spot`);
+  console.log(map, 'slot spawns: first two', two.toFixed(0), 'm apart, closest pair', closest.toFixed(0), 'm');
 }
 console.log('rival spot tests passed');
