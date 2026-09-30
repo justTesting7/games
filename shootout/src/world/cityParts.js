@@ -4,40 +4,44 @@
 // scripts/align-city.mjs, from the skyline towers both far.glb files share).
 //
 // Where sets overlap they contain the same buildings and streets. Every point is
-// owned by the set whose ground tile centre is nearest, so the seams run down the
-// middle of the overlaps and each building is kept from one file only. The runtime
+// owned by the set it lies deepest inside, so the seams run down the middle of the
+// overlaps and each building is kept from one file only. The runtime
 // loader (loadCity.js) and the nav bake use the same rule.
 
 export const CITY_PARTS = {
   'tel-aviv': {
     far: 'dizengoff-square', // skyline ring; its buildings over the other sets are removed
+    // half = half the side of the set's square ground tile (from each export's ground bounds)
     sets: [
-      { folder: 'dizengoff-square', offset: [0, 0, 0] },
-      { folder: 'dizengoff-center', offset: [97.0, -1.01, 275.22] },
-      { folder: 'haneviim', offset: [334.04, 7.12, 222.35] },
+      { folder: 'dizengoff-square', offset: [0, 0, 0], half: 180 },
+      { folder: 'dizengoff-center', offset: [97.0, -1.01, 275.22], half: 200 },
+      { folder: 'haneviim', offset: [334.04, 7.12, 222.35], half: 200 },
+      { folder: 'masrik', offset: [419.12, 7.13, -57.9], half: 220 },
     ],
-    half: 180, // every export's ground tile is 360 m square around its origin
     spill: 35, // buildings reach this far past the tile edge
   },
 };
 
 export const cityPartsOf = (folder) => CITY_PARTS[folder] || null;
 
-/** Index of the set that owns world point (x, z): nearest tile centre, square distance. */
+/**
+ * Index of the set that owns world point (x, z): the one with the most of its own tile
+ * left around the point (tile half-size minus square distance to its centre). Seams
+ * then sit where two sets are equally far from their edges.
+ */
 export function ownerOf(def, x, z) {
-  let best = 0, bd = Infinity;
-  def.sets.forEach(({ offset: [ox, , oz] }, i) => {
-    const d = Math.max(Math.abs(x - ox), Math.abs(z - oz));
-    if (d < bd - 1e-6) { bd = d; best = i; }
+  let best = 0, bm = -Infinity;
+  def.sets.forEach(({ offset: [ox, , oz], half }, i) => {
+    const m = half - Math.max(Math.abs(x - ox), Math.abs(z - oz));
+    if (m > bm + 1e-6) { bm = m; best = i; }
   });
   return best;
 }
 
 /** True when a skyline point lies over one of the detailed sets (it would double it). */
 export function underSets(def, x, z) {
-  const r = def.half + def.spill;
-  return def.sets.some(({ folder, offset: [ox, , oz] }) => folder !== def.far
-    && Math.abs(x - ox) < r && Math.abs(z - oz) < r);
+  return def.sets.some(({ folder, offset: [ox, , oz], half }) => folder !== def.far
+    && Math.abs(x - ox) < half + def.spill && Math.abs(z - oz) < half + def.spill);
 }
 
 // Street surfaces are big triangles (whole road strips): cut by centre they would leave
