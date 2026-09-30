@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { CITY, cityCell } from '../world/cityLayout.js';
 import { HALF_WORLD } from '../world/constants.js';
 import { LAB } from '../world/lab.js';
+import { CarBatch } from './carBatch.js';
 
 export const CAR = {
   count: 8,
@@ -809,6 +810,8 @@ export class Cars {
       this.group.add(car.mesh);
       this.list.push(car);
     });
+    // city cars draw as one batch per material (see carBatch.js)
+    if (this.list.length) this.batch = new CarBatch(this.group).build(this.list);
     return this.list;
   }
 
@@ -850,10 +853,14 @@ export class Cars {
       this.group.add(car.mesh);
       this.list.push(car);
     });
+    // city cars draw as one batch per material (see carBatch.js)
+    if (this.list.length) this.batch = new CarBatch(this.group).build(this.list);
     return this.list;
   }
 
   clear() {
+    this.batch?.dispose();
+    this.batch = null;
     for (const car of this.list) {
       car.driver = null;
       car.mesh.removeFromParent();
@@ -1188,6 +1195,7 @@ export class Cars {
       car.tails.emissiveIntensity = car.speed < -0.4 || (car.driver?.isPlayer && input?.back) ? 1.2 : 0.4;
     }
 
+    this.batch?.sync();
     if (player) this.updatePrompt(player);
     if (opts.squash) this.squash(opts.squash);
     this.dust(dt);
