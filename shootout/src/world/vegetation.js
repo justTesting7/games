@@ -272,12 +272,12 @@ export class Colliders {
     }
   }
 
-  addBox({ x0, x1, z0, z1, y0, y1, type = 'concrete' }) {
+  addBox({ x0, x1, z0, z1, y0, y1, type = 'concrete', noRay = false }) {
     const cx = (x0 + x1) * 0.5, cz = (z0 + z1) * 0.5;
     const hx = (x1 - x0) * 0.5, hz = (z1 - z0) * 0.5;
     this.add({
       box: true, x0, x1, z0, z1, y0, y1, x: cx, z: cz,
-      r: Math.hypot(hx, hz), type,
+      r: Math.hypot(hx, hz), type, noRay,
     });
   }
 
@@ -338,6 +338,7 @@ export class Colliders {
       const x = o.x + d.x * t, z = o.z + d.z * t;
       this.query(x, z, step, tmp);
       for (const c of tmp) {
+        if (c.noRay) continue;
         const hit = c.box ? rayBox(o, d, c, maxDist) : rayCylinder(o, d, c, maxDist);
         if (hit && (!best || hit.t < best.t)) best = hit;
       }

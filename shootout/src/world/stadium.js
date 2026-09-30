@@ -274,5 +274,5 @@ export function buildStadium(THREE, root, p, floorY) {
   }
   lights.instanceMatrix.needsUpdate = true;
   group.add(lights);
-  return { group };
+  return { group, doors };
 }

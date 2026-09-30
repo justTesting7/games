@@ -94,6 +94,8 @@ world.raycast = (o, d, maxDist, ignore) => {
     const tw = -o.y / d.y;
     if (tw < (best ? best.t : maxDist)) best = { t: tw, normal: new THREE.Vector3(0, 1, 0), surface: 'water' };
   }
+  const sh = world.shots?.raycast(o, d, best ? best.t : maxDist);
+  if (sh) best = sh;
   const c = world.veg.colliders.raycast(o, d, best ? best.t : maxDist);
   if (c && (!best || c.t < best.t)) best = { t: c.t, normal: c.normal, surface: c.surface || c.collider.type, collider: c.collider };
   const pr = world.props.raycast(o, d, best ? best.t : maxDist);
@@ -373,6 +375,7 @@ async function init() {
   }
   if (studio?.takeCars) cars.spawnCustom(studio.takeCars());
   if (studio?.takeScooters) cars.addScooters(studio.takeScooters());
+  if (studio?.buildShots) world.shots = studio.buildShots();
   if (arena && data.layout) {
     arena.build(data.layout);
     pipeline.scene.add(arena.group);

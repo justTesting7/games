@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "shootout",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["vite", "--config", "shootout/vite.config.js", "--port", "5173"],
+      "port": 5173
+    }
+  ]
+}

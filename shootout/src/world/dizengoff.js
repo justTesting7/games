@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { loadCity } from './loadCity.js';
 import { extractCityCars, removeInBoxes } from './cityCars.js';
-import { buildStadium, stadiumSlotSpawns } from './stadium.js';
+import { buildStadium, stadiumSlotSpawns, STADIUM } from './stadium.js';
+import { buildShotMesh } from './shotMesh.js';
 import { buildPitchProps } from './pitchProps.js';
 import { pickRivalSpots, slotSpawns } from './rivalSpots.js';
 
@@ -31,8 +32,12 @@ export function makeNavHeight(nav) {
   };
 }
 
-/** Wall and obstacle rectangles: tall ones stop bullets at any height, low ones only near the ground. */
-export function addNavColliders(nav, colliders, heightAt) {
+/**
+ * Wall and obstacle rectangles for walking. With a shot mesh (noRay) bullets and sight
+ * lines trace the real triangles instead; otherwise tall boxes stop bullets at any
+ * height and low ones only near the ground.
+ */
+export function addNavColliders(nav, colliders, heightAt, noRay = false) {
   for (const [x0, z0, x1, z1, tall] of nav.boxes) {
     const g = heightAt((x0 + x1) * 0.5, (z0 + z1) * 0.5);
     colliders.addBox({
@@ -40,6 +45,7 @@ export function addNavColliders(nav, colliders, heightAt) {
       y0: g - 4,
       y1: tall ? g + 200 : g + 2.4,
       type: tall ? 'concrete' : 'wood',
+      noRay,
     });
   }
   return nav.boxes.length;
@@ -60,7 +66,8 @@ export async function loadDizengoff(renderer, folder = 'dizengoff-center', { sta
     if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; }
   });
   city.far.traverse((o) => { if (o.isMesh) o.frustumCulled = false; });
-  if (nav.stadium) group.add(buildStadium(THREE, city.set, nav.stadium, nav.stadium.floorY).group);
+  const stadium = nav.stadium ? buildStadium(THREE, city.set, nav.stadium, nav.stadium.floorY) : null;
+  if (stadium) group.add(stadium.group);
   const pitchProps = nav.stadium?.pitch ? buildPitchProps(nav.stadium.pitch) : null;
   if (pitchProps) group.add(pitchProps.group);
   const heightAt = makeNavHeight(nav);
@@ -86,8 +93,12 @@ export async function loadDizengoff(renderer, folder = 'dizengoff-center', { sta
     cameraFar: FAR_DISTANCE,
     addColliders: (colliders) => {
       for (const c of pitchProps?.colliders || []) colliders.add(c);
-      return addNavColliders(nav, colliders, heightAt);
+      return addNavColliders(nav, colliders, heightAt, true);
     },
+    /** Exact bullet / sight-line geometry; call after takeCars and takeScooters. */
+    buildShots: () => buildShotMesh([city.set, ...(stadium ? [stadium.group] : [])], {
+      doors: stadium?.doors || [], doorMesh: STADIUM.glassMesh,
+    }),
     /** Cuts the parked cars out of the map meshes, once, as movable groups. */
     takeCars: () => extractCityCars(city.set, nav.cars || []),
     /** Replaces the parked scooters with rideable ones: removes the originals and returns their spots. */
