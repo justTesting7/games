@@ -18,7 +18,7 @@ the whole district, so frustum culling never skips any of it, and the shadow pas
 - [ ] 5. Distance fade / LOD for rivals' expensive per-frame work (IK, braid) when far away.
 
 ## Shooting accuracy
-- [ ] 6. Hit boxes per bone (capsules for head, chest, pelvis, upper/lower arms and legs) instead
+- [x] 6. Hit boxes per bone (capsules for head, chest, pelvis, upper/lower arms and legs) instead
       of one body cylinder + head sphere: arms held out, crouching and seated targets hit where
       they are; limb shots do less damage.
 - [ ] 7. Bullet holes / impact decals on walls and cars (pooled, fading).

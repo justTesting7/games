@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { LIMB_DAMAGE } from './combat.js';
 import { hasSea } from './swim.js';
 import { Character } from './character.js';
 import { SuicideDrone } from './drone.js';
@@ -58,6 +59,13 @@ export class Loadout {
 }
 
 const tmp = new THREE.Vector3();
+
+// Arms and legs take less than the torso. Networked victims keep the room's body damage
+// (the server scores those hits and only hears head or body).
+function shotDamage(def, hit) {
+  if (hit.head) return def.head;
+  return hit.limb && !hit.fighter?.net ? Math.round(def.body * LIMB_DAMAGE) : def.body;
+}
 
 export class Weapons {
   constructor(world, player, character, fx, audio, combat) {
@@ -328,10 +336,10 @@ export class Weapons {
       return hit;
     }
     if (hit.fighter?.net) {
-      this.combat.damage(hit.fighter, shooter, hit.head ? def.head : def.body, dir, { head: hit.head, weapon: def.key, at: end });
+      this.combat.damage(hit.fighter, shooter, shotDamage(def, hit), dir, { head: hit.head, limb: hit.limb, weapon: def.key, at: end });
       return hit;
     }
-    if (hit.fighter) this.combat.damage(hit.fighter, shooter, hit.head ? def.head : def.body, dir, { head: hit.head, weapon: def.key, at: end });
+    if (hit.fighter) this.combat.damage(hit.fighter, shooter, shotDamage(def, hit), dir, { head: hit.head, limb: hit.limb, weapon: def.key, at: end });
     else if (hit.body || hit.target) hit.scored = this.world.props.hit(hit, end, dir, def.force);
     return hit;
   }

@@ -7,6 +7,51 @@ const HEAD_R = 0.14;
 const tmpA = new THREE.Vector3();
 const tmpB = new THREE.Vector3();
 
+// [from bone, to bone, radius m, zone]
+const CAPSULES = [
+  ['Hips', 'Spine2', 0.17, 'body'],
+  ['Spine2', 'Neck', 0.17, 'body'],
+  ['LeftArm', 'LeftForeArm', 0.055, 'limb'],
+  ['LeftForeArm', 'LeftHand', 0.045, 'limb'],
+  ['RightArm', 'RightForeArm', 0.055, 'limb'],
+  ['RightForeArm', 'RightHand', 0.045, 'limb'],
+  ['LeftUpLeg', 'LeftLeg', 0.085, 'limb'],
+  ['LeftLeg', 'LeftFoot', 0.06, 'limb'],
+  ['RightUpLeg', 'RightLeg', 0.085, 'limb'],
+  ['RightLeg', 'RightFoot', 0.06, 'limb'],
+];
+export const LIMB_DAMAGE = 0.65;
+
+/** Distance along the unit ray o + t d to capsule a-b of radius r, or null (Inigo Quilez). */
+export function rayCapsule(o, d, a, b, r) {
+  const bax = b.x - a.x, bay = b.y - a.y, baz = b.z - a.z;
+  const oax = o.x - a.x, oay = o.y - a.y, oaz = o.z - a.z;
+  const baba = bax * bax + bay * bay + baz * baz;
+  const bard = bax * d.x + bay * d.y + baz * d.z;
+  const baoa = bax * oax + bay * oay + baz * oaz;
+  const rdoa = d.x * oax + d.y * oay + d.z * oaz;
+  const oaoa = oax * oax + oay * oay + oaz * oaz;
+  const A = baba - bard * bard;
+  let B = baba * rdoa - baoa * bard;
+  let C = baba * oaoa - baoa * baoa - r * r * baba;
+  let h = B * B - A * C;
+  if (h >= 0 && A > 1e-12) {
+    const t = (-B - Math.sqrt(h)) / A;
+    const y = baoa + t * bard;
+    if (y > 0 && y < baba) return t;
+  }
+  // the rounded ends
+  let best = null;
+  for (const end of [0, 1]) {
+    const ex = oax - bax * end, ey = oay - bay * end, ez = oaz - baz * end;
+    B = d.x * ex + d.y * ey + d.z * ez;
+    C = ex * ex + ey * ey + ez * ez - r * r;
+    h = B * B - C;
+    if (h > 0) { const t = -B - Math.sqrt(h); if (t > 0 && (best === null || t < best)) best = t; }
+  }
+  return best;
+}
+
 // Everyone who can shoot and be shot: the player and the rivals.
 export class Combat {
   constructor() {
@@ -48,18 +93,44 @@ export class Combat {
     return out.copy(f.pos).setY(f.pos.y + 1.2);
   }
 
-  // Bullets hit a vertical cylinder for the body and a sphere for the head.
+  // Bone capsules for each fighter, refreshed once per combat tick (the skeleton has
+  // been posed by then): torso, arms and legs where they actually are, so arms held out
+  // to aim, a kneeling player or a seated driver are hit where they are drawn.
+  hitShape(f) {
+    if (f.shapeT === this.time && f.shape) return f.shape;
+    const B = f.character?.bones;
+    const shape = f.shape || (f.shape = CAPSULES.map(() => ({ a: new THREE.Vector3(), b: new THREE.Vector3() })));
+    f.shapeT = this.time;
+    if (!B?.Hips) { shape.valid = false; return shape; }
+    CAPSULES.forEach(([from, to], i) => {
+      const bf = B[from], bt = B[to];
+      if (!bf || !bt) { shape[i].r = 0; return; }
+      bf.getWorldPosition(shape[i].a);
+      bt.getWorldPosition(shape[i].b);
+      shape[i].r = CAPSULES[i][2];
+    });
+    shape.valid = true;
+    return shape;
+  }
+
+  // Bullets hit the bone capsules, or the head sphere; limb hits are marked.
   raycast(o, d, maxDist, ignore) {
     let best = null;
     for (const f of this.fighters) {
       if (!f.alive || f === ignore) continue;
       const ox = o.x - f.pos.x, oz = o.z - f.pos.z;
       const along = -(ox * d.x + oz * d.z);
-      if (along < -1 || along > maxDist + 1) continue;
+      if (along < -1.5 || along > maxDist + 1.5) continue;
+      // cheap reject: the ray must pass within reach of the body's vertical axis
+      const a2 = d.x * d.x + d.z * d.z;
+      if (a2 > 1e-8) {
+        const tc = Math.max(0, -(ox * d.x + oz * d.z) / a2);
+        const cx = ox + d.x * tc, cz = oz + d.z * tc;
+        if (cx * cx + cz * cz > 1.4 * 1.4) continue;
+      }
       const hc = tmpA.subVectors(o, f.head);
       const hb = hc.dot(d);
-      const hcc = hc.lengthSq() - HEAD_R * HEAD_R;
-      const hdisc = hb * hb - hcc;
+      const hdisc = hb * hb - (hc.lengthSq() - HEAD_R * HEAD_R);
       if (hdisc > 0) {
         const t = -hb - Math.sqrt(hdisc);
         if (t > 0 && t < (best ? best.t : maxDist)) {
@@ -67,18 +138,20 @@ export class Combat {
           best = { t, normal: p.sub(f.head).normalize().clone(), surface: 'flesh', fighter: f, head: true };
         }
       }
-      const a = d.x * d.x + d.z * d.z;
-      if (a < 1e-8) continue;
-      const b = 2 * (ox * d.x + oz * d.z);
-      const c = ox * ox + oz * oz - BODY_R * BODY_R;
-      const disc = b * b - 4 * a * c;
-      if (disc < 0) continue;
-      const t = (-b - Math.sqrt(disc)) / (2 * a);
-      if (t <= 0 || t >= (best ? best.t : maxDist)) continue;
-      const y = o.y + d.y * t - f.pos.y;
-      if (y < 0.05 || y > f.head.y - f.pos.y - HEAD_R * 0.6) continue;
-      const normal = new THREE.Vector3(ox + d.x * t, 0, oz + d.z * t).normalize();
-      best = { t, normal, surface: 'flesh', fighter: f, head: false };
+      const shape = this.hitShape(f);
+      if (!shape.valid) continue;
+      for (let i = 0; i < shape.length; i++) {
+        const c = shape[i];
+        if (!c.r) continue;
+        const t = rayCapsule(o, d, c.a, c.b, c.r);
+        if (t === null || t <= 0 || t >= (best ? best.t : maxDist)) continue;
+        const p = new THREE.Vector3().copy(o).addScaledVector(d, t);
+        // normal: away from the capsule's axis
+        const ab = tmpA.subVectors(c.b, c.a);
+        const k = THREE.MathUtils.clamp(tmpB.subVectors(p, c.a).dot(ab) / Math.max(ab.lengthSq(), 1e-8), 0, 1);
+        const normal = p.clone().sub(tmpB.copy(c.a).addScaledVector(ab, k)).normalize();
+        best = { t, normal, surface: 'flesh', fighter: f, head: false, limb: CAPSULES[i][3] === 'limb', part: CAPSULES[i][0] };
+      }
     }
     return best;
   }
