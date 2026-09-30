@@ -12,7 +12,7 @@ import { Arena } from './world/arena.js';
 import { arenaHeightAt, standSpawn } from './world/arenaLayout.js';
 import { studioRivalSpots, blockedAt } from './world/glbMap.js';
 import { loadDizengoff } from './world/dizengoff.js';
-import { buildLab } from './world/lab.js';
+import { buildLab, LAB } from './world/lab.js';
 import { setSea, hasSea } from './game/swim.js';
 import { Fish } from './world/fish.js';
 import { Character } from './game/character.js';
@@ -513,6 +513,7 @@ async function init() {
       const spots = studio.rivalSpots?.(spawn, rivals.length)
         || studioRivalSpots(spawn, rivals.length, (x, z) => blockedAt(veg.colliders, x, z));
       rivals.forEach((r, i) => r.spawn(spots[i].x, spots[i].z, spots[i].yaw));
+      if (mapDef.lab && rivals[0]) rivals[0].sitIn(cars.list[LAB.driverCar]);
       return;
     }
     if (mapDef.id === 'city' || mapDef.id === 'manhattan') {

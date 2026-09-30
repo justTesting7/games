@@ -312,8 +312,18 @@ export function driverPose(car) {
   if (S.kind === 'scooter') return null;
   const o = localOffset(car.x, car.z, car);
   const seat = seatOf(car);
+  if (car.cockpit) {
+    // the low modelled cabin: eye near cockpitEye, hands on its wheel rig
+    const wx = S.seatX, wz = 0.14;
+    return {
+      hipY: car.y + 0.28,
+      thigh: 1.5, knee: -0.4, // legs out long, sports-car style
+      wheel: new THREE.Vector3(car.x + o.rightX * wx + o.fwdX * wz, car.y + 0.62, car.z + o.rightZ * wx + o.fwdZ * wz),
+    };
+  }
   return {
     hipY: car.y + 0.5,
+    thigh: 1.45, knee: -1.3,
     wheel: new THREE.Vector3(seat.x + o.fwdX * 0.46, car.y + 0.86, seat.z + o.fwdZ * 0.46),
   };
 }
@@ -635,9 +645,14 @@ function makeCarMesh(color, variant = 0) {
 
   const panes = {};
   const addPane = (name, geoName, make, x, y, z, rx = 0) => {
-    const glass = new THREE.MeshStandardMaterial({
-      color: 0x1c242c, metalness: 0.88, roughness: 0.06, transparent: true, opacity: 0.42, depthWrite: false,
+    const glass = new THREE.MeshPhysicalMaterial({
+      color: 0x1c242c, metalness: 0, roughness: 0.04, ior: 1.52, envMapIntensity: 1.6,
+      transparent: true, opacity: 0.42, depthWrite: false, side: THREE.DoubleSide,
     });
+    // keep the scene depth the HDR target stores in alpha (engine/patch.js)
+    glass.blending = THREE.CustomBlending;
+    glass.blendSrcAlpha = THREE.ZeroFactor;
+    glass.blendDstAlpha = THREE.OneFactor;
     const node = part(geoName, make, glass, x, y, z, rx);
     node.name = `glass-${name}`;
     node.userData.pane = name;

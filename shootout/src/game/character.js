@@ -1157,9 +1157,10 @@ export class Character {
     const hips = B.Hips.getWorldPosition(new THREE.Vector3());
     B.Hips.position.y -= hips.y - seat.hipY;
     B.Hips.updateMatrixWorld(true);
-    turn(B.LeftUpLeg, right, 1.45); turn(B.LeftUpLeg, fwd, -0.07);
-    turn(B.RightUpLeg, right, 1.45); turn(B.RightUpLeg, fwd, 0.07);
-    turn(B.LeftLeg, right, -1.3); turn(B.RightLeg, right, -1.3);
+    const thigh = seat.thigh ?? 1.45, knee = seat.knee ?? -1.3;
+    turn(B.LeftUpLeg, right, thigh); turn(B.LeftUpLeg, fwd, -0.07);
+    turn(B.RightUpLeg, right, thigh); turn(B.RightUpLeg, fwd, 0.07);
+    turn(B.LeftLeg, right, knee); turn(B.RightLeg, right, knee);
     turn(B.LeftFoot, right, 0.25); turn(B.RightFoot, right, 0.25);
     turn(B.Spine, right, 0.1);
     if (!seat.wheel || !B.LeftArm || !B.RightArm) return;

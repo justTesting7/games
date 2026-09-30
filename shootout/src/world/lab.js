@@ -4,14 +4,17 @@ import { buildShotMesh } from './shotMesh.js';
 // A tiny debug range: open it with /shootout/?lab and it drops straight into play.
 // Everything here is a test fixture for physics, shots and animation:
 //   low wall 1 m (shoot over it), tall wall with a doorway, a 0.4 m step, a ramp,
-//   crates, a glass pane, two parked cars, and rival spots behind the tall wall.
+//   crates, a glass pane, three parked cars (a rival sits in the one in front of the
+//   spawn), and rival spots behind the tall wall.
 // Player starts at the origin facing +z.
 
 export const LAB = {
   size: 80,
   spawn: { x: 0, z: 0, yaw: 0 },
   rivals: [{ x: -3, z: 22, yaw: Math.PI }, { x: 4, z: 24, yaw: Math.PI }, { x: 10, z: 20, yaw: Math.PI }, { x: -10, z: 21, yaw: Math.PI }],
-  cars: [{ x: 7, z: -5, yaw: Math.PI / 2 }, { x: -7, z: -5, yaw: 0 }],
+  // the last one is side-on in front of the spawn with a rival sitting in it
+  cars: [{ x: 7, z: -5, yaw: Math.PI / 2 }, { x: -7, z: -5, yaw: 0 }, { x: 1.5, z: 4.6, yaw: -Math.PI / 2 }],
+  driverCar: 2,
   step: { x0: -9, x1: -5, z0: 2, z1: 6, h: 0.4 },
   ramp: { x0: 5, x1: 9, z0: 2, z1: 10, h: 1.6 }, // rises along +z
 };

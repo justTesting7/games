@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { hasSea } from './swim.js';
+import { driverPose } from './cars.js';
 import { Loadout, WEAPONS, Weapons } from './weapons.js';
 import { bowlWaypoint } from '../world/arenaLayout.js';
 
@@ -116,7 +117,48 @@ export class Rival {
     this.character.equipT = 1;
   }
 
+  // Sit in a parked car as its driver: no AI, no guns, a target seen through the glass.
+  sitIn(car) {
+    this.standUp();
+    if (!car || car.driver) return;
+    this.seatedIn = car;
+    car.driver = this.fighter;
+    this.vehicle = car;
+    const ch = this.character;
+    if (ch.rifle) ch.rifle.visible = false;
+    ch.pistols?.forEach((p) => { p.visible = false; });
+  }
+
+  standUp() {
+    const car = this.seatedIn;
+    if (!car) return;
+    if (car.driver === this.fighter) car.driver = null;
+    this.seatedIn = null;
+    this.vehicle = null;
+    const ch = this.character;
+    if (ch.rifle) ch.rifle.visible = true;
+    ch.pistols?.forEach((p) => { p.visible = true; });
+  }
+
+  updateSeated(dt) {
+    const car = this.seatedIn, ch = this.character;
+    this.pos.copy(car.seat);
+    this.vel.set(0, 0, 0);
+    this.yaw = car.yaw;
+    const fwd = new THREE.Vector3(Math.sin(car.yaw), 0, Math.cos(car.yaw));
+    this.lookPoint.copy(this.pos).addScaledVector(fwd, 10).setY(this.pos.y + 1.1);
+    ch.root.position.copy(this.pos);
+    ch.root.rotation.set(0, car.yaw, 0);
+    ch.steer = car.steer || 0;
+    ch.update(dt, {
+      speed: 0, onGround: true, airTime: 0, strafe: false, localDir: this.localDir.set(0, 0, 1),
+      jumpStarted: false, predictedAir: 0, aiming: false, aimPoint: this.lookPoint,
+      lookDir: fwd, seat: driverPose(car),
+    });
+  }
+
   spawn(x, z, yaw) {
+    this.standUp();
     this.pos.set(x, this.world.terrain.heightAt(x, z), z);
     this.vel.set(0, 0, 0);
     this.yaw = yaw;
@@ -1192,6 +1234,8 @@ export class Rival {
 
   update(dt, active) {
     const ch = this.character;
+    if (this.seatedIn && this.fighter.alive) { this.updateSeated(dt); return; }
+    if (this.seatedIn) this.standUp(); // shot in the seat: the body stays where it fell
     if (!this.fighter.alive) {
       ch.root.position.copy(this.pos);
       ch.update(dt, {});
