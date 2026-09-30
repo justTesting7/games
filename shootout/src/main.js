@@ -12,6 +12,7 @@ import { Arena } from './world/arena.js';
 import { arenaHeightAt, standSpawn } from './world/arenaLayout.js';
 import { studioRivalSpots, blockedAt } from './world/glbMap.js';
 import { loadDizengoff } from './world/dizengoff.js';
+import { buildLab } from './world/lab.js';
 import { Fish } from './world/fish.js';
 import { Character } from './game/character.js';
 import { Player } from './game/player.js';
@@ -123,7 +124,10 @@ Character.wallProbe = (o, d, len) => {
   if (car) t = car.t;
   return t;
 };
-const mode = resolveMode();
+// /shootout/?lab opens the debug range and starts playing without the menu.
+const labBoot = new URLSearchParams(location.search).has('lab');
+const labCalm = labBoot && new URLSearchParams(location.search).has('calm'); // rivals stand still as targets
+const mode = labBoot ? 'solo' : resolveMode();
 const roomCode = resolveRoom();
 persistMode(mode);
 const jev = new Jev();
@@ -173,7 +177,7 @@ addEventListener('wheel', (e) => {
 }, { passive: true });
 addEventListener('blur', () => { for (const k in input) input[k] = false; });
 
-const mapId = localStorage.getItem('relic-map') || 'island';
+const mapId = labBoot ? 'lab' : localStorage.getItem('relic-map') || 'island';
 const mapDef = getMap(mapId);
 $('map').value = mapId;
 $('maptitle').textContent = mapDef.label;
@@ -304,7 +308,7 @@ async function init() {
     progress.task('Loading terrain materials', 3, () => loadTerrainTextures(mapDef)),
   ]);
   const garden = mapDef.id === 'garden';
-  const studioMap = !!mapDef.cityFolder;
+  const studioMap = !!mapDef.cityFolder || !!mapDef.lab;
   const urban = mapDef.id === 'city' || mapDef.id === 'manhattan' || garden;
   pipeline.indoor = garden;
   let studioHeight = (x, z) => 0;
@@ -349,7 +353,8 @@ async function init() {
     city ? city.load(progress) : Promise.resolve(),
     arena ? arena.load(progress) : Promise.resolve(),
     studioMap ? progress.task(mapDef.plantLabel, 2, async () => {
-      studio = await loadDizengoff(pipeline.renderer, mapDef.cityFolder, { stadiumStart: !!mapDef.stadiumStart });
+      studio = mapDef.lab ? buildLab()
+        : await loadDizengoff(pipeline.renderer, mapDef.cityFolder, { stadiumStart: !!mapDef.stadiumStart });
       if (studio.cameraFar) { camera.far = studio.cameraFar; camera.updateProjectionMatrix(); }
       studioHeight = studio.heightAt;
       studio.addColliders(veg.colliders);
@@ -382,6 +387,7 @@ async function init() {
     pipeline.scene.add(city.group);
     cars.spawnMap(mapDef.id);
   }
+  if (mapDef.lab) cars.spawnMap('lab');
   if (studio?.takeCars) cars.spawnCustom(studio.takeCars());
   if (studio?.takeScooters) cars.addScooters(studio.takeScooters());
   if (studio?.buildShots) world.shots = studio.buildShots();
@@ -804,6 +810,7 @@ async function init() {
     onLook: (dx, dy) => { if (inPlay) applyLook(dx, dy, true); },
     onMenu: () => setPlay(false),
   });
+  if (labBoot && mode === 'solo') setPlay(true);
   $('play').onclick = async () => {
     if (mode === 'solo' && rosterMenu.changed()) { rosterMenu.save(); location.reload(); return; }
     if (mode === 'multi') {
@@ -905,7 +912,7 @@ async function init() {
           : 'Connecting to the room…';
       banner('Waiting', wait, 'show countdown');
     }
-    if (mode === 'solo') rivals.forEach((r) => r.update(dt, active));
+    if (mode === 'solo') rivals.forEach((r) => r.update(dt, active && !labCalm));
     combat.update(dt);
     props.update(dt);
     fx.update(dt);

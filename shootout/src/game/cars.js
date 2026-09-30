@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { CITY, cityCell } from '../world/cityLayout.js';
 import { HALF_WORLD } from '../world/constants.js';
+import { LAB } from '../world/lab.js';
 
 export const CAR = {
   count: 8,
@@ -155,6 +156,7 @@ export function manhattanCarSpots(limit = 16) {
 export function carSpotsForMap(id) {
   if (id === 'manhattan') return manhattanCarSpots();
   if (id === 'city') return cityCarSpots();
+  if (id === 'lab') return LAB.cars;
   return [];
 }
 

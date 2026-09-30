@@ -139,6 +139,26 @@ export const MAPS = {
     fogDensity: 0.0008,
     radarRange: 100,
   },
+  lab: {
+    id: 'lab',
+    lab: true, // src/world/lab.js; /shootout/?lab boots straight into it
+    label: 'Lab (debug)',
+    subtitle: 'Test range · walls, step, ramp, cars, glass',
+    loadLabel: 'Setting up the lab',
+    plantLabel: 'Building the range',
+    textures: {
+      sand: 'asphalt_01',
+      grass: 'brushed_concrete_2',
+      forest: 'burned_ground_01',
+      rock: 'broken_brick_wall',
+    },
+    grass: false,
+    vegetation: false,
+    waterCamp: false,
+    timeOfDay: 0.3,
+    fogDensity: 0.0008,
+    radarRange: 60,
+  },
 };
 
 export function getMap(id) {
