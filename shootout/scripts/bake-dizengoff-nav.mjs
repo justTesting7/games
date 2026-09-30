@@ -197,34 +197,75 @@ const cars = [];
     }
     return { mx_, mz_, minY, ax, az, lo, hi, lw, hw_ };
   };
-  // Cars parked bumper to bumper cluster into one long row: cut it at the thinnest
-  // points of its vertex profile, near every ~4.6 m, into single cars.
-  const splitRow = (verts) => {
+  // Cars parked bumper to bumper cluster into one long row. Every car has its own glass
+  // cabin (windscreen and rear window under one roof): find the cabins along the row and
+  // cut at the lowest point of the body between two neighbouring ones. A piece still too
+  // long for a car (a van, a truck) stays parked and solid rather than cut in half.
+  const glassTris = carParts.carglass;
+  const splitRow = (tris) => {
+    const verts = tris.flat();
     const m = measure(verts);
     const len = m.hi - m.lo, wid = m.hw_ - m.lw;
     if (len <= 6.8 || wid < 1.4 || wid > 3.1) return [verts];
-    const n = Math.max(2, Math.min(12, Math.round(len / 4.6)));
-    const BIN = 0.1, bins = new Int32Array(Math.ceil(len / BIN) + 1);
-    const proj = verts.map((q) => (q[0] - m.mx_) * m.ax + (q[2] - m.mz_) * m.az - m.lo);
-    for (const a of proj) bins[Math.min(bins.length - 1, Math.floor(a / BIN))]++;
-    const cuts = [];
-    for (let k = 1; k < n; k++) {
-      const target = (k * len) / n;
-      let best = -1, bestC = Infinity;
-      for (let b = Math.floor((target - 1.1) / BIN); b <= Math.ceil((target + 1.1) / BIN); b++) {
-        if (b < 0 || b >= bins.length) continue;
-        const c = bins[b] + Math.abs(b * BIN - target) * 0.5;
-        if (c < bestC) { bestC = c; best = b; }
-      }
-      cuts.push((best + 0.5) * BIN);
+    const BIN = 0.1, nb = Math.ceil(len / BIN) + 1;
+    const along = (q) => (q[0] - m.mx_) * m.ax + (q[2] - m.mz_) * m.az - m.lo;
+    const across = (q) => (q[0] - m.mx_) * m.az - (q[2] - m.mz_) * m.ax;
+    // body cover: over every stretch of the row, the highest surface that spans it
+    const cover = new Float32Array(nb), glass = new Uint8Array(nb);
+    const span = (t, fn) => {
+      const a = t.map(along);
+      const b0 = Math.max(0, Math.floor(Math.min(...a) / BIN)), b1 = Math.min(nb - 1, Math.floor(Math.max(...a) / BIN));
+      for (let b = b0; b <= b1; b++) fn(b);
+    };
+    for (const t of tris) { const y = Math.min(t[0][1], t[1][1], t[2][1]) - m.minY; span(t, (b) => { if (y > cover[b]) cover[b] = y; }); }
+    for (const t of glassTris) {
+      const c = [(t[0][0] + t[1][0] + t[2][0]) / 3, (t[0][1] + t[1][1] + t[2][1]) / 3, (t[0][2] + t[1][2] + t[2][2]) / 3];
+      const a = along(c), w = across(c);
+      if (a < -0.3 || a > len + 0.3 || w < m.lw - 0.2 || w > m.hw_ + 0.2 || c[1] < m.minY || c[1] > m.minY + 2.6) continue;
+      span(t, (b) => { glass[b] = 1; });
     }
-    const out = Array.from({ length: n }, () => []);
-    verts.forEach((q, i) => { let s = 0; while (s < cuts.length && proj[i] > cuts[s]) s++; out[s].push(q); });
+    const runs = [];
+    for (let b = 0; b < nb; b++) {
+      if (!glass[b]) continue;
+      const last = runs[runs.length - 1];
+      if (last && b - last[1] <= 3) last[1] = b; else runs.push([b, b]);
+    }
+    // windscreen and rear window of one car: the roof covers the gap between them
+    const cabins = [];
+    for (const r of runs) {
+      const last = cabins[cabins.length - 1];
+      if (last) {
+        let gapLow = Infinity, peak = 0;
+        for (let b = last[1] + 1; b < r[0]; b++) gapLow = Math.min(gapLow, cover[b]);
+        for (let b = last[0]; b <= r[1]; b++) peak = Math.max(peak, cover[b]);
+        if (gapLow === Infinity || gapLow >= 0.8 * peak) { last[1] = r[1]; continue; }
+      }
+      cabins.push([...r]);
+    }
+    const cuts = [];
+    for (let i = 0; i + 1 < cabins.length; i++) {
+      const from = cabins[i][1] + 1, to = cabins[i + 1][0] - 1;
+      if (to < from) continue;
+      let low = Infinity;
+      for (let b = from; b <= to; b++) low = Math.min(low, cover[b]);
+      // the middle of the lowest stretch (where the bumpers meet)
+      let run0 = -1, best = null;
+      for (let b = from; b <= to + 1; b++) {
+        const isLow = b <= to && cover[b] <= low + 0.05;
+        if (isLow && run0 < 0) run0 = b;
+        if (!isLow && run0 >= 0) { if (!best || b - run0 > best[1] - best[0]) best = [run0, b]; run0 = -1; }
+      }
+      cuts.push(((best[0] + best[1]) / 2) * BIN);
+    }
+    if (process.env.DBG) console.log('ROW', len.toFixed(1), 'cabins', cabins.map((c) => `${(c[0] * BIN).toFixed(1)}-${(c[1] * BIN).toFixed(1)}`).join(' '), 'cuts', cuts.map((c) => c.toFixed(1)).join(' '));
+    if (!cuts.length) return [verts];
+    const out = Array.from({ length: cuts.length + 1 }, () => []);
+    verts.forEach((q) => { const a = along(q); let k = 0; while (k < cuts.length && a > cuts[k]) k++; out[k].push(q); });
     return out.filter((v) => v.length > 30);
   };
   for (const cl of clusters.values()) {
     const all = [];
-    for (const p of cl) for (const i of p.ix) for (const q of carParts.carpaint[i]) all.push(q);
+    for (const p of cl) for (const i of p.ix) all.push(carParts.carpaint[i]);
     for (const verts of splitRow(all)) {
     let { mx_, mz_, minY, ax, az, lo, hi, lw, hw_ } = measure(verts);
     const len = hi - lo, wid = hw_ - lw;
