@@ -9,6 +9,7 @@ import { NodeIO } from '@gltf-transform/core';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { measureProfile, classifyStadium, inGateDoor } from '../src/world/stadium.js';
+import { cityPartsOf, ownerOf, GROUND_MESH, groundDrop } from '../src/world/cityParts.js';
 
 const MAP = process.argv[2];
 if (!MAP) throw new Error('usage: bake-dizengoff-nav.mjs <map-folder>');
@@ -20,7 +21,15 @@ const BODY_LO = 0.45, BODY_HI = 2.0, TALL = 6;
 
 await MeshoptDecoder.ready;
 const io = new NodeIO().registerExtensions(ALL_EXTENSIONS).registerDependencies({ 'meshopt.decoder': MeshoptDecoder });
-const doc = await io.read(path.join(DIR, 'set.glb'));
+// a single set, or every set of a stitched map at its offset (src/world/cityParts.js)
+const partsDef = cityPartsOf(MAP);
+const sources = [];
+if (partsDef) {
+  fs.mkdirSync(DIR, { recursive: true });
+  for (const [own, part] of partsDef.sets.entries()) {
+    sources.push({ doc: await io.read(path.join(DIR, '..', part.folder, 'set.glb')), off: part.offset, own });
+  }
+} else sources.push({ doc: await io.read(path.join(DIR, 'set.glb')), off: [0, 0, 0], own: 0 });
 
 const tris = { ground: [], solid: [] };
 const carParts = { carpaint: [], carglass: [] };
@@ -29,7 +38,7 @@ const wallCells = new Set();
 const seatTris = [];
 const pitchVerts = [];
 let minX = 1e9, maxX = -1e9, minZ = 1e9, maxZ = -1e9;
-for (const n of doc.getRoot().listNodes()) {
+for (const { doc, off, own } of sources) for (const n of doc.getRoot().listNodes()) {
   const mesh = n.getMesh();
   if (!mesh) continue;
   const name = n.getName();
@@ -52,9 +61,11 @@ for (const n of doc.getRoot().listNodes()) {
     const idx = p.getIndices();
     const count = idx ? idx.getCount() : pos.getCount();
     const v = [0, 0, 0];
-    const get = (i) => { pos.getElement(idx ? idx.getScalar(i) : i, v); return [v[0] * s[0] + t[0], v[1] * s[1] + t[1], v[2] * s[2] + t[2]]; };
+    const get = (i) => { pos.getElement(idx ? idx.getScalar(i) : i, v); return [v[0] * s[0] + t[0] + off[0], v[1] * s[1] + t[1] + off[1], v[2] * s[2] + t[2] + off[2]]; };
     for (let i = 0; i + 2 < count; i += 3) {
       const tri = [get(i), get(i + 1), get(i + 2)];
+      if (partsDef && !GROUND_MESH.test(name) && ownerOf(partsDef, (tri[0][0] + tri[1][0] + tri[2][0]) / 3, (tri[0][2] + tri[1][2] + tri[2][2]) / 3) !== own) continue;
+      if (partsDef && GROUND_MESH.test(name)) for (const q of tri) q[1] -= groundDrop(own);
       if (scooterPart) scooterPart.push(tri);
       if (isSeats) { seatTris.push(tri); continue; }
       if (carPart) { carPart.push(tri); continue; }
@@ -292,6 +303,15 @@ const cars = [];
     }
   }
 }
+// every drivable car is its own set of meshes: past a couple of hundred the draw calls
+// add up. The rest stay parked in the shared meshes (and solid, see pass 2).
+const MAX_CARS = 200;
+if (cars.length > MAX_CARS) {
+  const step = cars.length / MAX_CARS;
+  const keep = Array.from({ length: MAX_CARS }, (_, i) => cars[Math.floor(i * step)]);
+  cars.length = 0;
+  cars.push(...keep);
+}
 console.log('drivable cars', cars.length);
 const inCar = (x, z) => cars.some((c) => {
   const dx = x - c.x, dz = z - c.z, s = Math.sin(c.yaw), co = Math.cos(c.yaw);
@@ -468,6 +488,10 @@ for (let s = 0; s < W * H; s++) {
   sizes.push(n);
 }
 const main = sizes.indexOf(Math.max(...sizes));
+if (process.env.DBG) {
+  const top = sizes.map((n, i) => [n, i]).sort((a, b) => b[0] - a[0]).slice(0, 4);
+  console.log('top regions m2', top.map(([n, i]) => `${i}:${(n * CELL * CELL).toFixed(0)}`).join(' '));
+}
 console.log('open regions', sizes.length, 'largest', sizes[main], 'cells =', (sizes[main] * CELL * CELL).toFixed(0), 'm2');
 // spawn near the middle of the open region, in a spot with room to move
 let cxs = 0, czs = 0, cn = 0;

@@ -139,6 +139,26 @@ export const MAPS = {
     fogDensity: 0.0008,
     radarRange: 100,
   },
+  telaviv: {
+    id: 'telaviv',
+    cityFolder: 'tel-aviv', // stitched from three exports, see src/world/cityParts.js
+    label: 'Tel Aviv',
+    subtitle: "Dizengoff Square, Dizengoff Center and HaNevi'im in one city",
+    loadLabel: 'Raising Tel Aviv',
+    plantLabel: 'Loading the city',
+    textures: {
+      sand: 'asphalt_01',
+      grass: 'brushed_concrete_2',
+      forest: 'burned_ground_01',
+      rock: 'broken_brick_wall',
+    },
+    grass: false,
+    vegetation: false,
+    waterCamp: false,
+    timeOfDay: 0.3,
+    fogDensity: 0.0008,
+    radarRange: 120,
+  },
   lab: {
     id: 'lab',
     lab: true, // src/world/lab.js; /shootout/?lab boots straight into it

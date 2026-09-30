@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
 import {KTX2Loader} from 'three/addons/loaders/KTX2Loader.js';
 import {MeshoptDecoder} from 'three/addons/libs/meshopt_decoder.module.js';
+import { cityPartsOf, ownerOf, underSets, GROUND_MESH, groundDrop } from './cityParts.js';
 
 const BASE = import.meta.env?.BASE_URL || '/shootout/';
 const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
@@ -22,14 +23,59 @@ const UPGRADE = {
   metal: (m) => physical(m, { roughness: 0.38, metalness: 0.85, envMapIntensity: 1.1 }),
 };
 
+/**
+ * Drops the triangles whose centre (world x, z) fails keep(x, z): the overlap between two
+ * neighbouring sets keeps each building once. Meshes whose name matches `skip` stay whole.
+ */
+function keepTriangles(root, keep, skip = null) {
+  const v = new THREE.Vector3();
+  root.traverse((o) => {
+    if (!o.isMesh || (skip && skip.test(o.name))) return;
+    const g = o.geometry, pos = g.attributes.position, idx = g.index;
+    const n = idx ? idx.count : pos.count;
+    const out = [];
+    let dropped = 0;
+    for (let t = 0; t + 2 < n; t += 3) {
+      let x = 0, z = 0;
+      for (let k = 0; k < 3; k++) {
+        v.fromBufferAttribute(pos, idx ? idx.getX(t + k) : t + k).applyMatrix4(o.matrixWorld);
+        x += v.x; z += v.z;
+      }
+      if (keep(x / 3, z / 3)) out.push(idx ? idx.getX(t) : t, idx ? idx.getX(t + 1) : t + 1, idx ? idx.getX(t + 2) : t + 2);
+      else dropped++;
+    }
+    if (dropped) g.setIndex(new THREE.BufferAttribute(new Uint32Array(out), 1));
+  });
+}
+
 export async function loadCity(scene, renderer, folder = 'dizengoff-center') {
   loader.setKTX2Loader(new KTX2Loader().setTranscoderPath(`${BASE}assets/basis/`).detectSupport(renderer));
-  const [far, set] = await Promise.all([loader.loadAsync(`${BASE}assets/maps/${folder}/far.glb`), loader.loadAsync(`${BASE}assets/maps/${folder}/set.glb`)]);
+  // a stitched map loads every set at its offset and the skyline of one of them
+  const def = cityPartsOf(folder);
+  const sets = def ? def.sets : [{ folder, offset: [0, 0, 0] }];
+  const [far, ...loaded] = await Promise.all([
+    loader.loadAsync(`${BASE}assets/maps/${def ? def.far : folder}/far.glb`),
+    ...sets.map((p) => loader.loadAsync(`${BASE}assets/maps/${p.folder}/set.glb`)),
+  ]);
+  const set = { scene: new THREE.Group() };
+  set.scene.name = `set-${folder}`;
+  loaded.forEach((g, i) => {
+    g.scene.position.fromArray(sets[i].offset);
+    if (def) g.scene.traverse((o) => { if (o.isMesh && GROUND_MESH.test(o.name)) o.position.y -= groundDrop(i); });
+    set.scene.add(g.scene);
+  });
+  if (def) {
+    set.scene.updateMatrixWorld(true);
+    loaded.forEach((g, i) => keepTriangles(g.scene, (x, z) => ownerOf(def, x, z) === i, GROUND_MESH));
+    far.scene.updateMatrixWorld(true);
+    keepTriangles(far.scene, (x, z) => !underSets(def, x, z), /^far_ground$/);
+  }
   scene.add(far.scene, set.scene);
   const nightMats = [], shutters = [];
   const max = renderer.capabilities.getMaxAnisotropy();
   const upgraded = new Map();
   for (const root of [far.scene, set.scene]) root.traverse(o => {
+    if (o.isMesh && !o.geometry.index?.count && o.geometry.index) { o.visible = false; return; } // clipped away entirely
     if (!o.isMesh) return;
     o.matrixAutoUpdate = false; o.updateMatrix();       // static
     if (UPGRADE[o.material.name]) {
