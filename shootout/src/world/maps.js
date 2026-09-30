@@ -121,6 +121,7 @@ export const MAPS = {
   bloomfield: {
     id: 'bloomfield',
     cityFolder: 'bloomfield',
+    stadiumStart: true, // multiplayer: one player in each stand
     label: 'Bloomfield',
     subtitle: 'Tel Aviv · Bloomfield district streets and blocks',
     loadLabel: 'Raising Bloomfield',

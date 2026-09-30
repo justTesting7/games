@@ -338,7 +338,7 @@ async function init() {
     city ? city.load(progress) : Promise.resolve(),
     arena ? arena.load(progress) : Promise.resolve(),
     studioMap ? progress.task(mapDef.plantLabel, 2, async () => {
-      studio = await loadDizengoff(pipeline.renderer, mapDef.cityFolder);
+      studio = await loadDizengoff(pipeline.renderer, mapDef.cityFolder, { stadiumStart: !!mapDef.stadiumStart });
       if (studio.cameraFar) { camera.far = studio.cameraFar; camera.updateProjectionMatrix(); }
       studioHeight = studio.heightAt;
       studio.addColliders(veg.colliders);

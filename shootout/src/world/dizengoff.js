@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { loadCity } from './loadCity.js';
 import { extractCityCars, removeInBoxes } from './cityCars.js';
-import { buildStadium } from './stadium.js';
+import { buildStadium, stadiumSlotSpawns } from './stadium.js';
 import { buildPitchProps } from './pitchProps.js';
 import { pickRivalSpots, slotSpawns } from './rivalSpots.js';
 
@@ -49,7 +49,7 @@ export function addNavColliders(nav, colliders, heightAt) {
  * Dizengoff Center: the optimised city set (set.glb) plus its far skyline
  * (far.glb), walked on the baked height/collision grid.
  */
-export async function loadDizengoff(renderer, folder = 'dizengoff-center') {
+export async function loadDizengoff(renderer, folder = 'dizengoff-center', { stadiumStart = false } = {}) {
   const group = new THREE.Group();
   group.name = `city-${folder}`;
   const [nav, city] = await Promise.all([
@@ -74,7 +74,10 @@ export async function loadDizengoff(renderer, folder = 'dizengoff-center') {
     stadium: nav.stadium || null,
     rivalSpots: (origin, count) => pickRivalSpots(nav.spots || [], origin, count),
     /** Where player `slot` starts in a multiplayer room (identical on every client). */
-    slotSpawn: (slot) => { const all = slotSpawns(nav.spots || [], 16); return all.length ? all[slot % all.length] : null; },
+    slotSpawn: (slot) => {
+      const all = stadiumStart && nav.stadium ? stadiumSlotSpawns(nav.stadium) : slotSpawns(nav.spots || [], 16);
+      return all.length ? all[slot % all.length] : null;
+    },
     heightAt,
     cameraFar: FAR_DISTANCE,
     addColliders: (colliders) => {

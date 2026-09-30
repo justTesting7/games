@@ -96,6 +96,20 @@ export function inGateDoor(p, x, z) {
   return Math.abs(r - (radiusAt(p.top, th) - STADIUM.glassOff)) < 5 && arcToOpening(STADIUM.gates, th, r) < STADIUM.gateHalf + 0.3;
 }
 
+/**
+ * Multiplayer starts inside the stadium: the hall under each stand, facing the pitch. Slots
+ * go to opposite stands first (two players get opposite ends), then the corners, then the
+ * gaps between, so a full room is spread round the whole ring.
+ */
+export const STAND_ANGLES = [0, 180, 90, 270, 45, 225, 135, 315, 22.5, 202.5, 112.5, 292.5, 67.5, 247.5, 157.5, 337.5];
+export function stadiumSlotSpawns(p) {
+  return STAND_ANGLES.map((d) => {
+    const th = deg(d), r = (radiusAt(p.toe, th) + radiusAt(p.wall, th)) / 2;
+    const x = +(p.c[0] + Math.sin(th) * r).toFixed(2), z = +(p.c[1] + Math.cos(th) * r).toFixed(2);
+    return { x, z, yaw: Math.atan2(p.c[0] - x, p.c[1] - z) };
+  });
+}
+
 // ---- runtime meshes ---------------------------------------------------------
 
 /** Ring wall from the floor up to topFn(r), with lintel-only gaps at the opening angles. */
