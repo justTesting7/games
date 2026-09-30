@@ -395,6 +395,7 @@ async function init() {
   if (studio?.takeCars) cars.spawnCustom(studio.takeCars());
   if (studio?.takeScooters) cars.addScooters(studio.takeScooters());
   if (studio?.buildShots) world.shots = studio.buildShots();
+  if (studio?.chunk) studio.chunk();
   if (arena && data.layout) {
     arena.build(data.layout);
     pipeline.scene.add(arena.group);

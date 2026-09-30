@@ -3,6 +3,7 @@ import { loadCity } from './loadCity.js';
 import { extractCityCars, removeInBoxes } from './cityCars.js';
 import { buildStadium, stadiumSlotSpawns, STADIUM } from './stadium.js';
 import { buildShotMesh } from './shotMesh.js';
+import { chunkMeshes } from './chunkMeshes.js';
 import { buildPitchProps } from './pitchProps.js';
 import { pickRivalSpots, slotSpawns } from './rivalSpots.js';
 
@@ -107,6 +108,8 @@ export async function loadDizengoff(renderer, folder = 'dizengoff-center', { sta
       removeInBoxes(city.set, nav.scooterRemove || []);
       return nav.scooters;
     },
+    /** Splits the district-wide meshes into culling cells; call after the cars and scooters are cut out. */
+    chunk: () => chunkMeshes(city.set),
     /** minutes = 0..1439, night = 0..1 */
     update: city.update,
   };
