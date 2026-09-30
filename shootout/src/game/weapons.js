@@ -447,8 +447,32 @@ export class Weapons {
   stepGrenade(p, v, dt, collide) {
     const { terrain, veg } = this.world;
     v.y -= GRAVITY * dt;
-    p.addScaledVector(v, dt);
     let bounced = 0;
+    // Sweep the step along the real geometry (walls, balconies, roofs, car bodies) and
+    // bounce off the surface it meets; the walking grid below is only a coarse backstop.
+    const speed = v.length(), step = speed * dt;
+    let moved = false;
+    if (step > 1e-5 && (this.world.shots || this.world.cars)) {
+      const dir = this._gDir || (this._gDir = new THREE.Vector3());
+      dir.copy(v).divideScalar(speed);
+      let hit = this.world.shots?.raycast(p, dir, step + 0.05) || null;
+      const car = this.world.cars?.raycast(p, dir, hit ? hit.t : step + 0.05, null);
+      if (car) hit = car;
+      if (hit && hit.t < 0.005) hit = null; // starting inside something: let it move out
+      if (hit) {
+        p.addScaledVector(dir, Math.max(0, hit.t - 0.05));
+        const n = hit.normal;
+        const vn = v.dot(n);
+        if (vn < 0) {
+          v.addScaledVector(n, -vn * 1.42); // restitution ~0.42
+          const tx = v.x - n.x * v.dot(n), ty = v.y - n.y * v.dot(n), tz = v.z - n.z * v.dot(n);
+          v.x -= tx * 0.3; v.y -= ty * 0.3; v.z -= tz * 0.3; // friction along the surface
+          bounced = -vn;
+        }
+        moved = true;
+      }
+    }
+    if (!moved) p.addScaledVector(v, dt);
     const h = terrain.heightAt(p.x, p.z);
     if (hasSea() && p.y < 0.03 && h < 0) {
       if (p.y < 0) { v.multiplyScalar(Math.exp(-dt * 8)); bounced = -1; }
@@ -459,7 +483,7 @@ export class Weapons {
         v.addScaledVector(n, -vn * 1.35);
         const vt = v.clone().addScaledVector(n, -v.dot(n));
         v.addScaledVector(vt, -0.35);
-        bounced = -vn;
+        bounced = Math.max(bounced, -vn);
       }
       p.y = h + 0.035;
     }
