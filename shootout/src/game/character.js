@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 import { loadGLTF, rpmUrl, modelUrl } from '../engine/assets.js';
+import { Ragdoll } from './ragdoll.js';
 
 const CLIPS = {
   idle: 'F_Standing_Idle_001',
@@ -646,8 +647,26 @@ export class Character {
     this.flinch = Math.min(1, this.flinch + 0.7);
   }
 
-  // Topples away from the killing shot, pivoting on the feet.
-  die(dir) {
+  // Goes limp: a ragdoll carries the body's own momentum and the killing blow into
+  // the ground and walls (Character.physics is set by the game). A driver killed in the
+  // seat slumps where they sit. `push` is the blow's speed in m/s.
+  die(dir, push = 2.5) {
+    if (Character.physics && this.bones.Hips && !this.seated) {
+      const flat = new THREE.Vector3(dir.x, 0, dir.z);
+      if (flat.lengthSq() > 1e-6) flat.normalize();
+      const blow = flat.multiplyScalar(push).setY(Math.min(push * 0.25, 1.5));
+      const vel = this.motion?.vel?.clone() || new THREE.Vector3();
+      this.ragdoll = new Ragdoll(this, vel, blow, Character.physics);
+      this.dead = { t: 0, ragdoll: true };
+      this.jump = null;
+      return;
+    }
+    if (this.seated) { this.dead = { t: 0, seated: true }; return; }
+    this.oldDie(dir);
+  }
+
+  // Without physics hooks: topples away from the killing shot, pivoting on the feet.
+  oldDie(dir) {
     const flat = new THREE.Vector3(dir.x, 0, dir.z);
     if (flat.lengthSq() < 1e-6) flat.set(Math.sin(this.root.rotation.y), 0, Math.cos(this.root.rotation.y)).negate();
     flat.normalize();
@@ -657,6 +676,7 @@ export class Character {
 
   revive() {
     this.dead = null;
+    this.ragdoll = null;
     this.flinch = 0;
     this.action = null;
     this.rifleKick = 0;
@@ -673,6 +693,25 @@ export class Character {
   updateDead(dt) {
     const d = this.dead;
     d.t += dt;
+    if (d.ragdoll || d.seated) {
+      if (d.ragdoll && this.ragdoll) {
+        this.ragdoll.step(dt); // sleeps once still; the pose is re-applied every frame regardless
+        this.ragdoll.apply(rotateBoneWorld, rotateBoneToward, this.tmp);
+      }
+      if (d.seated && d.t < 0.6) { // slump forward over the wheel
+        const k = Math.min(1, dt / 0.6);
+        const { right } = this.bodyAxes();
+        rotateBoneWorld(this.bones.Spine1, this.tmp.q.setFromAxisAngle(right, -0.55 * k), this.tmp);
+        if (this.bones.Neck) rotateBoneWorld(this.bones.Neck, this.tmp.q.setFromAxisAngle(right, -0.5 * k), this.tmp);
+      }
+      this.aimT = 0; this.aimWeight = 0; this.grenadeWindup = 0; this.drawn = 0;
+      this.root.updateMatrixWorld(true);
+      this.updateBraid(dt);
+      this.updatePistols(dt);
+      this.placeRifle();
+      this.placeGrenade();
+      return;
+    }
     const k = Math.min(1, d.t / 0.75);
     const tip = 1.5 * k * k;
     this.root.quaternion.setFromAxisAngle(d.axis, tip).multiply(this.tmp.q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), d.yaw));
@@ -786,6 +825,7 @@ export class Character {
     this.syncGait();
     this.mixer.update(dt);
     this.root.updateMatrixWorld(true);
+    this.seated = !!s.seat;
     if (s.seat) this.applySeated(s.seat);
     else this.applyLean(dt, s);
     this.applyCrouch(s.crouch || 0);

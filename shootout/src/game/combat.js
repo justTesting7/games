@@ -21,6 +21,7 @@ const CAPSULES = [
   ['RightLeg', 'RightFoot', 0.06, 'limb'],
 ];
 export const LIMB_DAMAGE = 0.65;
+const PUSH = { pistols: 1.8, rifle: 3, grenade: 6, drone: 6, car: 7 };
 
 /** Distance along the unit ray o + t d to capsule a-b of radius r, or null (Inigo Quilez). */
 export function rayCapsule(o, d, a, b, r) {
@@ -161,10 +162,11 @@ export class Combat {
     if (!victim.alive || amount <= 0) return;
     victim.lastAttacker = attacker;
     victim.lastHitT = this.time;
+    const push = PUSH[info.weapon] ?? 2.5; // how hard the killing blow throws the body (m/s)
     if (info.head) {
       victim.health = 0;
       victim.alive = false;
-      victim.character.die(dir);
+      victim.character.die(dir, push * 0.8);
       if (attacker && attacker !== victim) attacker.kills++;
       this.onKill?.(victim, attacker, { ...info, head: true, dir });
       return;
@@ -172,7 +174,7 @@ export class Combat {
     victim.health = Math.max(0, victim.health - amount);
     if (victim.health <= 0) {
       victim.alive = false;
-      victim.character.die(dir);
+      victim.character.die(dir, push);
       if (attacker && attacker !== victim) attacker.kills++;
       this.onKill?.(victim, attacker, { ...info, dir });
     } else {

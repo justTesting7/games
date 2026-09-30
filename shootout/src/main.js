@@ -116,6 +116,11 @@ world.raycast = (o, d, maxDist, ignore) => {
 };
 const combat = new Combat();
 world.combat = combat;
+// Ragdolls fall onto the ground and are kept out of walls.
+Character.physics = {
+  heightAt: (x, z) => world.terrain.heightAt(x, z),
+  resolve: (p, r) => world.veg?.colliders.resolveXZ(p, r, p.y - r, p.y + r),
+};
 // Static geometry only (walls, props, parked cars): keeps gun barrels out of walls.
 Character.wallProbe = (o, d, len) => {
   let t = world.shots?.raycast(o, d, len)?.t ?? null;
