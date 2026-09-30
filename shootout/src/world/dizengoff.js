@@ -64,7 +64,9 @@ export async function loadDizengoff(renderer, folder = 'dizengoff-center', { sta
   const pitchProps = nav.stadium?.pitch ? buildPitchProps(nav.stadium.pitch) : null;
   if (pitchProps) group.add(pitchProps.group);
   const heightAt = makeNavHeight(nav);
-  const spawn = { ...nav.spawn };
+  // Stadium maps: everyone starts inside, one player per stand; the local player takes the first
+  const stands = stadiumStart && nav.stadium ? stadiumSlotSpawns(nav.stadium) : null;
+  const spawn = stands ? { ...stands[0] } : { ...nav.spawn };
   spawn.y = heightAt(spawn.x, spawn.z);
   return {
     group,
@@ -72,7 +74,9 @@ export async function loadDizengoff(renderer, folder = 'dizengoff-center', { sta
     spawn,
     outdoor: true,
     stadium: nav.stadium || null,
-    rivalSpots: (origin, count) => pickRivalSpots(nav.spots || [], origin, count),
+    rivalSpots: (origin, count) => (stands
+      ? Array.from({ length: count }, (_, i) => stands[(i + 1) % stands.length]) // the other stands
+      : pickRivalSpots(nav.spots || [], origin, count)),
     /** Where player `slot` starts in a multiplayer room (identical on every client). */
     slotSpawn: (slot) => {
       const all = stadiumStart && nav.stadium ? stadiumSlotSpawns(nav.stadium) : slotSpawns(nav.spots || [], 16);
