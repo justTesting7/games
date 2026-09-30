@@ -10,7 +10,7 @@ export const CAR = {
   halfW: 1.02,
   height: 1.18,
   enterR: 2.75,
-  seatX: -0.36,
+  seatX: 0.36, // local +x is the car's left: left-hand drive, as in Israel
   seatY: 0.38,
   seatZ: 0.06,
   maxSpeed: 24,
@@ -303,6 +303,21 @@ export function stepDrive({ speed, yaw, throttle, steer, dt, sprint = false, spe
   };
 }
 
+/**
+ * Where a seated driver's hips go and where the steering wheel is, in world space
+ * (a scooter rider stands instead).
+ */
+export function driverPose(car) {
+  const S = specOf(car);
+  if (S.kind === 'scooter') return null;
+  const o = localOffset(car.x, car.z, car);
+  const seat = seatOf(car);
+  return {
+    hipY: car.y + 0.5,
+    wheel: new THREE.Vector3(seat.x + o.fwdX * 0.46, car.y + 0.86, seat.z + o.fwdZ * 0.46),
+  };
+}
+
 export function cockpitEye(car) {
   const o = localOffset(car.x, car.z, car);
   return {
@@ -343,6 +358,34 @@ export function rayAABB(o, d, b, maxDist) {
   return { t, nx: n[0], ny: n[1], nz: n[2] };
 }
 
+/** Closest hit of a ray on a flat list of triangles (x, y, z per vertex), both sides. */
+export function rayTriangles(o, d, pos, maxDist) {
+  let best = null;
+  for (let i = 0; i + 9 <= pos.length; i += 9) {
+    const ax = pos[i], ay = pos[i + 1], az = pos[i + 2];
+    const e1x = pos[i + 3] - ax, e1y = pos[i + 4] - ay, e1z = pos[i + 5] - az;
+    const e2x = pos[i + 6] - ax, e2y = pos[i + 7] - ay, e2z = pos[i + 8] - az;
+    const px = d.y * e2z - d.z * e2y, py = d.z * e2x - d.x * e2z, pz = d.x * e2y - d.y * e2x;
+    const det = e1x * px + e1y * py + e1z * pz;
+    if (Math.abs(det) < 1e-9) continue;
+    const inv = 1 / det;
+    const tx = o.x - ax, ty = o.y - ay, tz = o.z - az;
+    const u = (tx * px + ty * py + tz * pz) * inv;
+    if (u < 0 || u > 1) continue;
+    const qx = ty * e1z - tz * e1y, qy = tz * e1x - tx * e1z, qz = tx * e1y - ty * e1x;
+    const v = (d.x * qx + d.y * qy + d.z * qz) * inv;
+    if (v < 0 || u + v > 1) continue;
+    const t = (e2x * qx + e2y * qy + e2z * qz) * inv;
+    if (t <= 0 || t >= (best ? best.t : maxDist)) continue;
+    let nx = e1y * e2z - e1z * e2y, ny = e1z * e2x - e1x * e2z, nz = e1x * e2y - e1y * e2x;
+    const l = Math.hypot(nx, ny, nz) || 1;
+    const s = nx * d.x + ny * d.y + nz * d.z > 0 ? -1 / l : 1 / l;
+    nx *= s; ny *= s; nz *= s;
+    best = { t, nx, ny, nz };
+  }
+  return best;
+}
+
 export function hitCar(origin, dir, car, maxDist, opts = {}) {
   if (!car || maxDist <= 0) return null;
   const basis = localOffset(origin.x, origin.z, car);
@@ -361,9 +404,12 @@ export function hitCar(origin, dir, car, maxDist, opts = {}) {
   }
   if (!opts.metalOnly && !car.spec) {
     const mask = car.glass || 0;
+    const boxes = car.paneBoxes || PANE_BOXES; // city cars carry boxes measured from their own glass
     for (const name of PANES) {
-      if (!glassIntact(mask, name)) continue;
-      const h = rayAABB(o, d, PANE_BOXES[name], best ? best.t : maxDist);
+      if (!glassIntact(mask, name) || !boxes[name]) continue;
+      let h = rayAABB(o, d, boxes[name], best ? best.t : maxDist);
+      // city panes are a handful of real triangles: test those, the boxes overlap
+      if (h && car.paneBoxes && car.panes?.[name]) h = rayTriangles(o, d, car.panes[name].geometry.attributes.position.array, best ? best.t : maxDist);
       if (h && (!best || h.t < best.t)) best = { ...h, surface: 'glass', pane: name };
     }
   }
@@ -699,6 +745,7 @@ export class Cars {
         lights: built.lights,
         tails: built.tails,
         panes: built.panes,
+        cockpit: true, // modelled interior: V can switch to the driver's view
         wheelRig: built.wheelRig,
         cluster: built.cluster,
         home: { x: s.x, z: s.z, yaw: s.yaw },
@@ -736,7 +783,8 @@ export class Cars {
         wheels: [],
         lights: { emissiveIntensity: 0 },
         tails: { emissiveIntensity: 0 },
-        panes: null,
+        panes: s.panes || null,
+        paneBoxes: s.paneBoxes || null,
         wheelRig: null,
         cluster: null,
         home: { x: s.x, z: s.z, yaw: s.yaw },

@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { hasSea } from './swim.js';
+import { driverPose } from './cars.js';
 import { Character } from './character.js';
 import { Loadout } from './weapons.js';
 import { byId, resolveLooks } from './roster.js';
@@ -96,7 +98,8 @@ class Remote {
     }
     const ch = this.character;
     ch.root.position.copy(this.pos);
-    const swimming = this.pos.y < 0.15;
+    const swimming = hasSea() && this.pos.y < 0.15;
+    const inCar = this.vehicle && this.vehicle.kind !== 'scooter';
     if (!ch.dead) {
       ch.root.rotation.order = 'YXZ';
       ch.root.rotation.x = swimming && this.pos.y < -1.6 ? 0.9 : swimming ? 0.3 : 0;
@@ -109,8 +112,15 @@ class Remote {
       Math.cos(this.yaw) * Math.cos(this.pitch || 0),
     );
     const aimPoint = this.pos.clone().addScaledVector(look, 20).setY(this.pos.y + 1.4);
+    if (this.vehicle) ch.steer = this.vehicle.steer || 0;
+    if (!!inCar !== !!this.gunsStowed) { // guns go away behind the wheel and come back out after
+      this.gunsStowed = !!inCar;
+      if (ch.rifle) ch.rifle.visible = !inCar;
+      ch.pistols?.forEach((p) => { p.visible = !inCar; });
+    }
     ch.update(dt, {
-      speed: this.speed,
+      speed: this.vehicle ? 0 : this.speed,
+      seat: inCar ? driverPose(this.vehicle) : null,
       onGround: this.onGround,
       airTime: this.onGround ? 0 : 0.4,
       strafe: this.aiming,

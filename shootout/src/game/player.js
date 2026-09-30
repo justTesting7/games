@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { FLOAT_Y, canExitWater, shouldSwim, stepSwim, swimSpeed, hasSea } from './swim.js';
-import { cockpitEye } from './cars.js';
+import { cockpitEye, driverPose } from './cars.js';
 
 const GRAVITY = 16;
 const JUMP_V = 5.4;
@@ -337,17 +337,18 @@ export class Player {
     ch.root.rotation.x = 0;
     ch.root.rotation.y = this.yaw;
     ch.root.rotation.z = standing ? car.body?.r || 0 : 0; // lean with the deck
-    ch.root.visible = standing;
+    ch.root.visible = true; // seen through the glass from the chase camera
     if (!standing) {
       if (ch.rifle) ch.rifle.visible = false;
       ch.pistols?.forEach((p) => { p.visible = false; });
     }
+    ch.steer = car.steer || 0;
     this.updateCamera(dt, false, Math.abs(car.speed) > (standing ? 9 : 14), Math.abs(car.speed));
     this.updateAim();
     ch.update(dt, {
       speed: 0, onGround: true, airTime: 0, strafe: false, localDir: this.localDir.set(0, 0, 1),
       jumpStarted: false, predictedAir: 0, aiming: false, aimPoint: this.aimPoint,
-      lookDir: this.lookDir(), crouch: 0, swimming: false, diving: false,
+      lookDir: this.lookDir(), crouch: 0, swimming: false, diving: false, seat: driverPose(car),
     });
     return { speed: Math.abs(car.speed), aiming: false, driving: true };
   }
@@ -361,7 +362,7 @@ export class Player {
     const ride = rideCar(follow?.vehicle) || (!follow && rideCar(this.vehicle));
     if (ride) {
       // Chase camera by default; V switches to the cockpit in cars that have an interior.
-      if (!(this.cockpitView && ride.panes)) { this.updateChaseCamera(dt, ride, follow); return; }
+      if (!(this.cockpitView && ride.cockpit)) { this.updateChaseCamera(dt, ride, follow); return; }
       this.updateCockpitCamera(dt, ride, follow, sprinting, speed);
       return;
     }
@@ -447,10 +448,6 @@ export class Player {
     const fovGoal = 62 + Math.min(spd, 30) * 0.4;
     this.fov += (fovGoal - this.fov) * Math.min(1, dt * 4);
     if (Math.abs(cam.fov - this.fov) > 0.01) { cam.fov = this.fov; cam.updateProjectionMatrix(); }
-    if (this.character.root) this.character.root.visible = false;
-    if (this.character.rifle) this.character.rifle.visible = false;
-    if (follow?.character?.root) { follow.character.root.visible = false; this._cockpitHide = follow.character; }
-
     const yaw = this.camYaw;
     const pitch = THREE.MathUtils.clamp(this.camPitch - 0.14, -0.7, 0.3);
     const dir = new THREE.Vector3(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch));

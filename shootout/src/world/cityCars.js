@@ -8,6 +8,70 @@ const CAR_MESHES = new Set(['carpaint', 'carglass', 'metal', 'paint']);
 const PAD = 0.25;
 const CELL = 8;
 
+// Tinted, see-through car glass. The HDR target keeps scene depth in alpha (see
+// engine/patch.js), so the blend leaves the destination alpha untouched.
+let glassMat = null;
+function cityGlass(src) {
+  if (glassMat) return glassMat;
+  glassMat = new THREE.MeshPhysicalMaterial({
+    name: 'city-car-glass', color: 0x1c262c, roughness: 0.04, metalness: 0, ior: 1.52,
+    envMapIntensity: 1.6, transparent: true, opacity: 0.5, depthWrite: false, side: THREE.DoubleSide,
+  });
+  glassMat.blending = THREE.CustomBlending;
+  glassMat.blendSrc = THREE.SrcAlphaFactor;
+  glassMat.blendDst = THREE.OneMinusSrcAlphaFactor;
+  glassMat.blendSrcAlpha = THREE.ZeroFactor;
+  glassMat.blendDstAlpha = THREE.OneFactor;
+  glassMat.userData = src?.userData || {};
+  return glassMat;
+}
+
+/**
+ * Which window a glass triangle belongs to, in the car's own frame (+z forward,
+ * +x the car's left): sideways-facing glass is a side window, front or rear half by
+ * the middle of the side glass; the rest is the windscreen or the rear window.
+ */
+export function paneOf(cx, cz, nx, nz, midZ, sideMidZ) {
+  if (Math.abs(nx) > Math.abs(nz) * 1.2) return `${cx > 0 ? 'left' : 'right'}${cz > sideMidZ ? 'F' : 'R'}`;
+  return cz > midZ ? 'wind' : 'rear';
+}
+
+function splitPanes(p) {
+  const tris = [];
+  for (let i = 0; i + 9 <= p.pos.length; i += 9) {
+    const a = [p.pos[i], p.pos[i + 1], p.pos[i + 2]], b = [p.pos[i + 3], p.pos[i + 4], p.pos[i + 5]], c = [p.pos[i + 6], p.pos[i + 7], p.pos[i + 8]];
+    const e1 = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], e2 = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+    const n = [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]];
+    const l = Math.hypot(...n) || 1;
+    tris.push({ i, c: [(a[0] + b[0] + c[0]) / 3, (a[1] + b[1] + c[1]) / 3, (a[2] + b[2] + c[2]) / 3], n: n.map((v) => v / l) });
+  }
+  if (!tris.length) return null;
+  const zs = tris.map((t) => t.c[2]);
+  const midZ = (Math.min(...zs) + Math.max(...zs)) / 2;
+  const side = tris.filter((t) => Math.abs(t.n[0]) > Math.abs(t.n[2]) * 1.2).map((t) => t.c[2]);
+  const sideMidZ = side.length ? (Math.min(...side) + Math.max(...side)) / 2 : midZ;
+  const out = {};
+  for (const t of tris) {
+    const name = paneOf(t.c[0], t.c[2], t.n[0], t.n[2], midZ, sideMidZ);
+    const o = out[name] || (out[name] = { pos: [], nor: [], uv: [] });
+    o.pos.push(...p.pos.slice(t.i, t.i + 9));
+    if (p.nor.length) o.nor.push(...p.nor.slice(t.i, t.i + 9));
+    if (p.uv.length) o.uv.push(...p.uv.slice((t.i / 3) * 2, (t.i / 3) * 2 + 6));
+  }
+  return out;
+}
+
+const boxOf = (pos, pad = 0.03) => {
+  const b = { x0: Infinity, y0: Infinity, z0: Infinity, x1: -Infinity, y1: -Infinity, z1: -Infinity };
+  for (let i = 0; i < pos.length; i += 3) {
+    b.x0 = Math.min(b.x0, pos[i]); b.x1 = Math.max(b.x1, pos[i]);
+    b.y0 = Math.min(b.y0, pos[i + 1]); b.y1 = Math.max(b.y1, pos[i + 1]);
+    b.z0 = Math.min(b.z0, pos[i + 2]); b.z1 = Math.max(b.z1, pos[i + 2]);
+  }
+  for (const [lo, hi] of [['x0', 'x1'], ['y0', 'y1'], ['z0', 'z1']]) { b[lo] -= pad; b[hi] += pad; }
+  return b;
+};
+
 export function extractCityCars(root, cars) {
   const grid = new Map();
   const key = (i, j) => `${i},${j}`;
@@ -79,18 +143,32 @@ export function extractCityCars(root, cars) {
     if (low > -1 && low < 1) for (const p of parts[n].values()) for (let i = 1; i < p.pos.length; i += 3) p.pos[i] -= low;
     const group = new THREE.Group();
     group.name = 'city-car';
-    for (const [src, p] of parts[n]) {
+    const build = (p, material, name) => {
       const geo = new THREE.BufferGeometry();
       geo.setAttribute('position', new THREE.Float32BufferAttribute(p.pos, 3));
       if (p.nor.length) geo.setAttribute('normal', new THREE.Float32BufferAttribute(p.nor, 3));
       if (p.uv.length) geo.setAttribute('uv', new THREE.Float32BufferAttribute(p.uv, 2));
       geo.computeBoundingSphere();
-      const mesh = new THREE.Mesh(geo, src.material);
+      const mesh = new THREE.Mesh(geo, material);
+      mesh.name = name;
       mesh.castShadow = true;
       mesh.receiveShadow = true;
       group.add(mesh);
+      return mesh;
+    };
+    // Glass: one see-through mesh per window, so a shot breaks the window it hits.
+    let panes = null, paneBoxes = null;
+    for (const [src, p] of parts[n]) {
+      const split = src.name === 'carglass' ? splitPanes(p) : null;
+      if (!split) { build(p, src.material, src.name); continue; }
+      panes = {}; paneBoxes = {};
+      for (const [name, q] of Object.entries(split)) {
+        panes[name] = build(q, cityGlass(src.material), `pane-${name}`);
+        panes[name].castShadow = false;
+        paneBoxes[name] = boxOf(q.pos);
+      }
     }
-    out.push({ x: car.x, z: car.z, yaw: car.yaw, y: car.y, mesh: group });
+    out.push({ x: car.x, z: car.z, yaw: car.yaw, y: car.y, mesh: group, panes, paneBoxes });
   });
   return out;
 }

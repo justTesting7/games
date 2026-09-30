@@ -786,7 +786,8 @@ export class Character {
     this.syncGait();
     this.mixer.update(dt);
     this.root.updateMatrixWorld(true);
-    this.applyLean(dt, s);
+    if (s.seat) this.applySeated(s.seat);
+    else this.applyLean(dt, s);
     this.applyCrouch(s.crouch || 0);
 
     this.updateEquip(dt);
@@ -1142,6 +1143,34 @@ export class Character {
   setRate(name, speed) {
     const cs = this.speeds[name];
     if (cs > 0.1) this.actions[name].timeScale = THREE.MathUtils.clamp(speed / cs, 0.55, 1.6);
+  }
+
+  // Behind the wheel: hips on the seat, thighs forward, shins down to the pedals, a
+  // slight recline and both hands on the wheel. seat = { hipY, wheel } in world space.
+  applySeated(seat) {
+    const B = this.bones;
+    if (!B.Hips || !B.LeftUpLeg) return;
+    const { fwd, left, right } = this.bodyAxes();
+    const turn = (bone, axis, ang) => {
+      if (bone && Math.abs(ang) > 1e-4) rotateBoneWorld(bone, this.tmp.q.setFromAxisAngle(axis, ang), this.tmp);
+    };
+    const hips = B.Hips.getWorldPosition(new THREE.Vector3());
+    B.Hips.position.y -= hips.y - seat.hipY;
+    B.Hips.updateMatrixWorld(true);
+    turn(B.LeftUpLeg, right, 1.45); turn(B.LeftUpLeg, fwd, -0.07);
+    turn(B.RightUpLeg, right, 1.45); turn(B.RightUpLeg, fwd, 0.07);
+    turn(B.LeftLeg, right, -1.3); turn(B.RightLeg, right, -1.3);
+    turn(B.LeftFoot, right, 0.25); turn(B.RightFoot, right, 0.25);
+    turn(B.Spine, right, 0.1);
+    if (!seat.wheel || !B.LeftArm || !B.RightArm) return;
+    const steer = this.steer || 0;
+    for (const [side, out, sign] of [['Left', left, 1], ['Right', right, -1]]) {
+      const sh = B[`${side}Arm`].getWorldPosition(new THREE.Vector3());
+      // hands at ten to two, turning with the wheel
+      const grip = seat.wheel.clone().addScaledVector(out, 0.17).addScaledVector(UP, 0.05 + sign * steer * 0.06);
+      solveArm(B, side, grip, sh.clone().addScaledVector(UP, -0.4).addScaledVector(out, 0.3),
+        fwd.clone().addScaledVector(UP, 0.2).normalize(), out, 1, this.tmp);
+    }
   }
 
   // Take a knee: planted left foot, right knee on the ground, chest up,
