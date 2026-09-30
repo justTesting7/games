@@ -65,6 +65,47 @@ export const JUMPS = {
 
 const LOOPING = new Set(['idle', 'walk', 'walkBack', 'walkLeft', 'walkRight', 'jog', 'jogBack', 'jogLeft', 'jogRight', 'run', 'fall']);
 
+// Locomotion loops that blend together. They are kept on one stride phase so
+// blending walk into jog, or forward into strafe, never mixes a left step
+// with a right one (the legs used to scissor through every transition).
+const GAIT = ['walk', 'walkBack', 'walkLeft', 'walkRight', 'jog', 'jogBack', 'jogLeft', 'jogRight', 'run'];
+const frac = (x) => x - Math.floor(x);
+
+/**
+ * Stride landmarks of a gait clip: how many strides it loops (`cycles`) and the
+ * stride phase of its first frame (`offset`), taken where the left thigh swings
+ * furthest ahead of the right one.
+ */
+export function gaitPhase(clip) {
+  const L = clip.tracks.find((t) => t.name === 'LeftUpLeg.quaternion');
+  const R = clip.tracks.find((t) => t.name === 'RightUpLeg.quaternion');
+  if (!L || !R || L.times.length !== R.times.length || L.times.length < 4) return null;
+  const q = new THREE.Quaternion(), a = new THREE.Vector3(), b = new THREE.Vector3();
+  const sep = [];
+  for (let i = 0; i < L.times.length; i++) {
+    a.set(0, 1, 0).applyQuaternion(q.fromArray(L.values, i * 4));
+    b.set(0, 1, 0).applyQuaternion(q.fromArray(R.values, i * 4));
+    sep.push(a.z - b.z);
+  }
+  const n = sep.length, max = Math.max(...sep);
+  // looping clips repeat their first frame at the end: compare neighbours cyclically without it
+  const m = Math.abs(sep[n - 1] - sep[0]) < 0.02 ? n - 1 : n;
+  const peaks = [];
+  for (let i = 0; i < m; i++) {
+    const p = sep[(i + m - 1) % m], c = sep[i], x = sep[(i + 1) % m];
+    if (c > 0.5 * max && c >= p && c > x) peaks.push(i);
+  }
+  if (!peaks.length) return null;
+  const cycles = peaks.length;
+  const i = peaks[0];
+  // parabolic refinement between frames
+  const p = sep[(i + m - 1) % m], c = sep[i], x = sep[(i + 1) % m];
+  const den = p - 2 * c + x;
+  const shift = Math.abs(den) > 1e-6 ? THREE.MathUtils.clamp(0.5 * (p - x) / den, -0.5, 0.5) : 0;
+  const t = L.times[0] + ((L.times[Math.min(i + 1, n - 1)] - L.times[i]) * shift) + (L.times[i] - L.times[0]);
+  return { cycles, offset: frac((t / clip.duration) * cycles) };
+}
+
 // Strips horizontal root motion so the controller owns movement, and returns
 // the speed the clip was authored at so playback can match real speed.
 function processClip(clip, name, boneNames) {
@@ -374,15 +415,16 @@ export class Character {
       if (o.isBone) boneNames.add(o.name);
       if (o.isSkinnedMesh) baseImage = o.material.map.image;
     });
-    const clips = {}, speeds = {};
+    const clips = {}, speeds = {}, gait = {};
     Object.keys(def.clips).forEach((name, i) => {
       const { clip, speed } = processClip(anims[i].animations[0], name, boneNames);
       clips[name] = clip;
       speeds[name] = speed;
+      if (GAIT.includes(name)) gait[name] = gaitPhase(clip);
     });
     const normalMap = await avatar.parser.getDependency('texture', 0);
     normalMap.flipY = false;
-    return { scene: avatar.scene, clips, speeds, baseImage, normalMap };
+    return { scene: avatar.scene, clips, speeds, gait, baseImage, normalMap };
   }
 
   static async loadAssets(progress, bodyIds = ['f']) {
@@ -430,6 +472,7 @@ export class Character {
       this.speeds[name] = body.speeds[name];
       this.weights[name] = 0;
     });
+    this.gait = body.gait || {};
     this.weights.idle = 1;
     this.actions.idle.setEffectiveWeight(1);
 
@@ -726,6 +769,7 @@ export class Character {
       locomotion();
     }
     this.setWeights(target, fade, dt);
+    this.syncGait();
     this.mixer.update(dt);
     this.root.updateMatrixWorld(true);
     this.applyCrouch(s.crouch || 0);
@@ -964,6 +1008,33 @@ export class Character {
     if (!this.released) return false;
     this.released = false;
     return true;
+  }
+
+  // Every weighted gait loop plays at one blended stride rate, on the stride phase of
+  // the heaviest one: feet stay planted through walk / jog / run / strafe blends.
+  syncGait() {
+    let tot = 0, rate = 0, lead = null, leadW = 0;
+    for (const name of GAIT) {
+      const w = this.weights[name], g = this.gait[name];
+      if (!g || !(w > 1e-3)) continue;
+      const a = this.actions[name];
+      rate += w * a.timeScale * g.cycles / a.getClip().duration;
+      tot += w;
+      if (w > leadW) { leadW = w; lead = name; }
+    }
+    if (!lead) return;
+    rate /= tot; // strides per second
+    const la = this.actions[lead], lg = this.gait[lead], ld = la.getClip().duration;
+    const phase = frac((la.time / ld) * lg.cycles - lg.offset);
+    for (const name of GAIT) {
+      const w = this.weights[name], g = this.gait[name];
+      if (!g || !(w > 1e-3)) continue;
+      const a = this.actions[name], d = a.getClip().duration;
+      a.timeScale = (rate * d) / g.cycles;
+      if (name === lead) continue;
+      const k = Math.floor((a.time / d) * g.cycles);
+      a.time = (((k + phase + g.offset) / g.cycles) % 1) * d;
+    }
   }
 
   setRate(name, speed) {
