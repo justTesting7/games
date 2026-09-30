@@ -694,11 +694,25 @@ export class Character {
   // Called by the controller every frame with the movement state.
   update(dt, s) {
     if (this.dead) { this.updateDead(dt); return; }
+    const motion = this.updateMotion(dt);
     const target = {};
     const locomotion = () => {
       const sp = s.speed;
       if ((s.crouch || 0) > 0.45) { target.idle = 1; return; }
-      if (sp < 0.15) { target.idle = 1; return; }
+      if (sp < 0.15) {
+        // Turning on the spot shuffles the feet round instead of spinning on planted soles.
+        const yr = motion.yawRate;
+        if (Math.abs(yr) > 0.9 && s.onGround !== false && Math.hypot(motion.vel.x, motion.vel.z) < 0.6) { // not while riding
+          const w = Math.min(0.6, 0.2 + (Math.abs(yr) - 0.9) * 0.3);
+          const step = yr > 0 ? 'walkLeft' : 'walkRight';
+          target[step] = w;
+          target.idle = 1 - w;
+          this.actions[step].timeScale = THREE.MathUtils.clamp(Math.abs(yr) * 0.45, 0.7, 1.4);
+          return;
+        }
+        target.idle = 1;
+        return;
+      }
       if (s.strafe) {
         const lf = s.localDir;
         const fast = sp > 2.4;
@@ -772,6 +786,7 @@ export class Character {
     this.syncGait();
     this.mixer.update(dt);
     this.root.updateMatrixWorld(true);
+    this.applyLean(dt, s);
     this.applyCrouch(s.crouch || 0);
 
     this.updateEquip(dt);
@@ -1008,6 +1023,66 @@ export class Character {
     if (!this.released) return false;
     this.released = false;
     return true;
+  }
+
+  // Velocity, acceleration and turn rate of the body, measured from where the
+  // controller put the root (player, rival and network bodies alike).
+  updateMotion(dt) {
+    const p = this.root.position;
+    let m = this.motion;
+    if (!m) {
+      m = this.motion = {
+        last: p.clone(), lastYaw: this.root.rotation.y, vel: new THREE.Vector3(), acc: new THREE.Vector3(),
+        yawRate: 0, pitch: 0, pitchV: 0, roll: 0, rollV: 0,
+      };
+    }
+    if (!(dt > 1e-4)) return m;
+    const vx = (p.x - m.last.x) / dt, vz = (p.z - m.last.z) / dt;
+    m.last.copy(p);
+    const yaw = this.root.rotation.y;
+    const dy = Math.atan2(Math.sin(yaw - m.lastYaw), Math.cos(yaw - m.lastYaw));
+    m.lastYaw = yaw;
+    if (vx * vx + vz * vz > 900 || Math.abs(dy) > 1.5) { // a respawn or a teleport, not motion
+      m.vel.set(0, 0, 0); m.acc.set(0, 0, 0); m.yawRate = 0;
+      return m;
+    }
+    const kv = 1 - Math.exp(-dt * 12), ka = 1 - Math.exp(-dt * 7);
+    const px = m.vel.x, pz = m.vel.z;
+    m.vel.x += (vx - m.vel.x) * kv;
+    m.vel.z += (vz - m.vel.z) * kv;
+    m.acc.x += ((m.vel.x - px) / dt - m.acc.x) * ka;
+    m.acc.z += ((m.vel.z - pz) / dt - m.acc.z) * ka;
+    m.yawRate += (dy / dt - m.yawRate) * (1 - Math.exp(-dt * 9));
+    return m;
+  }
+
+  // Weight shift: the chest leads into acceleration and sits back when braking,
+  // and the body banks into turns at speed. Critically damped springs keep it
+  // soft; aiming keeps most of it out of the gun.
+  applyLean(dt, s) {
+    const m = this.motion, B = this.bones;
+    if (!m || !B.Spine || !B.Hips || !(dt > 0)) return;
+    const { fwd, left, right } = this.bodyAxes();
+    const sp = Math.hypot(m.vel.x, m.vel.z);
+    const aF = m.acc.x * fwd.x + m.acc.z * fwd.z;
+    const aL = m.acc.x * left.x + m.acc.z * left.z;
+    const grounded = s.onGround !== false && !s.swimming;
+    const clamp = THREE.MathUtils.clamp;
+    const pitchGoal = grounded ? clamp(aF * 0.02, -0.14, 0.17) + clamp((sp - 3.6) * 0.035, 0, 0.09) : 0;
+    const rollGoal = grounded ? clamp(m.yawRate * sp * 0.014, -0.11, 0.11) + clamp(aL * 0.01, -0.05, 0.05) : 0;
+    const w = 9, step = Math.min(dt, 0.05);
+    m.pitchV += (w * w * (pitchGoal - m.pitch) - 2 * w * m.pitchV) * step;
+    m.pitch += m.pitchV * step;
+    m.rollV += (w * w * (rollGoal - m.roll) - 2 * w * m.rollV) * step;
+    m.roll += m.rollV * step;
+    const keep = 1 - 0.75 * this.aimWeight;
+    const turn = (bone, axis, ang) => {
+      if (bone && Math.abs(ang) > 1e-4) rotateBoneWorld(bone, this.tmp.q.setFromAxisAngle(axis, ang), this.tmp);
+    };
+    // +angle about `right` tips the chest back; +angle about `fwd` leans to the right
+    turn(B.Spine, right, -m.pitch * 0.55 * keep);
+    turn(B.Spine1, right, -m.pitch * 0.45 * keep);
+    turn(B.Hips, fwd, -m.roll * keep);
   }
 
   // Every weighted gait loop plays at one blended stride rate, on the stride phase of
