@@ -97,9 +97,9 @@ function fsMaterial(frag, uniforms, extra = {}) {
 
 export const QUALITY = {
   low: { label: 'Low', shadow: 512, shadowDist: 28, ssr: 0, msaa: 0, ao: 0, fxaa: false, pixelRatio: 0.7, grass: 0.3, trees: 0.45 },
-  medium: { label: 'Medium', shadow: 1024, shadowDist: 40, ssr: 8, msaa: 0, ao: 8, fxaa: true, pixelRatio: 1, grass: 0.55, trees: 0.7 },
-  high: { label: 'High', shadow: 2048, shadowDist: 48, ssr: 16, msaa: 0, ao: 12, fxaa: true, pixelRatio: 1, grass: 0.85, trees: 0.9 },
-  ultra: { label: 'Ultra', shadow: 2048, shadowDist: 58, ssr: 24, msaa: 2, ao: 16, fxaa: true, pixelRatio: 1.25, grass: 1.1, trees: 1.05 },
+  medium: { label: 'Medium', shadow: 2048, shadowDist: 64, ssr: 8, msaa: 0, ao: 8, fxaa: true, pixelRatio: 1, grass: 0.55, trees: 0.7 },
+  high: { label: 'High', shadow: 4096, shadowDist: 90, ssr: 16, msaa: 0, ao: 12, fxaa: true, pixelRatio: 1, grass: 0.85, trees: 0.9 },
+  ultra: { label: 'Ultra', shadow: 4096, shadowDist: 110, ssr: 24, msaa: 2, ao: 16, fxaa: true, pixelRatio: 1.25, grass: 1.1, trees: 1.05 },
 };
 
 export class Pipeline {
