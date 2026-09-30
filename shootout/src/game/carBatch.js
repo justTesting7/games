@@ -59,16 +59,18 @@ export class CarBatch {
         };
       }
     }
-    this.sync();
+    this.sync(true);
     return this;
   }
 
-  /** Copies every car's current transform into its instances. */
-  sync() {
+  /** Copies the transforms of the cars that moved (car.dirty) into their instances. */
+  sync(all = false) {
     for (const p of this.parts) {
+      if (!all && !p.car.dirty) continue;
       p.mesh.updateWorldMatrix(true, false);
       p.batch.setMatrixAt(p.id, p.mesh.matrixWorld);
     }
+    for (const p of this.parts) p.car.dirty = false;
   }
 
   dispose() {

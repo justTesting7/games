@@ -903,6 +903,7 @@ export class Cars {
   }
 
   placeMesh(car) {
+    car.dirty = true; // the batch copies this car's transform on the next sync
     car.mesh.position.set(car.x, car.y, car.z);
     car.mesh.rotation.order = 'YXZ';
     car.mesh.rotation.y = car.yaw;
@@ -939,6 +940,10 @@ export class Cars {
     b.r += b.rv * step;
     car.mesh.rotation.x = b.p;
     car.mesh.rotation.z = b.r;
+    car.dirty = true;
+    // settled: a parked car stops being simulated until it is driven, shoved or synced
+    b.rest = !car.driver && Math.abs(car.speed) < 0.05 && Math.abs(b.pv) + Math.abs(b.rv) < 0.003
+      && Math.abs(b.p - pitchGoal) + Math.abs(b.r - rollGoal) < 0.003;
   }
 
   localCar() {
@@ -1005,6 +1010,7 @@ export class Cars {
   applySnap(id, snap, driver) {
     const car = this.byId(id);
     if (!car) return;
+    if (car.body) car.body.rest = false;
     if (Array.isArray(snap.p) && snap.p.length === 3) {
       car.x = snap.p[0];
       car.y = snap.p[1];
@@ -1183,6 +1189,8 @@ export class Cars {
           this.placeMesh(car);
         } else if (!car.driver && car.slide && (Math.abs(car.slide.x) + Math.abs(car.slide.z) > 0.03 || Math.abs(car.slide.spin) > 0.02)) {
           this.slideFree(car, dt);
+        } else if (!car.driver && car.body?.rest) {
+          continue; // parked and settled on its springs: nothing to do until something moves it
         } else {
           this.refreshSeat(car);
           this.placeMesh(car);
