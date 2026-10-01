@@ -44,7 +44,7 @@ the whole district, so frustum culling never skips any of it, and the shadow pas
       then the car explodes (blast physics, glass, nearby cars thrown), burnt-out shell; synced.
 - [x] 21. Driving physics: grip and slip per axle (bicycle model), handbrake drift (Space),
       weight transfer, speed-sensitive steering, tyre smoke and skid marks on the road.
-- [ ] 22. Impact debris: chips that bounce off the ground for concrete/wood, sparks for metal,
+- [x] 22. Impact debris: chips that bounce off the ground for concrete/wood, sparks for metal,
       glass shards; dust puffs on ground hits.
 - [ ] 23. Rifle rounds travel (~800 m/s) with drop and a visible tracer; long shots lead.
 - [ ] 24. Rivals drive: a rival far from the fight takes a nearby car to close distance.

@@ -1,6 +1,17 @@
 import * as THREE from 'three';
 import { BulletHoles } from './bulletHoles.js';
 import { SkidMarks } from './skidMarks.js';
+import { Debris } from './debris.js';
+
+// what a round knocks off each surface
+const DEBRIS = {
+  concrete: { n: 3, kind: 'chip', size: 0.03, color: [0.55, 0.53, 0.5] },
+  cover: { n: 3, kind: 'chip', size: 0.03, color: [0.55, 0.53, 0.5] },
+  rock: { n: 3, kind: 'chip', size: 0.035, color: [0.45, 0.43, 0.4] },
+  wood: { n: 3, kind: 'splinter', size: 0.025, color: [0.5, 0.36, 0.2] },
+  target: { n: 2, kind: 'splinter', size: 0.025, color: [0.6, 0.45, 0.28] },
+  glass: { n: 5, kind: 'shard', size: 0.03, color: [0.75, 0.85, 0.9] },
+};
 import { BloodDecals } from './blood.js';
 
 const particleVert = /* glsl */ `
@@ -206,6 +217,7 @@ export class Effects {
     this.decals = new BloodDecals(pipeline.scene, terrain);
     this.holes = new BulletHoles(pipeline.scene);
     this.skids = new SkidMarks(pipeline.scene);
+    this.debris = new Debris(pipeline.scene, (x, z) => terrain.heightAt(x, z));
     this.blood.ground = (x, z) => terrain.heightAt(x, z);
     this.blood.onLand = (p, h) => {
       if (h > 0.02 && Math.random() < 0.5) this.decals.drop(p.x, h, p.z, Math.min(0.22, Math.max(0.035, p.size * 9)));
@@ -266,6 +278,13 @@ export class Effects {
         this.alpha.spawn({ pos: pos.clone().setY(0.3 + Math.random()), vel: new THREE.Vector3().randomDirection().multiplyScalar(2).setY(1.5), size: 0.6, grow: 1.5, life: 1.5 + Math.random(), color: [0.9, 0.93, 0.97], alpha: 0.5, drag: 2 });
       }
       return;
+    }
+    // chunks of whatever it went off on, thrown out and up
+    for (let i = 0; i < 18; i++) {
+      const v = new THREE.Vector3().randomDirection().multiplyScalar(3 + Math.random() * 6);
+      v.y = Math.abs(v.y) * 1.2 + 2.5;
+      const g = 0.18 + Math.random() * 0.2;
+      this.debris.spawn(pos.clone().setY(pos.y + 0.2), v, { kind: 'chip', size: 0.05 + Math.random() * 0.08, color: [g, g * 0.95, g * 0.9] });
     }
     const s = SURFACE[this.terrain.heightAt(pos.x, pos.z) < 0.6 ? 'sand' : 'grass'];
     for (let i = 0; i < 26; i++) {
@@ -452,6 +471,16 @@ export class Effects {
       const v = refl.clone().lerp(normal, 0.5).multiplyScalar(2 + Math.random() * 4).add(new THREE.Vector3().randomDirection().multiplyScalar(1.8));
       this.alpha.spawn({ pos, vel: v, size: 0.008 + Math.random() * 0.012, life: 0.5 + Math.random() * 0.5, color: s.chunks, alpha: 1, gravity: 9.8, fade: 0 });
     }
+    // solid bits that fly, bounce and settle
+    const bits = DEBRIS[surface];
+    if (bits) {
+      for (let i = 0; i < bits.n; i++) {
+        const v = refl.clone().lerp(normal, 0.6).multiplyScalar(1.5 + Math.random() * 3).add(new THREE.Vector3().randomDirection().multiplyScalar(1.2));
+        const c = bits.color;
+        const tint = 0.8 + Math.random() * 0.35;
+        this.debris.spawn(pos.clone().addScaledVector(normal, 0.03), v, { kind: bits.kind, size: bits.size * (0.6 + Math.random() * 0.8), color: [c[0] * tint, c[1] * tint, c[2] * tint] });
+      }
+    }
     if (s.sparks) {
       for (let i = 0; i < 9; i++) {
         const v = refl.clone().multiplyScalar(4 + Math.random() * 8).add(new THREE.Vector3().randomDirection().multiplyScalar(3));
@@ -477,6 +506,7 @@ export class Effects {
 
   update(dt) {
     this.skids.update(dt);
+    this.debris.update(dt);
     this.add.update(dt);
     this.alpha.update(dt);
     this.blood.update(dt);
