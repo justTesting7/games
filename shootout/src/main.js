@@ -498,7 +498,8 @@ async function init() {
     return new Rival(world, combat, weapons, jev, persona(entry), ch);
   });
   // civilians driving the city's streets (solo; the parked cars are theirs to take)
-  const traffic = studio?.takeCars ? new Traffic(world, (i) => {
+  // (in the Lab only with &traffic: its few cars are there to be tested)
+  const traffic = studio?.takeCars && (!mapDef.lab || bootQuery.has('traffic')) ? new Traffic(world, (i) => {
     const ch = new Character();
     ch.load(charAssets, looks[(i + 1) % looks.length]);
     ch.addTo(pipeline.scene);
