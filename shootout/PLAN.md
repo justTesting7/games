@@ -145,6 +145,8 @@ Ordered by how much they lift the whole game; one commit each.
 - [ ] 80. Film touches: faint grain and chromatic fringing at the screen edges.
 - [ ] 81. Shop windows and glass facades reflect the street (screen-space, always on).
 
+- [x] 82. Jevs walk like people: routes around walls on a 1 m walking grid when the way ahead is blocked, a human turn rate, slowing into corners, no random hops when held up.
+
 ## Log
 - Tel Aviv load (local, cached): ready in ~8 s; main-thread stages: decode 1.6 s, seam clip 1.0,
   cars 0.4, shot BVH 1.5, chunking 1.3.

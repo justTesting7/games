@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { DriveGrid, followRoute } from './drivePath.js';
+import { DriveGrid, followRoute, walkGrid } from './drivePath.js';
 import { hasSea } from './swim.js';
 import { driverPose, exitOf } from './cars.js';
 import { findVault, stepVault } from './vault.js';
@@ -870,6 +870,7 @@ export class Rival {
       return;
     }
     const via = this.wrapPoint(c.c, dest);
+    this.navGoal = dest;
     const to = new THREE.Vector3(via.x - this.pos.x, 0, via.z - this.pos.z);
     const len = to.length() || 1;
     out.dir.copy(to).divideScalar(len);
@@ -907,6 +908,7 @@ export class Rival {
       }
     }
 
+    this.navGoal = (this.tactic === 'push' || this.tactic === 'hunt' || this.tactic === 'flank') ? tp : null;
     const exposed = !this.isRuthless() && (this.shouldShelter() || (this.runningToShelter && !this.peeking));
     if (this.peeking && this.cover) {
       const dest = this.peekSpot(tp) || this.cover.spot;
@@ -983,6 +985,7 @@ export class Rival {
       if (dd < 3 && dd > 1e-3) out.dir.add(new THREE.Vector3(dx / dd, 0, dz / dd).multiplyScalar((3 - dd) * 0.6));
     }
     if (out.dir.lengthSq() > 1e-6) out.dir.normalize();
+    if (!danger && !this.peeking && out.speed > 0.6 && !this.world.terrain?.arena) this.navigate(out, dt);
     if (this.detour > 0) {
       this.detour -= dt;
       out.dir.applyAxisAngle(UP, this.detourAngle);
@@ -991,6 +994,41 @@ export class Rival {
       this.steerBowl(out, tp);
     }
     return out;
+  }
+
+  // On foot around the walls: while the way straight ahead is open, go straight; when a
+  // wall, a fence or a parked car is in it, follow a route (A* on a 1 m grid of where a
+  // body fits) to where they're headed, re-planned as the goal moves. One plan a frame
+  // across all the rivals.
+  navigate(out, dt) {
+    const world = this.world;
+    if (!world.veg?.colliders) return;
+    let grid = world.walkGrid;
+    if (!grid || grid.world.terrain !== world.terrain) grid = world.walkGrid = walkGrid(world);
+    const L = THREE.MathUtils.clamp(out.speed * 1.5, 2.5, 7);
+    const from = { x: this.pos.x + out.dir.x * 0.6, z: this.pos.z + out.dir.z * 0.6 };
+    const probe = { x: this.pos.x + out.dir.x * L, z: this.pos.z + out.dir.z * L };
+    this.navT = (this.navT || 0) - dt;
+    const following = this.navRoute && this.navT > 0;
+    if (!following && !this.navForce && grid.line(from, probe)) { this.navRoute = null; return; }
+    const g = this.navGoal && Math.hypot(this.navGoal.x - this.pos.x, this.navGoal.z - this.pos.z) < 70 ? this.navGoal : probe;
+    const moved = this.navRoute?.goal ? Math.hypot(this.navRoute.goal.x - g.x, this.navRoute.goal.z - g.z) : 99;
+    const now = this.combat.time;
+    if ((!this.navRoute || moved > 3 || this.navT <= 0 || this.navForce) && DriveGrid.walkPlanned !== now) {
+      DriveGrid.walkPlanned = now;
+      this.navForce = false;
+      const route = grid.find({ x: this.pos.x, z: this.pos.z }, { x: g.x, z: g.z }, { near: 1.5, maxNodes: 2500 });
+      if (route) route.goal = { x: g.x, z: g.z };
+      this.navRoute = route;
+      this.navT = 2.5; // follow it a while before trusting the straight line again
+    }
+    if (!this.navRoute) return;
+    const f = followRoute(this.navRoute, this.pos.x, this.pos.z, 0.9 + out.speed * 0.2); // short: corners are taken, not cut
+    if (f.end) { this.navRoute = null; return; }
+    const dx = f.x - this.pos.x, dz = f.z - this.pos.z, len = Math.hypot(dx, dz);
+    if (len > 0.2) out.dir.set(dx / len, 0, dz / len);
+    // ease off into a sharp corner
+    if (f.turn > 0.8) out.speed = Math.min(out.speed, 3.2);
   }
 
   // Garden stands: take the stairs, or hop a seat row — never walk the chairs.
@@ -1167,7 +1205,18 @@ export class Rival {
   move(dt, wish) {
     const { terrain } = this.world;
     const horiz = new THREE.Vector3(this.vel.x, 0, this.vel.z);
-    const desired = wish.dir.clone().multiplyScalar(wish.speed * (this.character.stagger > 0 ? 0.45 : 1));
+    // people turn, they don't snap: the heading swings toward the wish at a human rate
+    // (quicker when slow), and they slow into a sharp change of direction
+    const md = this.moveDir || (this.moveDir = wish.dir.clone());
+    let speedK = 1;
+    if (wish.dir.lengthSq() > 1e-6 && wish.speed > 0.05) {
+      const ang = Math.atan2(md.x * wish.dir.z - md.z * wish.dir.x, md.x * wish.dir.x + md.z * wish.dir.z);
+      const rate = (horiz.length() > 3.5 ? 5 : 9) * dt;
+      if (md.lengthSq() < 0.25 || (Math.abs(ang) > 2.6 && horiz.length() < 1.5)) md.copy(wish.dir); // from a standstill: turn on the spot
+      else md.applyAxisAngle(UP, -THREE.MathUtils.clamp(ang, -rate, rate)).normalize();
+      speedK = 0.55 + 0.45 * Math.max(0, Math.cos(Math.min(Math.abs(ang), Math.PI)));
+    }
+    const desired = md.clone().multiplyScalar(wish.speed * speedK * (this.character.stagger > 0 ? 0.45 : 1));
     const accel = this.onGround ? (wish.speed >= SHELTER_SPRINT - 0.05 ? 8 : wish.speed > horiz.length() ? 6 : 8) : 1.5;
     horiz.lerp(desired, Math.min(1, dt * accel));
     this.vel.x = horiz.x;
@@ -1242,9 +1291,13 @@ export class Rival {
     if (this.progressT > 0.8) {
       const moved = this.pos.distanceTo(this.lastProgress);
       if (wish.speed > 1.5 && moved < 0.35 * this.progressT && this.detour <= 0) {
-        this.detour = 0.9 + Math.random() * 0.6;
-        this.detourAngle = (Math.random() < 0.5 ? 1 : -1) * (1.2 + Math.random() * 0.8);
-        if (!blocked && this.onGround && Math.random() < 0.4) jumpStarted = this.forceJump();
+        // held up: plan a way round first; only if that fails too, try a short detour
+        if (!this.navForce && !this.navRoute) this.navForce = true;
+        else {
+          this.detour = 0.7 + Math.random() * 0.5;
+          this.detourAngle = (Math.random() < 0.5 ? 1 : -1) * (1.0 + Math.random() * 0.6);
+          this.navRoute = null;
+        }
       }
       this.lastProgress.copy(this.pos);
       this.progressT = 0;

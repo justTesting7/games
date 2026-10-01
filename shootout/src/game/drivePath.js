@@ -2,7 +2,8 @@
 // or tree in a car's width at body height), built lazily cell by cell as searches touch it.
 // Climbing a kerb costs extra, so routes keep to the road they start on and cross pavement
 // only where it saves a long way round. The route is pulled straight wherever a car could
-// drive the line between two points.
+// drive the line between two points. walkGrid() is the same for people on foot: a finer
+// grid, a body's width, kerbs and steps taken in stride.
 
 const CELL = 2;
 const CLEAR = 1.25; // metres around a cell centre that must be free (half a car's width + a margin)
@@ -10,10 +11,16 @@ const KERB = 0.08; // a step higher than this between cells is a kerb
 const SQ2 = Math.SQRT2;
 
 export class DriveGrid {
-  /** world: { terrain: { heightAt(x, z), inBounds?(x, z) }, veg?: { colliders: { query(x, z, r, out) } } } */
-  constructor(world, cell = CELL) {
+  /**
+   * world: { terrain: { heightAt(x, z), inBounds?(x, z) }, veg?: { colliders: { query(x, z, r, out) } } }
+   * opts: clear (m free around a cell centre), lo/hi (the height band that must be free,
+   * above the ground), kerb (a step that counts as one), climb (the highest step taken),
+   * kerbCost (how much a kerb step costs, x the step).
+   */
+  constructor(world, cell = CELL, { clear = CLEAR, lo = 0.25, hi = 1.3, kerb = KERB, climb = 0.6, kerbCost = 4, lineClimb = KERB } = {}) {
     this.world = world;
     this.cell = cell;
+    Object.assign(this, { clear, lo, hi, kerb, climb, kerbCost, lineClimb });
     this.cache = new Map(); // key -> height of a free cell, or NaN when blocked
     this._tmp = [];
   }
@@ -30,11 +37,12 @@ export class DriveGrid {
     h = t.inBounds && !t.inBounds(x, z) ? NaN : t.heightAt(x, z);
     const cols = this.world.veg?.colliders;
     if (cols && !Number.isNaN(h)) {
-      for (const c of cols.query(x, z, CLEAR + 0.5, this._tmp)) {
-        if (c.y1 < h + 0.25 || c.y0 > h + 1.3) continue; // under the bumper or over the roof
+      const C = this.clear;
+      for (const c of cols.query(x, z, C + 0.5, this._tmp)) {
+        if (c.y1 < h + this.lo || c.y0 > h + this.hi) continue; // under the bumper or over the roof
         const hit = c.box
-          ? x > c.x0 - CLEAR && x < c.x1 + CLEAR && z > c.z0 - CLEAR && z < c.z1 + CLEAR
-          : Math.hypot(x - c.x, z - c.z) < (c.r || 0) + CLEAR;
+          ? x > c.x0 - C && x < c.x1 + C && z > c.z0 - C && z < c.z1 + C
+          : Math.hypot(x - c.x, z - c.z) < (c.r || 0) + C;
         if (hit) { h = NaN; break; }
       }
     }
@@ -51,7 +59,7 @@ export class DriveGrid {
       const x = a.x + (dx * i) / n, z = a.z + (dz * i) / n;
       const h = this.free(Math.floor(x / this.cell), Math.floor(z / this.cell));
       if (Number.isNaN(h)) return false;
-      if (prev !== null && h - prev > KERB) return false;
+      if (prev !== null && h - prev > this.lineClimb) return false;
       prev = h;
     }
     return true;
@@ -106,8 +114,8 @@ export class DriveGrid {
         // no cutting a corner past a blocked cell
         if (dx && dz && (Number.isNaN(this.free(n.ix + dx, n.iz)) || Number.isNaN(this.free(n.ix, n.iz + dz)))) continue;
         const climb = h - n.h;
-        if (climb > 0.6) continue; // a wall-sized step: no car gets up that
-        const step = (dx && dz ? SQ2 : 1) * c * (climb > KERB ? 4 : Math.abs(climb) > KERB ? 2 : 1);
+        if (climb > this.climb) continue; // a wall-sized step: nobody gets up that
+        const step = (dx && dz ? SQ2 : 1) * c * (climb > this.kerb ? this.kerbCost : Math.abs(climb) > this.kerb ? Math.max(1, this.kerbCost / 2) : 1);
         const k = this.key(ix, iz);
         const g = n.g + step;
         const old = nodes.get(k);
@@ -171,4 +179,9 @@ export function followRoute(route, x, z, ahead) {
     turn = Math.abs(Math.atan2(Math.sin(a2 - a1), Math.cos(a2 - a1)));
   }
   return { x: px, z: pz, off: bd, turn, end: bi >= route.length - 2 && bt > 0.9 };
+}
+
+/** A grid for people on foot: 1 m cells, a body's width clear from the knees to the head. */
+export function walkGrid(world) {
+  return new DriveGrid(world, 1, { clear: 0.65, lo: 0.35, hi: 1.7, kerb: 0.25, climb: 0.5, kerbCost: 1.3, lineClimb: 0.5 });
 }
