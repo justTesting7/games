@@ -798,6 +798,17 @@ async function init() {
     const p = player.pos;
     const wet = hasSea() && p.y < 0.05;
     audio.footstep(wet ? 'water' : surfaceAt(p.x, p.z), speed);
+    // a footfall kicks up a little: splashes in the rain, dust at a run
+    const foot = character.bones[i ? 'RightFoot' : 'LeftFoot']?.getWorldPosition(new THREE.Vector3());
+    if (foot && !wet) {
+      const rain = world.weather?.amount || 0;
+      foot.y = terrain.heightAt(foot.x, foot.z) + 0.03;
+      if (rain > 0.3) {
+        for (let k = 0; k < 5; k++) fx.alpha.spawn({ pos: foot.clone(), vel: new THREE.Vector3((Math.random() - 0.5) * 1.2, 0.8 + Math.random() * 0.8, (Math.random() - 0.5) * 1.2), size: 0.014, life: 0.35, color: [0.75, 0.8, 0.85], alpha: 0.7, gravity: 9.8 });
+      } else if (speed > 4.5) {
+        fx.alpha.spawn({ pos: foot.clone(), vel: new THREE.Vector3((Math.random() - 0.5) * 0.4, 0.25, (Math.random() - 0.5) * 0.4), size: 0.12, grow: 1.4, life: 0.7, color: [0.55, 0.52, 0.48], alpha: 0.16, drag: 2 });
+      }
+    }
     if (wet) fx.impact(p.clone().setY(0.02), new THREE.Vector3(0, 1, 0), 'water', new THREE.Vector3(0, -1, 0));
   };
   player.onLand = (v) => audio.land(v);
