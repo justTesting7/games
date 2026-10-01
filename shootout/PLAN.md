@@ -130,7 +130,7 @@ Ordered by how much they lift the whole game; one commit each.
 - [x] 72. Temporal anti-aliasing: jittered frames reprojected through the depth and blended with
       clamped history, then sharpened; stable edges, wires, railings and foliage instead of
       crawling pixels (replaces FXAA/SMAA where it runs).
-- [ ] 73. Far shadow cascade: a second, coarse shadow map over ~600 m refreshed every few frames,
+- [x] 73. Far shadow cascade: a second, coarse shadow map over ~600 m refreshed every few frames,
       sampled past the near map, so buildings shade the streets into the distance.
 - [ ] 74. City surfaces with life: per-building tint, grime that darkens toward the ground and
       under ledges, streaks below windows, fine detail normals; no more flat, clean plaster.

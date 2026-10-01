@@ -99,9 +99,9 @@ function fsMaterial(frag, uniforms, extra = {}) {
 
 export const QUALITY = {
   low: { label: 'Low', shadow: 512, shadowDist: 28, ssr: 0, msaa: 0, ao: 0, fxaa: false, pixelRatio: 0.7, grass: 0.3, trees: 0.45 },
-  medium: { label: 'Medium', shadow: 2048, shadowDist: 64, ssr: 8, msaa: 0, ao: 8, fxaa: true, taa: true, pixelRatio: 1, grass: 0.55, trees: 0.7 },
-  high: { label: 'High', shadow: 4096, shadowDist: 90, ssr: 16, msaa: 0, ao: 12, fxaa: true, smaa: true, taa: true, pixelRatio: 1, grass: 0.85, trees: 0.9 },
-  ultra: { label: 'Ultra', shadow: 4096, shadowDist: 110, ssr: 24, msaa: 2, ao: 16, fxaa: true, smaa: true, taa: true, pixelRatio: 1.25, grass: 1.1, trees: 1.05 },
+  medium: { label: 'Medium', shadow: 2048, shadowDist: 64, farShadow: 2048, farDist: 260, ssr: 8, msaa: 0, ao: 8, fxaa: true, taa: true, pixelRatio: 1, grass: 0.55, trees: 0.7 },
+  high: { label: 'High', shadow: 4096, shadowDist: 90, farShadow: 2048, farDist: 320, ssr: 16, msaa: 0, ao: 12, fxaa: true, smaa: true, taa: true, pixelRatio: 1, grass: 0.85, trees: 0.9 },
+  ultra: { label: 'Ultra', shadow: 4096, shadowDist: 110, farShadow: 4096, farDist: 400, ssr: 24, msaa: 2, ao: 16, fxaa: true, smaa: true, taa: true, pixelRatio: 1.25, grass: 1.1, trees: 1.05 },
 };
 
 export class Pipeline {
@@ -155,6 +155,16 @@ export class Pipeline {
     this.sun.shadow.normalBias = 0.035;
     this.sun.shadow.radius = 2;
     this.scene.add(this.sun, this.sun.target);
+    // the far shadow cascade: casts a coarse shadow far out and adds no light (patch.js)
+    if (!this.mobile) {
+      this.farSun = new THREE.DirectionalLight(0xffffff, 0);
+      this.farSun.castShadow = true;
+      this.farSun.shadow.bias = -0.0005; // depth units: ~0.8 m over the 1600 m range
+      this.farSun.shadow.normalBias = 0.12;
+      this.farSun.shadow.radius = 1;
+      this.farSun.shadow.autoUpdate = false;
+      this.scene.add(this.farSun, this.farSun.target);
+    }
 
     // Muzzle flashes reuse a single light that is always present, so toggling
     // it never changes the light count and never triggers shader recompiles.
@@ -343,6 +353,13 @@ export class Pipeline {
     const d = q.shadowDist;
     Object.assign(sh.camera, { left: -d, right: d, top: d, bottom: -d, near: 1, far: 800 });
     sh.camera.updateProjectionMatrix();
+    if (this.farSun) {
+      const fs = this.farSun.shadow, fd = q.farDist || 0;
+      if (fs.mapSize.x !== (q.farShadow || 1024)) { fs.mapSize.set(q.farShadow || 1024, q.farShadow || 1024); fs.map?.dispose(); fs.map = null; }
+      Object.assign(fs.camera, { left: -fd, right: fd, top: fd, bottom: -fd, near: 1, far: 1600 });
+      fs.camera.updateProjectionMatrix();
+      fs.needsUpdate = true;
+    }
     this.waterMaterial.uniforms.uSSRSteps.value = q.ssr;
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, this.mobile ? Math.min(q.pixelRatio, 1) : q.pixelRatio));
     if (changedMsaa && this.sceneRT) { this.sceneRT.dispose(); this.sceneRT = null; }
@@ -427,6 +444,7 @@ export class Pipeline {
       this.sun.color.setRGB(1, 0.96, 0.9, THREE.LinearSRGBColorSpace);
       this.sun.intensity = this.indoorKey ?? 2.4;
       this.sun.castShadow = true;
+      this.syncFarShadow();
       this.night = 0;
       if (this.hemi) this.hemi.visible = false;
       cu.uAutoExposure.value = 0;
@@ -472,13 +490,23 @@ export class Pipeline {
     this.sun.intensity = this.mobile ? Math.min(li, 1.6) : li;
     if (li > 0) this.sun.color.setRGB(lc.x / li, lc.y / li, lc.z / li, THREE.LinearSRGBColorSpace);
     this.sun.castShadow = li > 1e-3;
+    this.syncFarShadow();
     this.night = smoothstep(0.08, -0.18, this.sunDir.y);
     // the ground's bounce: a warm grey street lit by the sun (or moon) from above
     const cosL = Math.max(0, this.lightDir.y) / Math.PI;
     this.skyGenMaterial.uniforms.uBounce.value.set(0.26, 0.23, 0.19).multiply(lc).multiplyScalar(cosL * (this.mobile ? 1 / 0.085 : 1));
   }
 
+  // the far cascade casts while the sun does (outdoors, with a quality that has one); the
+  // shadow count changing recompiles the materials, so it only flips with the sun
+  syncFarShadow() {
+    if (!this.farSun) return;
+    const on = this.sun.castShadow && !this.indoor && !!this.quality?.farDist;
+    if (this.farSun.castShadow !== on) this.farSun.castShadow = on;
+  }
+
   updateShadowCamera(center) {
+    this.updateFarShadow(center);
     const L = this.lightDir;
     const cam = this.sun.shadow.camera;
     // Snap the shadow frustum to whole texels in light space to stop shimmering.
@@ -494,6 +522,28 @@ export class Pipeline {
     this.sun.position.copy(snapped).addScaledVector(L, 400);
     this.sun.target.updateMatrixWorld();
     this.sun.updateMatrixWorld();
+  }
+
+  // The far map is re-rendered every 8 frames (or when the camera has moved 20 m), aimed like
+  // the near one and snapped to its texels.
+  updateFarShadow(center) {
+    const F = this.farSun;
+    if (!F?.castShadow) return;
+    this._farAt = this._farAt || new THREE.Vector3(1e9, 0, 0);
+    if (this.frame % 8 !== 0 && this._farAt.distanceToSquared(center) < 400) return;
+    this._farAt.copy(center);
+    const L = this.lightDir, cam = F.shadow.camera;
+    const up = Math.abs(L.y) > 0.99 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0);
+    const right = new THREE.Vector3().crossVectors(up, L).normalize();
+    const upL = new THREE.Vector3().crossVectors(L, right);
+    const texel = (cam.right - cam.left) / F.shadow.mapSize.x;
+    const snapped = new THREE.Vector3().addScaledVector(right, Math.round(center.dot(right) / texel) * texel)
+      .addScaledVector(upL, Math.round(center.dot(upL) / texel) * texel).addScaledVector(L, center.dot(L));
+    F.target.position.copy(snapped);
+    F.position.copy(snapped).addScaledVector(L, 800);
+    F.target.updateMatrixWorld();
+    F.updateMatrixWorld();
+    F.shadow.needsUpdate = true;
   }
 
   render(camera, dt, opts = {}) {
