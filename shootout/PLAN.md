@@ -113,6 +113,8 @@ the whole district, so frustum culling never skips any of it, and the shadow pas
 
 - [x] 65. The last kill of a solo round plays out in slow motion (30%), easing back to speed.
 
+- [x] 66. Lens flare: soft coloured ghosts and a faint ring when the sun is in clear view.
+
 ## Log
 - Tel Aviv load (local, cached): ready in ~8 s; main-thread stages: decode 1.6 s, seam clip 1.0,
   cars 0.4, shot BVH 1.5, chunking 1.3.

@@ -557,6 +557,9 @@ uniform float uAutoExposure;
 uniform float uScotopic;
 uniform float uVignette;
 uniform float uFlash;
+uniform vec2 uSunUV;
+uniform float uFlare;
+uniform float uAspect;
 
 vec3 RRTAndODTFit(vec3 v) {
   vec3 a = v * (v + 0.0245786) - 0.000090537;
@@ -569,6 +572,32 @@ vec3 aces(vec3 c) {
   return clamp(outM * RRTAndODTFit(inM * c), 0.0, 1.0);
 }
 float ign(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715)))); }
+
+// A camera lens looking toward the sun: soft coloured ghosts strung along the line from the
+// sun through the middle of the frame, and a faint ring. Only while the sun itself is in
+// clear view (the sky's depth at and around it).
+vec3 lensFlare(vec2 uv) {
+  float seen = 0.0;
+  for (int i = 0; i < 5; i++) {
+    vec2 o = vec2(float(i == 1) - float(i == 2), float(i == 3) - float(i == 4)) * 0.012;
+    seen += step(9000.0, texture(tScene, uSunUV + o).a);
+  }
+  float k = uFlare * seen / 5.0;
+  if (k < 0.001) return vec3(0.0);
+  vec2 axis = vec2(0.5) - uSunUV;
+  vec3 c = vec3(0.0);
+  const vec3 tint[5] = vec3[5](vec3(0.9, 0.6, 0.3), vec3(0.3, 0.8, 0.6), vec3(0.5, 0.5, 1.0), vec3(1.0, 0.75, 0.4), vec3(0.6, 0.9, 1.0));
+  const float at[5] = float[5](0.35, 0.7, 1.15, 1.45, 1.9);
+  const float rad[5] = float[5](0.035, 0.06, 0.02, 0.09, 0.05);
+  for (int i = 0; i < 5; i++) {
+    vec2 p = uSunUV + axis * at[i];
+    float d = length((uv - p) * vec2(uAspect, 1.0));
+    c += tint[i] * smoothstep(rad[i], rad[i] * 0.55, d) * 0.06;
+  }
+  float r = length((uv - 0.5) * vec2(uAspect, 1.0)) - length(axis * vec2(uAspect, 1.0)) * 0.9;
+  c += vec3(0.6, 0.7, 0.9) * exp(-r * r * 4000.0) * 0.02;
+  return c * k;
+}
 
 void main() {
   vec2 uv = vUv;
@@ -602,6 +631,7 @@ void main() {
   col *= mix(vec3(0.97, 0.99, 1.04), vec3(1.03, 1.0, 0.96), smoothstep(0.2, 0.8, l));
   vec2 vc = vUv - 0.5;
   col *= 1.0 - dot(vc, vc) * uVignette;
+  col += lensFlare(vUv);
   col = pow(max(col, 0.0), vec3(1.0 / 2.2));
   col += (ign(gl_FragCoord.xy) - 0.5) / 255.0;
   gl_FragColor = vec4(col, 1.0);

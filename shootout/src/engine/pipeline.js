@@ -279,6 +279,7 @@ export class Pipeline {
       uUnderwater: { value: 0 },
       uTime: this.u.uTime,
       uExposureBias: { value: 1.0 },
+      uSunUV: { value: new THREE.Vector2() }, uFlare: { value: 0 }, uAspect: { value: 1 },
       uAutoExposure: { value: 1 },
       uScotopic: { value: 1 },
       uVignette: { value: 0.55 },
@@ -579,6 +580,7 @@ export class Pipeline {
     let bloomTex = this.blackRT?.texture || sceneTex;
     let lumTex = this.lumRT[0].texture;
     let raysTex = this.blackRT?.texture || sceneTex;
+    let flare = 0;
     let rays = 0;
 
     if (this.bloomRTs.length) {
@@ -619,6 +621,11 @@ export class Pipeline {
       if (facing > 0 && lightPos.z < 1 && this.raysRT) {
         const onScreen = 1 - smoothstep(0.9, 1.6, Math.max(Math.abs(lightPos.x), Math.abs(lightPos.y)));
         rays = onScreen * smoothstep(0.0, 0.35, facing) * (opts.underwater ? 0.3 : 1);
+        // the lens catches the sun (not the moon), less through cloud
+        const cf = this.compositeMaterial.uniforms;
+        cf.uSunUV.value.set(lightPos.x * 0.5 + 0.5, lightPos.y * 0.5 + 0.5);
+        cf.uAspect.value = W / H;
+        flare = rays * (this.sunDir.y > 0 ? 1 : 0) * (1 - (this.weather || 0)) * (opts.underwater ? 0 : 1);
         const ru = this.raysMaterial.uniforms;
         ru.tScene.value = sceneTex;
         ru.uSunUV.value.set(lightPos.x * 0.5 + 0.5, lightPos.y * 0.5 + 0.5);
@@ -636,6 +643,7 @@ export class Pipeline {
     cu.tLum.value = lumTex;
     cu.tRays.value = raysTex;
     cu.uRays.value = rays * 1.2;
+    cu.uFlare.value = flare;
     cu.uUnderwater.value = opts.underwater ? 1 : 0;
     cu.uFlash.value = opts.flash || 0;
     const amb = new THREE.Vector3(0.02, 0.1, 0.13).multiplyScalar(0.4 + this.lightColor.y * 0.08 + (1 - this.night) * 0.4);
