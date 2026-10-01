@@ -684,6 +684,9 @@ export class Character {
       if (flat.lengthSq() > 1e-6) flat.normalize();
       const blow = flat.multiplyScalar(push).setY(Math.min(push * 0.25, 1.5));
       const vel = this.motion?.vel?.clone() || new THREE.Vector3();
+      // guns in hand fly out of them
+      if (this.weapon === 'rifle' && this.equipT > 0.5) this.dropGun(this.rifle, vel, blow);
+      if (this.weapon === 'pistols' && this.drawn) this.pistols.forEach((p) => this.dropGun(p, vel, blow));
       this.ragdoll = new Ragdoll(this, vel, blow, Character.physics);
       this.dead = { t: 0, ragdoll: true };
       this.jump = null;
@@ -702,7 +705,53 @@ export class Character {
     this.jump = null;
   }
 
+  // A copy of a held gun falls from the dead hand, tumbles and settles; the real one hides
+  // until the fighter is back.
+  dropGun(gun, vel, blow) {
+    if (!gun?.parent) return;
+    gun.updateMatrixWorld(true);
+    const copy = gun.clone(true);
+    copy.matrixAutoUpdate = false;
+    const p = new THREE.Vector3(), q = new THREE.Quaternion(), s = new THREE.Vector3();
+    gun.matrixWorld.decompose(p, q, s);
+    gun.parent.add(copy);
+    gun.userData.dropHidden = true;
+    gun.visible = false;
+    (this.dropped || (this.dropped = [])).push({
+      obj: copy, gun, p, q, s,
+      v: vel.clone().multiplyScalar(0.6).add(blow.clone().multiplyScalar(0.5)).add(new THREE.Vector3((Math.random() - 0.5) * 1.5, 1.5 + Math.random(), (Math.random() - 0.5) * 1.5)),
+      w: new THREE.Vector3().randomDirection().multiplyScalar(6 + Math.random() * 6), rest: false,
+    });
+  }
+
+  updateDropped(dt) {
+    if (!this.dropped?.length) return;
+    const P = Character.physics;
+    const dq = this.tmp.q;
+    for (const d of this.dropped) {
+      if (!d.rest) {
+        d.v.y -= 9.8 * dt;
+        d.p.addScaledVector(d.v, dt);
+        const w = d.w.length();
+        if (w > 1e-4) d.q.premultiply(dq.setFromAxisAngle(V[0].copy(d.w).divideScalar(w), w * dt));
+        const g = (P?.heightAt(d.p.x, d.p.z) ?? 0) + 0.04;
+        if (d.p.y < g) {
+          d.p.y = g;
+          d.v.y = -d.v.y * 0.25;
+          d.v.x *= 0.5; d.v.z *= 0.5;
+          d.w.multiplyScalar(0.45);
+          if (Math.abs(d.v.y) < 0.5 && Math.hypot(d.v.x, d.v.z) < 0.3) d.rest = true;
+        }
+      }
+      d.obj.matrix.compose(d.p, d.q, d.s);
+      d.obj.matrixWorld.copy(d.obj.matrix);
+      d.obj.children.forEach((c) => c.updateMatrixWorld(true));
+    }
+  }
+
   revive() {
+    for (const d of this.dropped || []) { d.obj.removeFromParent(); d.gun.visible = true; d.gun.userData.dropHidden = false; }
+    this.dropped = [];
     this.dead = null;
     this.ragdoll = null;
     this.flinch = 0;
@@ -722,6 +771,7 @@ export class Character {
     const d = this.dead;
     d.t += dt;
     if (d.ragdoll || d.seated) {
+      this.updateDropped(dt);
       if (d.ragdoll && this.ragdoll) {
         this.ragdoll.step(dt); // sleeps once still; the pose is re-applied every frame regardless
         this.ragdoll.apply(rotateBoneWorld, rotateBoneToward, this.tmp);

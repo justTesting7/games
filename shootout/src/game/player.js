@@ -396,7 +396,7 @@ export class Player {
     if (Math.abs(cam.fov - this.fov) > 0.01) { cam.fov = this.fov; cam.updateProjectionMatrix(); }
     const inCockpit = !!rideCar(this.vehicle);
     if (this.character.root && !inCockpit) this.character.root.visible = follow ? true : !through;
-    if (this.character.rifle && !inCockpit) this.character.rifle.visible = follow ? true : !through;
+    if (this.character.rifle && !inCockpit && !this.character.rifle.userData.dropHidden) this.character.rifle.visible = follow ? true : !through;
 
     this.recoilPitch *= Math.exp(-dt * (scoped ? 4.5 : 10));
     // Breathing and heartbeat sway the scope, more when moving or hurt.
