@@ -86,7 +86,7 @@ the whole district, so frustum culling never skips any of it, and the shadow pas
 - [x] 47. Brake and tail lights glow (HDR, bloom) on driven cars; reversing lights.
 - [x] 48. Shell casings: brass ejected from the gun, tumbling and bouncing (existed); now they tink.
 - [x] 49. Blood: spatter decals on the walls and ground behind a hit, pools under bodies (existed).
-- [ ] 50. Rain puddles: noise-masked mirror patches in the wet streets with raindrop ripples.
+- [x] 50. Rain puddles: noise-masked mirror patches in the wet streets with raindrop ripples.
 - [ ] 51. Crash dents: cars deform around the point of impact (vertex dents on the car's own mesh).
 - [ ] 52. Knock-over props: bollards, signs and bins hit by cars topple and roll as physics props.
 - [ ] 53. Bullet flight time for rifles (finishes 23): rounds travel and resolve on arrival.

@@ -240,8 +240,8 @@ export class Pipeline {
     this.wetMaterial = fsMaterial(S.wetReflectFrag, {
       tColor: { value: null }, uInvViewProj: { value: new THREE.Matrix4() }, uViewProj: { value: new THREE.Matrix4() },
       uCamPos: { value: new THREE.Vector3() }, uCamForward: { value: new THREE.Vector3() },
-      uTexel: { value: new THREE.Vector2() }, uWet: { value: 0 },
-    }, { transparent: true, blending: THREE.CustomBlending, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor, blendSrcAlpha: THREE.ZeroFactor, blendDstAlpha: THREE.OneFactor });
+      uTexel: { value: new THREE.Vector2() }, uWet: { value: 0 }, uTime: this.u.uTime,
+    }, { transparent: true, blending: THREE.CustomBlending, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor, blendSrcAlpha: THREE.ZeroFactor, blendDstAlpha: THREE.OneFactor });
     this.wet = 0; // 0..1, set by the game (rain)
     this.motion = 0; // 0..1, set by the game (fast driving)
     this.bloomDown = fsMaterial(S.bloomDownFrag, {

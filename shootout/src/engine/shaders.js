@@ -729,6 +729,35 @@ uniform vec3 uCamPos;
 uniform vec3 uCamForward;
 uniform vec2 uTexel;
 uniform float uWet;
+uniform float uTime;
+
+float h21(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float vnoise(vec2 p) {
+  vec2 i = floor(p), f = fract(p);
+  vec2 u = f * f * (3.0 - 2.0 * f);
+  return mix(mix(h21(i), h21(i + vec2(1, 0)), u.x), mix(h21(i + vec2(0, 1)), h21(i + vec2(1, 1)), u.x), u.y);
+}
+// where the water pools: low-frequency blotches with ragged edges, fixed in the world
+float puddle(vec2 xz) {
+  float n = vnoise(xz * 0.22) * 0.6 + vnoise(xz * 0.61 + 7.3) * 0.3 + vnoise(xz * 2.3 + 3.1) * 0.1;
+  return smoothstep(0.6, 0.66, n);
+}
+// raindrops landing: an expanding ring per 0.5 m cell, each on its own clock (two layers)
+vec2 ripples(vec2 xz, float t) {
+  vec2 g = vec2(0.0);
+  for (int k = 0; k < 2; k++) {
+    vec2 p = xz * 2.0 + float(k) * 17.31;
+    vec2 c = floor(p);
+    vec2 o = vec2(h21(c), h21(c + 3.7)) * 0.6 + 0.2;
+    float ph = fract(t * 1.3 + h21(c + 9.1));
+    vec2 d = fract(p) - o;
+    float r = length(d);
+    float ring = r - ph * 0.45;
+    float w = sin(ring * 60.0) * exp(-ring * ring * 900.0) * (1.0 - ph);
+    g += d / max(r, 1e-3) * w;
+  }
+  return g * 0.12;
+}
 
 vec3 worldAt(vec2 uv, float viewZ) {
   vec4 far = uInvViewProj * vec4(uv * 2.0 - 1.0, 1.0, 1.0);
@@ -745,7 +774,13 @@ void main() {
   vec3 N = normalize(cross(Py - P, Px - P));
   if (N.y < 0.0) N = -N;
   if (N.y < 0.9) { gl_FragColor = vec4(0.0); return; }
-  N = vec3(0.0, 1.0, 0.0); // streets are flat enough: keep the mirror clean
+  // streets are flat enough: a clean mirror, except where raindrops ring the puddles
+  // puddles lie on grey ground (asphalt, paving), not on grass, leaves or car roofs
+  vec3 base = texture(tColor, vUv).rgb;
+  float sat = (max(base.r, max(base.g, base.b)) - min(base.r, min(base.g, base.b))) / max(max(base.r, max(base.g, base.b)), 1e-4);
+  float pud = puddle(P.xz) * smoothstep(0.3, 0.8, uWet) * (1.0 - smoothstep(0.2, 0.35, sat)) * step(P.y, uCamPos.y - 1.0);
+  vec2 rip = ripples(P.xz, uTime) * pud * smoothstep(25.0, 6.0, d);
+  N = normalize(vec3(rip.x, 1.0, rip.y));
   vec3 V = normalize(P - uCamPos);
   vec3 R = reflect(V, N);
   vec3 hitCol = vec3(0.0);
@@ -768,6 +803,9 @@ void main() {
     }
   }
   float fres = 0.04 + 0.96 * pow(1.0 - clamp(dot(-V, N), 0.0, 1.0), 5.0);
-  gl_FragColor = vec4(hitCol * found * uWet * (0.3 + 0.7 * fres), 0.0);
+  // a puddle is a near-perfect mirror and darkens the street under its film of water
+  float k = uWet * mix(0.15 + 0.55 * fres, 0.6 + 0.4 * fres, pud);
+  float fade = smoothstep(120.0, 80.0, d);
+  gl_FragColor = vec4(hitCol * found * k * (1.0 + pud * 0.6), pud * 0.45 * fade);
 }
 `;
