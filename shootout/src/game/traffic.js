@@ -125,7 +125,7 @@ export class Traffic {
       if (atGoal) { a.goal = this.goalFor(car); a.route = null; }
       if ((!a.route || a.replan <= 0) && DriveGrid.planned !== now) {
         DriveGrid.planned = now;
-        a.route = grid.find({ x: car.x, z: car.z }, a.goal, { near: 15, maxNodes: 5000 });
+        a.route = grid.find({ x: car.x, z: car.z }, a.goal, { near: 15, maxNodes: 2500 });
         a.replan = 8;
         if (!a.route) a.goal = this.goalFor(car); // nowhere to go that way: try another
       }

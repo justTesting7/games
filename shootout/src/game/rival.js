@@ -10,6 +10,7 @@ const GRAVITY = 16;
 const JUMP_V = 5.0;
 const RADIUS = 0.3;
 const UP = new THREE.Vector3(0, 1, 0);
+const COVER_BUDGET = { at: -1, used: 0 }; // cover searches run this tick (see Rival.findCover)
 const SHELTER_SPRINT = 5.6;
 const EXPOSE_LIMIT = 1.15;
 const COVER_PAD = RADIUS + 0.5;
@@ -406,7 +407,24 @@ export class Rival {
     return { c, spot, type: this.coverKind(c) };
   }
 
-  findCover(threat, { mustHide = true } = {}) {
+  // Cover searches are the heaviest thing a rival does (tens of milliseconds on a city
+  // map), and a kill sets every survivor rethinking at once. So searches are rationed:
+  // one a tick across all rivals; the others keep their last answer and get their turn on
+  // a following tick.
+  findCover(threat, opts = {}) {
+    if (!threat) return null;
+    const key = opts.mustHide === false ? 'bulk' : 'hide';
+    const now = this.combat.time, R = COVER_BUDGET;
+    if (R.at !== now) { R.at = now; R.used = 0; }
+    const last = this._coverCache?.[key];
+    if (R.used >= 1) return last && last.threat.distanceTo(threat) < 6 ? last.result : null;
+    R.used++;
+    const result = this.searchCover(threat, opts);
+    (this._coverCache || (this._coverCache = {}))[key] = { result, threat: threat.clone() };
+    return result;
+  }
+
+  searchCover(threat, { mustHide = true } = {}) {
     if (!threat) return null;
     const cols = this.world.veg.colliders.query(this.pos.x, this.pos.z, SEARCH_R, this.cols);
     // City maps put well over a thousand boxes in range. Walk them nearest first and
@@ -1408,7 +1426,7 @@ export class Rival {
     const offRoute = d.route && followRoute(d.route, car.x, car.z, 0).off > 7;
     if ((!d.route || d.replan <= 0 || offRoute) && DriveGrid.planned !== now) {
       DriveGrid.planned = now;
-      d.route = grid.find({ x: car.x, z: car.z }, { x: tp.x, z: tp.z }, { near: 20 });
+      d.route = grid.find({ x: car.x, z: car.z }, { x: tp.x, z: tp.z }, { near: 20, maxNodes: 2500 }); // capped: no hitch
       d.replan = 5;
     }
     let aimX = tp.x, aimZ = tp.z, turn = 0;
