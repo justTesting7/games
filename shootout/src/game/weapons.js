@@ -63,8 +63,15 @@ const tmp = new THREE.Vector3();
 // Arms and legs take less than the torso. Networked victims keep the room's body damage
 // (the server scores those hits and only hears head or body).
 function shotDamage(def, hit) {
-  if (hit.head) return def.head;
-  return hit.limb && !hit.fighter?.net ? Math.round(def.body * LIMB_DAMAGE) : def.body;
+  const through = Math.pow(0.6, hit.pierced || 0); // each layer it punched through
+  if (hit.head) return Math.round(def.head * through);
+  return Math.round((hit.limb && !hit.fighter?.net ? def.body * LIMB_DAMAGE : def.body) * through);
+}
+
+/** What a round goes through: a rifle punches wood, glass and car bodies, a pistol only glass. */
+function pierceable(hit, rifle) {
+  if (hit.surface === 'glass') return true;
+  return rifle && (hit.surface === 'wood' || hit.surface === 'target' || !!hit.car);
 }
 
 export class Weapons {
@@ -303,6 +310,31 @@ export class Weapons {
     // rifle rounds drop over distance: trace the arc, then treat the hit as a straight
     // shot to where the round actually landed (so cover, tracer and reports agree)
     let hit = rifle ? this.ballistic(from, dir, shooter) : this.world.raycast(from, dir, 900, shooter);
+    // Penetration: a rifle round punches through wood, glass and car bodywork, a pistol
+    // round through glass; each layer leaves its mark and costs 40% of the damage.
+    for (let layer = 0; hit && layer < 2 && !hit.fighter && !hit.drone && pierceable(hit, rifle); layer++) {
+      const entry = from.clone().addScaledVector(dir, hit.t);
+      this.fx.impact(entry, hit.normal, hit.surface, dir);
+      let pane = null;
+      if (hit.surface === 'glass' && hit.tri !== undefined && this.world.studio?.root) {
+        pane = this.world.shots?.breakPane(hit.tri, [this.world.studio.root]);
+        if (pane) this.fx.shatter?.(pane.center, pane.size, hit.normal, dir);
+      }
+      if (!hit.car && !pane) this.fx.bulletHole?.(entry, hit.normal, hit.surface);
+      if (hit.car) this.world.cars?.damage(hit.car, rifle ? 16 : 4, shooter);
+      let through = hit.car ? 2.2 : 0.3; // a car is crossed whole, a board or pane barely
+      let next = this.world.raycast(entry.clone().addScaledVector(dir, through), dir, 900, shooter);
+      // the far face of the same crate or pane is where it comes out, not a second layer
+      if (next && !next.fighter && !next.car && next.surface === hit.surface && next.t < 1.2) {
+        through += next.t + 0.05;
+        next = this.world.raycast(entry.clone().addScaledVector(dir, through), dir, 900, shooter);
+      }
+      const pierced = (hit.pierced || 0) + 1;
+      if (!next) { hit = null; break; }
+      next.t += hit.t + through;
+      next.pierced = pierced;
+      hit = next;
+    }
     // Cover the chest is standing behind still stops the shot. A fighter
     // on that chest line that the crosshair missed is ignored.
     if (shooter.isPlayer && hit && !hit.drone) {
@@ -312,7 +344,7 @@ export class Weapons {
       if (len > 0.35) {
         to.multiplyScalar(1 / len);
         const cover = this.world.raycast(body, to, len - 0.15, shooter);
-        if (cover && !cover.fighter && !cover.drone) hit = cover;
+        if (cover && !cover.fighter && !cover.drone && !(hit.pierced && pierceable(cover, rifle))) hit = cover;
       }
     }
     this.fx.muzzle(flashAt, flashAxis, rifle ? 2.4 : 1);

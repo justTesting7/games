@@ -63,6 +63,8 @@ the whole district, so frustum culling never skips any of it, and the shadow pas
 - [x] 34. Engine sound: synthesised, RPM through four gears, throttle-opened filter; nearest other
       car under power gets its own distance-attenuated voice; scooters whine.
 - [x] 35. Tracers that read: brighter, longer streaks for rifles and every third pistol round.
+- [x] 36. Bullet penetration: rifle through wood, glass and car bodies (60% damage per layer, up
+      to two), pistols through glass; concrete and stone stop everything.
 
 ## Log
 - Tel Aviv load (local, cached): ready in ~8 s; main-thread stages: decode 1.6 s, seam clip 1.0,
