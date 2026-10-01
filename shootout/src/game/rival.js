@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { hasSea } from './swim.js';
-import { driverPose } from './cars.js';
+import { driverPose, exitOf } from './cars.js';
 import { Loadout, WEAPONS, Weapons } from './weapons.js';
 import { bowlWaypoint } from '../world/arenaLayout.js';
 
@@ -158,6 +158,9 @@ export class Rival {
   }
 
   spawn(x, z, yaw) {
+    if (this.drive) this.leaveCar();
+    this.drive = null;
+    this.driveCooldown = 0;
     this.standUp();
     this.pos.set(x, this.world.terrain.heightAt(x, z), z);
     this.vel.set(0, 0, 0);
@@ -1238,10 +1241,138 @@ export class Rival {
     return true;
   }
 
+  // ---- taking a car ---------------------------------------------------------------
+  // A rival whose target is far off takes the nearest empty car within reach: walks to
+  // the driver's door, gets in, drives at the target (running down anyone in the way)
+  // and jumps out to fight when close, or when the car is wedged or burning.
+  considerCar() {
+    if (this.drive || !this.target || this.combat.time < (this.driveCooldown || 0)) return;
+    const cars = this.world.cars;
+    if (!cars?.list.length) return;
+    const tp = this.threatPos();
+    if (!tp || tp.distanceTo(this.pos) < 70) return;
+    // a parked car boxed in front and back by others can't get out: skip those
+    const lane = (car, dir) => !cars.list.some((o) => {
+      if (o === car) return false;
+      const dx = o.x - car.x, dz = o.z - car.z;
+      const along = (dx * Math.sin(car.yaw) + dz * Math.cos(car.yaw)) * dir;
+      const side = dx * Math.cos(car.yaw) - dz * Math.sin(car.yaw);
+      return along > 0 && along < 6.5 && Math.abs(side) < 1.6;
+    });
+    let best = null, bd = 20, out = 0;
+    for (const car of cars.list) {
+      if (car.driver || car.wrecked || car.spec) continue;
+      const d = Math.hypot(car.x - this.pos.x, car.z - this.pos.z);
+      if (d >= bd) continue;
+      const fwdFree = lane(car, 1), backFree = lane(car, -1);
+      if (!fwdFree && !backFree) continue;
+      bd = d; best = car; out = fwdFree ? 0 : 1.3; // reverse out first when only the back is free
+    }
+    if (best) this.drive = { car: best, phase: 'walk', t: 0, stuck: 0, tries: 0, reverse: out };
+  }
+
+  // Looks ahead along the heading and 25 deg to each side for whatever the car would hit
+  // (the walking grid it collides with, other cars, building walls): returns a steer away
+  // from the nearer side, scaled by how close it is (0 = clear).
+  carAvoid(car) {
+    const cols = this.world.veg?.colliders, cars = this.world.cars?.list || [];
+    const reach = 6 + Math.min(Math.abs(car.speed), 20) * 0.45;
+    const tmp = this._avoidTmp || (this._avoidTmp = []);
+    const hitAt = (x, z) => {
+      if (cols) {
+        for (const c of cols.query(x, z, 1.4, tmp)) {
+          if (c.y1 < car.y + 0.2 || c.y0 > car.y + 1.3) continue;
+          if (c.box ? x > c.x0 - 0.9 && x < c.x1 + 0.9 && z > c.z0 - 0.9 && z < c.z1 + 0.9 : Math.hypot(x - c.x, z - c.z) < (c.r || 0) + 0.9) return true;
+        }
+      }
+      for (const o of cars) if (o !== car && Math.abs(o.x - x) < 2.4 && Math.abs(o.z - z) < 2.4 && Math.hypot(o.x - x, o.z - z) < 2.2) return true;
+      return false;
+    };
+    const look = (a) => {
+      const yaw = car.yaw + a * Math.sign(car.speed || 1);
+      const fx = Math.sin(yaw) * Math.sign(car.speed || 1), fz = Math.cos(yaw) * Math.sign(car.speed || 1);
+      for (let t = 2.6; t < reach; t += 1) if (hitAt(car.x + fx * t, car.z + fz * t)) return t;
+      return reach;
+    };
+    const c = look(0);
+    if (c >= reach) return 0;
+    const l = look(0.45), r = look(-0.45);
+    if (l >= reach && r >= reach) return 0.8;
+    return (l > r ? 1 : -1) * (1 - c / reach); // +steer turns left
+  }
+
+  walkToCar(wish) {
+    const car = this.drive.car;
+    this.drive.t += 1 / 60;
+    if (car.driver || car.wrecked || this.drive.t > 8) { this.leaveCar(); return; } // can't get to it
+    const door = exitOf(car, 1);
+    const to = new THREE.Vector3(door.x - this.pos.x, 0, door.z - this.pos.z);
+    if (to.length() < 1.3) {
+      car.driver = this.fighter;
+      car.ai = { throttle: 0, steer: 0, handbrake: false };
+      this.seatedIn = car;
+      this.vehicle = car;
+      this.drive.phase = 'drive';
+      this.drive.t = 0;
+      const ch = this.character;
+      if (ch.rifle) ch.rifle.visible = false;
+      ch.pistols?.forEach((p) => { p.visible = false; });
+      return;
+    }
+    wish.dir.copy(to.normalize());
+    wish.speed = 5.2;
+    wish.aim = false;
+  }
+
+  updateDriving(dt) {
+    const d = this.drive, car = d.car;
+    d.t += dt;
+    const tp = this.threatPos();
+    if (!tp || car.wrecked || (car.hp ?? 100) < 25) { this.leaveCar(); return; }
+    const dx = tp.x - car.x, dz = tp.z - car.z;
+    const dist = Math.hypot(dx, dz);
+    const err = wrapAngle(Math.atan2(dx, dz) - car.yaw);
+    const ai = car.ai;
+    if (d.reverse > 0) {
+      d.reverse -= dt;
+      ai.throttle = -1;
+      ai.steer = -Math.sign(err);
+    } else {
+      const avoid = this.carAvoid(car);
+      ai.steer = THREE.MathUtils.clamp(err * 2.2 + avoid * 2.5, -1, 1);
+      ai.throttle = dist < 32 ? (car.speed > 1 ? -1 : 0) : Math.abs(err) > 1.3 || Math.abs(avoid) > 0.6 ? 0.4 : 1;
+      if (Math.abs(car.speed) < 1.2 && ai.throttle > 0) d.stuck += dt; else d.stuck = Math.max(0, d.stuck - dt);
+      if (d.stuck > 1.4) { d.stuck = 0; d.reverse = 1.1; d.tries++; }
+    }
+    if ((dist < 32 && Math.abs(car.speed) < 2) || d.tries > 3 || d.t > 45) { this.leaveCar(); return; } // close enough: out and fight
+    this.updateSeated(dt);
+  }
+
+  leaveCar() {
+    const d = this.drive;
+    this.drive = null;
+    this.driveCooldown = this.combat.time + 20;
+    if (!d) return;
+    const car = d.car;
+    if (car.driver === this.fighter) car.driver = null;
+    car.ai = null;
+    if (this.seatedIn === car) {
+      this.standUp();
+      const at = exitOf(car, 1);
+      this.pos.set(at.x, this.world.terrain.heightAt(at.x, at.z), at.z);
+      this.vel.set(0, 0, 0);
+      this.yaw = car.yaw;
+    }
+  }
+
   update(dt, active) {
     const ch = this.character;
-    if (this.seatedIn && this.fighter.alive) { this.updateSeated(dt); return; }
-    if (this.seatedIn) this.standUp(); // shot in the seat: the body stays where it fell
+    if (this.drive?.phase === 'drive') {
+      if (this.fighter.alive && active) { this.updateDriving(dt); this.weapons.tick(this.fighter, dt); return; }
+      if (!this.fighter.alive) { const car = this.drive.car; car.ai = null; if (car.driver === this.fighter) car.driver = null; this.drive = null; }
+    }
+    if (this.seatedIn && this.fighter.alive && !this.drive) { this.updateSeated(dt); return; }
+    if (this.seatedIn && !this.drive) this.standUp(); // shot in the seat: the body stays where it fell
     if (!this.fighter.alive) {
       ch.root.position.copy(this.pos);
       ch.update(dt, {});
@@ -1258,6 +1389,8 @@ export class Rival {
       if (this.thinkT <= 0 && !this.thinking) this.think();
       if (this.target && !this.enemies().includes(this.target)) this.target = null;
       wish = this.steer(dt);
+      this.considerCar();
+      if (this.drive?.phase === 'walk') this.walkToCar(wish);
     }
     this.updateAim(dt, wish);
     const jumpStarted = this.move(dt, wish);

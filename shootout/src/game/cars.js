@@ -1221,7 +1221,20 @@ export class Cars {
     }
 
     for (const car of this.list) {
-      if (!car.driver?.isPlayer) {
+      if (car.ai && car.driver && !car.driver.isPlayer && !car.remote) {
+        // a rival at the wheel: same grip physics as the player's car
+        const stepped = stepGrip(car, { throttle: car.ai.throttle, steer: car.ai.steer, handbrake: car.ai.handbrake, dt, spec: specOf(car) });
+        Object.assign(car, { speed: stepped.speed, lat: stepped.lat, yawRate: stepped.yawRate, slip: stepped.slip, yaw: stepped.yaw });
+        car.steer = car.ai.steer;
+        car.x += stepped.vx * dt;
+        car.z += stepped.vz * dt;
+        car.vel.set(stepped.vx, 0, stepped.vz);
+        this.groundCar(car);
+        this.bumpWorld(car);
+        this.bumpCars(car);
+        this.refreshSeat(car);
+        this.placeMesh(car);
+      } else if (!car.driver?.isPlayer) {
         if (!car.driver && Math.abs(car.speed) > 0.05) {
           const stepped = stepDrive({
             speed: car.speed, yaw: car.yaw, throttle: 0, steer: 0, dt, spec: specOf(car),

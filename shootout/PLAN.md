@@ -37,7 +37,7 @@ the whole district, so frustum culling never skips any of it, and the shadow pas
 - [~] 17. Shadows reach further: Medium 2048 over 64 m, High/Ultra 4096 over 90/110 m (was 40-58 m);
       a real second cascade would still help the far streets.
 - [x] 19. Explosions shove nearby cars and scooters and shatter their windows.
-- [ ] 18. Rival drivers: rivals take cars to close distance / flee.
+- [~] 18. Rival drivers: see 24.
 
 ## Phase 2 (2026-10-01): 3x more impressive, visually and physically
 - [x] 20. Cars take damage: shots and crashes wear them down; smoke from the bonnet, then fire,
@@ -47,7 +47,8 @@ the whole district, so frustum culling never skips any of it, and the shadow pas
 - [x] 22. Impact debris: chips that bounce off the ground for concrete/wood, sparks for metal,
       glass shards; dust puffs on ground hits.
 - [~] 23. Rifle rounds follow a ballistic arc at 820 m/s (0.65 m drop at 300 m); hit resolved at once.
-- [ ] 24. Rivals drive: a rival far from the fight takes a nearby car to close distance.
+- [~] 24. Rivals drive: a rival far from its target takes an unboxed car within 20 m and drives at
+      it with look-ahead avoidance, out and fighting within ~32 m. No road pathfinding yet.
 - [x] 25. SMAA on High/Ultra (FXAA stays on Medium).
 - [x] 26. Night: streetlamp light pools and headlight beams (additive, no real lights: no shader cost by day).
 - [x] 27. Camera feel: speed FOV and shake on impacts, landing dip, damage vignette and
