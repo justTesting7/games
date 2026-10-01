@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { BulletHoles } from './bulletHoles.js';
 import { SkidMarks } from './skidMarks.js';
 import { Debris } from './debris.js';
+import { Fireballs } from './fireball.js';
 
 const WIND = new THREE.Vector3(0.9, 0, 0.4); // smoke drifts this way
 
@@ -220,6 +221,7 @@ export class Effects {
     this.holes = new BulletHoles(pipeline.scene);
     this.skids = new SkidMarks(pipeline.scene);
     this.debris = new Debris(pipeline.scene, (x, z) => terrain.heightAt(x, z));
+    this.fireballs = new Fireballs(pipeline.fxScene);
     this.blood.ground = (x, z) => terrain.heightAt(x, z);
     this.blood.onLand = (p, h) => {
       if (h > 0.02 && Math.random() < 0.5) this.decals.drop(p.x, h, p.z, Math.min(0.22, Math.max(0.035, p.size * 9)));
@@ -281,6 +283,7 @@ export class Effects {
       }
       return;
     }
+    this.fireballs.spawn(pos.clone().setY(pos.y + 0.9), 2.4 + Math.random() * 0.6);
     // a column of smoke that keeps rising and drifting, and a scorch on the ground
     (this.emitters || (this.emitters = [])).push({ pos: pos.clone(), t: 0, dur: 7, acc: 0 });
     this.holes.add(new THREE.Vector3(pos.x, this.terrain.heightAt(pos.x, pos.z) + 0.03, pos.z), new THREE.Vector3(0, 1, 0), 'scorch');
@@ -532,6 +535,7 @@ export class Effects {
   }
 
   update(dt) {
+    this.fireballs.update(dt);
     this.updateEmitters(dt);
     this.skids.update(dt);
     this.debris.update(dt);

@@ -7,7 +7,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as S0 from '../src/engine/shaders.js';
 import { FXAAShader } from 'three/addons/shaders/FXAAShader.js';
-const S = { ...S0, fxaaFrag: FXAAShader.fragmentShader };
+import { fireballShaders } from '../src/game/fireball.js';
+const S = { ...S0, fxaaFrag: FXAAShader.fragmentShader, fireballVert: fireballShaders.vert, fireballFrag: fireballShaders.frag };
 
 try { execFileSync('glslangValidator', ['--version'], { stdio: 'ignore' }); } catch {
   console.log('skip: glslangValidator not installed');
@@ -32,6 +33,7 @@ precision highp int;
 #define varying out
 #define texture2D texture
 uniform mat4 modelMatrix, modelViewMatrix, projectionMatrix, viewMatrix;
+uniform mat3 normalMatrix;
 uniform vec3 cameraPosition;
 in vec3 position;
 in vec3 normal;
