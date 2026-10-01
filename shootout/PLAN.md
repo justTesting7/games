@@ -81,7 +81,7 @@ the whole district, so frustum culling never skips any of it, and the shadow pas
 ## Phase 3 (2026-10-01, cont.): push further
 - [x] 45. Ground bounce: the sky env's lower half is the sunlit street's warm bounce, not more
       blue sky, so shaded walls and car flanks stop looking teal.
-- [ ] 46. Night exposure: auto exposure adapts night back to overcast day; cap the adaptation so
+- [x] 46. Night exposure: auto exposure adapts night back to overcast day; cap the adaptation so
       night reads as night and the lamp pools and headlights matter.
 - [ ] 47. Brake and tail lights glow (HDR, bloom) on driven cars; reversing lights.
 - [ ] 48. Shell casings: brass ejected from the gun, tumbling and bouncing with a tink.

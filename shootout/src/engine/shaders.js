@@ -588,7 +588,9 @@ void main() {
   float avgLum = texture(tLum, vec2(0.5)).r;
   if (!(avgLum > 0.0) || avgLum != avgLum) avgLum = 0.18;
   // HDR auto-exposure on an 8-bit phone target blows the ground to white.
-  if (uAutoExposure > 0.5) col *= uExposureBias * 0.16 / clamp(avgLum, 0.04, 3.0);
+  // The eye adapts only partly: a dim scene is brightened by its luminance to the 0.6, so
+  // night stays night (lamps and headlights matter) while full daylight is unchanged.
+  if (uAutoExposure > 0.5) col *= uExposureBias * 0.16 / (0.374 * pow(clamp(avgLum, 0.002, 3.0) / 0.374, 0.6));
   else col *= uExposureBias;
   col = aces(col);
 

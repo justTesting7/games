@@ -102,7 +102,7 @@ export class Weather {
     u.uTime.value += dt;
     u.uCam.value.copy(camera.position);
     u.uAmount.value = this.amount;
-    if (light) u.uLight.value.set(0.25 + light.x * 0.02, 0.27 + light.y * 0.02, 0.3 + light.z * 0.02);
+    if (light) u.uLight.value.set(0.04 + light.x * 0.045, 0.045 + light.y * 0.045, 0.05 + light.z * 0.045); // dim at night
     this.mesh.visible = this.amount > 0.01;
     // splashes on the ground around the player
     if (this.amount > 0.01 && fx?.alpha && heightAt && at) {
