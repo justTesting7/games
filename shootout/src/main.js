@@ -34,7 +34,7 @@ import { Session } from './game/session.js';
 import { modeUrl, persistMode, persistRoom, resolveMode, resolveRoom } from './game/mode.js';
 import { isTouchDevice, setupTouch } from './game/touch.js';
 import { DRONE } from './game/drone.js';
-import { Cars } from './game/cars.js';
+import { Cars, localOffset, sizeOf, carOverlap, resolveCarBox } from './game/cars.js';
 import { CarLights } from './game/carLights.js';
 import { createGameRenderer } from './engine/webgl.js';
 import { RADAR_RANGE, radarBlips, radarSubjects, drawRadar } from './game/radar.js';
@@ -122,7 +122,20 @@ world.combat = combat;
 // Ragdolls fall onto the ground and are kept out of walls.
 Character.physics = {
   heightAt: (x, z) => world.terrain.heightAt(x, z),
-  resolve: (p, r) => world.veg?.colliders.resolveXZ(p, r, p.y - r, p.y + r),
+  // the cars within reach of a body this step
+  near: (p) => (world.cars?.list || []).filter((c) => Math.abs(c.x - p.x) < 6 && Math.abs(c.z - p.z) < 6 && Math.abs(c.y - p.y) < 3),
+  resolve: (p, r, cars) => {
+    world.veg?.colliders.resolveXZ(p, r, p.y - r, p.y + r);
+    // a body thrown onto a car lies on its roof or bonnet; one against its side slides off
+    for (const car of cars || []) {
+      const { along } = localOffset(p.x, p.z, car);
+      const top = car.spec ? 0.8 : Math.abs(along) < sizeOf(car).halfL * 0.35 ? 1.4 : 0.95;
+      const h = p.y - car.y;
+      if (h > top + r || h < -r || !carOverlap(p.x, p.z, car.y, car, r)) continue;
+      if (h > top - 0.35) p.y = car.y + top + r;
+      else resolveCarBox(p, r, car);
+    }
+  },
 };
 // Static geometry only (walls, props, parked cars): keeps gun barrels out of walls.
 Character.wallProbe = (o, d, len) => {

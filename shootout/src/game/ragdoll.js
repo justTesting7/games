@@ -47,7 +47,7 @@ function frame(up, left, out) {
 export class Ragdoll {
   /**
    * character: a posed Character. vel: its velocity at death. push: the killing blow
-   * (a direction scaled to a speed in m/s). physics: { heightAt(x, z), resolve(p, r) }.
+   * (a direction scaled to a speed in m/s). physics: { heightAt(x, z), resolve(p, r, near), near?(p) }.
    */
   constructor(character, vel, push, physics) {
     this.ch = character;
@@ -98,6 +98,7 @@ export class Ragdoll {
     const h = Math.min(dt, 1 / 30);
     this.t += h;
     const { heightAt, resolve } = this.physics;
+    const near = this.physics.near?.(this.p[0]); // what's close enough to touch, once a step
     let motion = 0;
     for (let i = 0; i < this.p.length; i++) {
       const p = this.p[i], q = this.prev[i];
@@ -117,7 +118,15 @@ export class Ragdoll {
       }
       for (let i = 0; i < this.p.length; i++) {
         const p = this.p[i], q = this.prev[i];
-        resolve?.(p, RADIUS);
+        if (resolve) {
+          // pushed out of a wall or a car: move the last position along too, or the push
+          // itself would turn into speed and fling the body
+          const bx = p.x, by = p.y, bz = p.z;
+          resolve(p, RADIUS, near);
+          q.x += (p.x - bx) * 0.85; q.y += (p.y - by) * 0.85; q.z += (p.z - bz) * 0.85;
+          // lifted onto something (a car's roof or bonnet): it grips like the ground does
+          if (p.y - by > 1e-4) { q.x += (p.x - q.x) * 0.5; q.z += (p.z - q.z) * 0.5; }
+        }
         const g = heightAt(p.x, p.z) + RADIUS;
         if (p.y < g) {
           p.y = g;
