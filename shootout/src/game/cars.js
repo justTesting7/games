@@ -1597,6 +1597,8 @@ export class Cars {
       if (!rd) continue;
       const at = f.character.bones.Hips.getWorldPosition(new THREE.Vector3());
       for (const car of this.list) {
+        // one lying on a car that moves off wakes up, so it slides off instead of floating
+        if (Math.abs(car.speed) > 0.3 && at.y - car.y > 0.7 && carOverlap(at.x, at.z, car.y, car, 0.2)) rd.sleep = 0;
         if (Math.abs(car.speed) < 2 || !carOverlap(at.x, at.z, at.y, car, 0.3)) continue;
         rd.kick(at, car.vel.clone().multiplyScalar(0.9).setY(Math.abs(car.speed) * 0.15));
       }
