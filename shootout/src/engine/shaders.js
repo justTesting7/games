@@ -771,6 +771,7 @@ uniform vec3 uCamForward;
 uniform vec2 uTexel;
 uniform float uWet;
 uniform float uTime;
+uniform float uFrame;
 
 float h21(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 float vnoise(vec2 p) {
@@ -824,24 +825,47 @@ void main() {
   N = normalize(vec3(rip.x, 1.0, rip.y));
   vec3 V = normalize(P - uCamPos);
   vec3 R = reflect(V, N);
+  // march the reflected ray in growing steps; a hit is the ray just passing behind the
+  // depth there (within a thin shell, so it doesn't snag on the far side of a pole or a
+  // leg and smear it), then pinned down by bisection. Passing well behind something keeps
+  // going: what's reflected may be further back.
   vec3 hitCol = vec3(0.0);
   float found = 0.0;
-  float t = 0.25;
-  for (int i = 0; i < 28; i++) {
-    t *= 1.18;
+  // each pixel starts its march a little differently (TAA averages away the banding)
+  float jit = fract(52.9829189 * fract(dot(gl_FragCoord.xy + uFrame * 7.31, vec2(0.06711056, 0.00583715))));
+  float t = 0.12 * (1.0 + jit * 0.15), prevT = 0.0;
+  for (int i = 0; i < 40; i++) {
     vec3 q = P + R * t;
     vec4 clip = uViewProj * vec4(q, 1.0);
     if (clip.w <= 0.0) break;
     vec2 uv = clip.xy / clip.w * 0.5 + 0.5;
     if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) break;
     float sceneZ = texture(tColor, uv).a;
-    float qz = dot(q - uCamPos, uCamForward);
-    if (qz > sceneZ + 0.05 && qz < sceneZ + 1.5 + t * 0.15) {
-      hitCol = texture(tColor, uv).rgb;
-      vec2 e = min(uv, 1.0 - uv);
-      found = clamp(min(e.x, e.y) * 8.0, 0.0, 1.0) * (1.0 - float(i) / 28.0);
+    float diff = dot(q - uCamPos, uCamForward) - sceneZ;
+    float shell = 0.12 + t * 0.03;
+    if (diff > 0.0 && t > 0.3) {
+      float lo = prevT, hi = t;
+      for (int k = 0; k < 6; k++) {
+        float mid = 0.5 * (lo + hi);
+        vec3 qm = P + R * mid;
+        vec4 cm = uViewProj * vec4(qm, 1.0);
+        vec2 um = cm.xy / cm.w * 0.5 + 0.5;
+        if (dot(qm - uCamPos, uCamForward) > texture(tColor, um).a) hi = mid; else lo = mid;
+      }
+      vec3 qh = P + R * hi;
+      vec4 ch = uViewProj * vec4(qh, 1.0);
+      vec2 uh = ch.xy / ch.w * 0.5 + 0.5;
+      vec4 sh = texture(tColor, uh);
+      diff = dot(qh - uCamPos, uCamForward) - sh.a;
+      // the crossing was behind something thin (a pole, a leg): not what's reflected here
+      if (diff > shell) { prevT = t; t *= 1.15; continue; }
+      hitCol = sh.rgb;
+      vec2 e = min(uh, 1.0 - uh);
+      found = clamp(min(e.x, e.y) * 10.0, 0.0, 1.0) * (1.0 - smoothstep(20.0, 34.0, hi)) * (1.0 - diff / shell * 0.5);
       break;
     }
+    prevT = t;
+    t *= 1.15;
   }
   float fres = 0.04 + 0.96 * pow(1.0 - clamp(dot(-V, N), 0.0, 1.0), 5.0);
   // a puddle is a near-perfect mirror and darkens the street under its film of water

@@ -272,7 +272,7 @@ export class Pipeline {
     this.wetMaterial = fsMaterial(S.wetReflectFrag, {
       tColor: { value: null }, uInvViewProj: { value: new THREE.Matrix4() }, uViewProj: { value: new THREE.Matrix4() },
       uCamPos: { value: new THREE.Vector3() }, uCamForward: { value: new THREE.Vector3() },
-      uTexel: { value: new THREE.Vector2() }, uWet: { value: 0 }, uTime: this.u.uTime,
+      uTexel: { value: new THREE.Vector2() }, uWet: { value: 0 }, uTime: this.u.uTime, uFrame: { value: 0 },
     }, { transparent: true, blending: THREE.CustomBlending, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor, blendSrcAlpha: THREE.ZeroFactor, blendDstAlpha: THREE.OneFactor });
     this.wet = 0; // 0..1, set by the game (rain)
     this.motion = 0; // 0..1, set by the game (fast driving)
@@ -611,6 +611,7 @@ export class Pipeline {
       camera.getWorldDirection(wu.uCamForward.value);
       wu.uTexel.value.set(1 / W, 1 / H);
       wu.uWet.value = this.wet;
+      wu.uFrame.value = this.frame % 64;
       this.quad.render(r, this.wetMaterial, this.sceneRT);
       // the haze redraws the scene behind it: give it the reflections too
       if (this.haze.n > 0 || this.waves.items.some((w) => w.t < 0.45)) this.quad.render(r, this.copyMaterial, this.copyRT);
