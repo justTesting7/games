@@ -17,7 +17,7 @@ import { NightLights } from './world/nightLights.js';
 import { Weather } from './world/weather.js';
 import { setSea, hasSea } from './game/swim.js';
 import { Fish } from './world/fish.js';
-import { Character } from './game/character.js';
+import { Character, stainWarmup } from './game/character.js';
 import { Player } from './game/player.js';
 import { Props } from './game/props.js';
 import { Effects } from './game/fx.js';
@@ -915,7 +915,15 @@ async function init() {
     player.update(0.016, input);
     rivals.forEach((r) => r.update(0.016, false));
     combat.update(0);
+    // materials made on first use (wound stains) compile now, not mid-fight
+    const warm = stainWarmup();
+    warm.position.copy(camera.position).add(new THREE.Vector3(0, -50, 0));
+    pipeline.scene.add(warm);
+    fx.decals.pool(camera.position.clone().add(new THREE.Vector3(0, -50, 0)), 1, 1); // and the blood pool under a body
     renderer.compile(pipeline.scene, camera);
+    pipeline.render(camera, 0.016, {});
+    warm.removeFromParent();
+    fx.decals.clear();
     pipeline.render(camera, 0.016, {});
   });
 

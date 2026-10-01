@@ -393,6 +393,13 @@ function throwPoint(t, out) {
 
 // wound stains (Character.stain): one shared soft blotch texture and material
 const STAIN = { v: new THREE.Vector3(), p: new THREE.Vector3(), s: new THREE.Vector3(), z: new THREE.Vector3(0, 0, 1), q: new THREE.Quaternion(), r: new THREE.Quaternion() };
+/** A throwaway stain quad, so the shader compiles with the rest at load and not on the first wound. */
+export function stainWarmup() {
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(0.01, 0.01), stainMaterial());
+  m.frustumCulled = false;
+  return m;
+}
+
 function stainMaterial() {
   if (STAIN.mat) return STAIN.mat;
   const c = document.createElement('canvas');
