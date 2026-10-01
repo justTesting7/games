@@ -124,3 +124,18 @@ const playerSrc = await import('node:fs').then((fs) => fs.readFileSync(new URL('
 if (!playerSrc.includes('updateCockpitCamera')) throw new Error('driving must use an in-car camera');
 
 console.log('cars ok', { spots: spots.length, speed: +d.speed.toFixed(1), yaw: +turned.yaw.toFixed(3) });
+
+// Grip: a hard turn at speed slides a little and settles; the handbrake drifts
+import { stepGrip } from '../src/game/cars.js';
+{
+  let st = { speed: 20, lat: 0, yawRate: 0, yaw: 0 };
+  let maxSlip = 0;
+  for (let i = 0; i < 60; i++) { const r = stepGrip(st, { throttle: 0.5, steer: 1, dt: 1 / 60 }); st = r; maxSlip = Math.max(maxSlip, r.slip); }
+  if (!(st.yaw > 0.3)) throw new Error('steering left turns the car');
+  if (!(maxSlip > 0.05 && maxSlip < 3)) throw new Error(`a grippy turn slides a little (${maxSlip.toFixed(2)})`);
+  let dr = { speed: 20, lat: 0, yawRate: 0, yaw: 0 }, drift = 0;
+  for (let i = 0; i < 60; i++) { const r = stepGrip(dr, { throttle: 0, steer: 1, handbrake: true, dt: 1 / 60 }); dr = r; drift = Math.max(drift, r.slip); }
+  if (!(drift > maxSlip * 1.5)) throw new Error(`the handbrake slides the tail out (${drift.toFixed(2)} vs ${maxSlip.toFixed(2)})`);
+  if (!(dr.speed < 18)) throw new Error('a handbrake slide costs speed');
+}
+console.log('ok grip');

@@ -70,6 +70,12 @@ export class Audio {
     param.exponentialRampToValueAtTime(0.0001, t + attack + release);
   }
 
+  // Tyres sliding on asphalt: a narrow, pitched hiss; k 0..1 by how hard.
+  squeal(k = 1) {
+    if (!this.ctx) return;
+    this.noiseBurst({ freq: 1650 + Math.random() * 450, q: 11, type: 'bandpass', gain: 0.22 * k, attack: 0.03, release: 0.2 });
+  }
+
   noiseBurst({ freq = 1000, q = 0.7, type = 'bandpass', gain = 0.5, attack = 0.002, release = 0.2, rate = 1, dest, pan = 0, send = 0 }) {
     const ctx = this.ctx;
     const t = ctx.currentTime;

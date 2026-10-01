@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { BulletHoles } from './bulletHoles.js';
+import { SkidMarks } from './skidMarks.js';
 import { BloodDecals } from './blood.js';
 
 const particleVert = /* glsl */ `
@@ -204,6 +205,7 @@ export class Effects {
     pipeline.fxScene.add(this.add.mesh, this.alpha.mesh, this.blood.mesh);
     this.decals = new BloodDecals(pipeline.scene, terrain);
     this.holes = new BulletHoles(pipeline.scene);
+    this.skids = new SkidMarks(pipeline.scene);
     this.blood.ground = (x, z) => terrain.heightAt(x, z);
     this.blood.onLand = (p, h) => {
       if (h > 0.02 && Math.random() < 0.5) this.decals.drop(p.x, h, p.z, Math.min(0.22, Math.max(0.035, p.size * 9)));
@@ -474,6 +476,7 @@ export class Effects {
   }
 
   update(dt) {
+    this.skids.update(dt);
     this.add.update(dt);
     this.alpha.update(dt);
     this.blood.update(dt);

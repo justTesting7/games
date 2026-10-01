@@ -42,7 +42,7 @@ the whole district, so frustum culling never skips any of it, and the shadow pas
 ## Phase 2 (2026-10-01): 3x more impressive, visually and physically
 - [x] 20. Cars take damage: shots and crashes wear them down; smoke from the bonnet, then fire,
       then the car explodes (blast physics, glass, nearby cars thrown), burnt-out shell; synced.
-- [ ] 21. Driving physics: grip and slip per axle (bicycle model), handbrake drift (Space),
+- [x] 21. Driving physics: grip and slip per axle (bicycle model), handbrake drift (Space),
       weight transfer, speed-sensitive steering, tyre smoke and skid marks on the road.
 - [ ] 22. Impact debris: chips that bounce off the ground for concrete/wood, sparks for metal,
       glass shards; dust puffs on ground hits.

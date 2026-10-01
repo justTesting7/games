@@ -309,6 +309,43 @@ export function stepDrive({ speed, yaw, throttle, steer, dt, sprint = false, spe
 }
 
 /**
+ * The driven car with momentum and tyre grip. The throttle and brakes act along the nose
+ * (as stepDrive); turning rotates the body with some inertia while the car keeps its
+ * world velocity, so any part of it that now points sideways is slip, which the tyres
+ * scrub off at a rate set by their grip. The handbrake locks the rear: little grip,
+ * a faster turn and scrubbing speed, so the tail steps out into a drift.
+ * state: { speed (along the nose), lat (sideways, +x of the car), yawRate, yaw }.
+ */
+export function stepGrip(state, { throttle, steer, handbrake = false, dt, sprint = false, spec = CAR }) {
+  const S = spec;
+  const scooter = S.kind === 'scooter';
+  const lon = stepDrive({ speed: state.speed, yaw: state.yaw, throttle, steer: 0, dt, sprint, spec });
+  let speed = lon.speed;
+  if (handbrake) speed -= Math.sign(speed) * Math.min(Math.abs(speed), S.brake * 0.35 * dt);
+  const grip = 1 / (1 + Math.abs(speed) * 0.055);
+  let want = Math.abs(speed) < 0.25 ? 0 : steer * S.steer * grip * Math.sign(speed);
+  if (handbrake && !scooter) want *= 1.35;
+  let yawRate = state.yawRate || 0;
+  yawRate += (want - yawRate) * (1 - Math.exp(-dt * (handbrake ? 3.5 : 10)));
+  const yaw = wrap(state.yaw + yawRate * dt);
+  // the world velocity carries over the turn: re-split it along the new heading
+  const f0x = Math.sin(state.yaw), f0z = Math.cos(state.yaw);
+  const vx = f0x * speed + f0z * (state.lat || 0), vz = f0z * speed - f0x * (state.lat || 0);
+  const fx = Math.sin(yaw), fz = Math.cos(yaw);
+  speed = vx * fx + vz * fz;
+  let lat = vx * fz - vz * fx;
+  const hold = handbrake ? 1.7 : scooter ? 14 : 7.5;
+  const scrub = 1 - Math.exp(-dt * hold);
+  speed -= Math.sign(speed) * Math.min(Math.abs(speed), Math.abs(lat) * scrub * 0.25); // sliding costs speed
+  lat -= lat * scrub;
+  return {
+    speed, lat, yawRate, yaw,
+    vx: fx * speed + fz * lat, vz: fz * speed - fx * lat,
+    slip: Math.abs(lat),
+  };
+}
+
+/**
  * Where a seated driver's hips go and where the steering wheel is, in world space
  * (a scooter rider stands instead).
  */
@@ -994,6 +1031,7 @@ export class Cars {
   }
 
   ejectLocal(player, car = player.vehicle) {
+    if (car) { car.lat = 0; car.yawRate = 0; car.slip = 0; car.handbrake = false; car.wheelsAt = null; }
     if (!car) return;
     if (car.driver === player.fighter) car.driver = null;
     player.vehicle = null;
@@ -1156,17 +1194,21 @@ export class Cars {
     if (active && player?.fighter?.alive && local) {
       const f = (input.forward ? 1 : 0) - (input.back ? 1 : 0) + (input.moveY || 0);
       local.steer = THREE.MathUtils.clamp(driveSteer(input), -1, 1);
-      const stepped = stepDrive({
-        speed: local.speed,
-        yaw: local.yaw,
+      local.handbrake = !!input.fire; // Space: the fire button does nothing at the wheel
+      const stepped = stepGrip(local, {
         throttle: THREE.MathUtils.clamp(f, -1, 1),
         steer: local.steer,
+        handbrake: local.handbrake,
         dt,
         sprint: !!input.sprint,
         spec: specOf(local),
       });
       local.speed = stepped.speed;
+      local.lat = stepped.lat;
+      local.yawRate = stepped.yawRate;
+      local.slip = stepped.slip;
       local.yaw = stepped.yaw;
+      this.tyres(local, dt, f);
       local.x += stepped.vx * dt;
       local.z += stepped.vz * dt;
       local.vel.set(stepped.vx, 0, stepped.vz);
@@ -1321,6 +1363,37 @@ export class Cars {
           this.damage(other, dmg, car.driver);
         }
       }
+    }
+  }
+
+  // Skidding tyres: rubber on the road and smoke, from the rear wheels when the car slides,
+  // and from all four under hard braking at speed.
+  tyres(car, dt, throttle) {
+    const marks = this.world.fx?.skids;
+    const size = sizeOf(car);
+    const sliding = (car.slip || 0) > 1.6 || (car.handbrake && Math.abs(car.speed) > 3);
+    const braking = throttle < -0.5 && car.speed > 7;
+    const o = localOffset(car.x, car.z, car);
+    const wheels = car.wheelsAt || (car.wheelsAt = [null, null, null, null]);
+    [[-1, 1], [-1, -1], [1, 1], [1, -1]].forEach(([fb, side], i) => {
+      const on = car.spec ? (sliding || braking) && i === 0 : sliding ? fb < 0 : braking;
+      if (!on || !marks) { wheels[i] = null; return; }
+      const along = fb * size.halfL * 0.68, across = side * size.halfW * 0.82;
+      const x = car.x + o.fwdX * along + o.rightX * across, z = car.z + o.fwdZ * along + o.rightZ * across;
+      const p = new THREE.Vector3(x, this.world.terrain.heightAt(x, z), z);
+      if (wheels[i]) marks.lay(wheels[i], p, car.spec ? 0.08 : 0.21, Math.min(1, (car.slip || 3) / 4));
+      wheels[i] = p;
+      if (Math.random() < dt * 14 && this.world.fx?.alpha) {
+        this.world.fx.alpha.spawn({
+          pos: p.clone().setY(p.y + 0.15), vel: new THREE.Vector3((Math.random() - 0.5) * 0.8, 0.5 + Math.random() * 0.5, (Math.random() - 0.5) * 0.8),
+          size: 0.4, grow: 2.2, life: 1.4, color: [0.75, 0.75, 0.75], alpha: 0.28, drag: 1.2, gravity: -0.1,
+        });
+      }
+    });
+    // the tyres complain
+    if ((sliding || braking) && car.driver?.isPlayer) {
+      this.squealT = (this.squealT || 0) - dt;
+      if (this.squealT <= 0) { this.squealT = 0.16; this.world.audio?.squeal?.(Math.min(1, (car.slip || 3) / 6)); }
     }
   }
 
