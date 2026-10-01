@@ -992,3 +992,36 @@ void main() {
   gl_FragColor = vec4(itm(o), cur.a);
 }
 `;
+
+// Depth of field through the scope: what's well in front of or behind the point aimed at
+// softens with a disc blur sized by how far out of focus it is (view depth in alpha).
+// Samples that are themselves in focus don't bleed into a blurred neighbour.
+export const dofFrag = /* glsl */ `
+varying vec2 vUv;
+uniform sampler2D tScene;
+uniform float uFocus;
+uniform float uAmount;
+uniform vec2 uTexel;
+float coc(float d) {
+  d = min(d, 3000.0);
+  return clamp(abs(d - uFocus) / max(uFocus, 1.0) * 1.6, 0.0, 1.0) * uAmount;
+}
+void main() {
+  vec4 c = texture(tScene, vUv);
+  float r = coc(c.a);
+  if (r < 0.02) { gl_FragColor = c; return; }
+  vec3 sum = c.rgb;
+  float wsum = 1.0;
+  const float GOLD = 2.39996;
+  for (int i = 1; i < 20; i++) {
+    float fi = float(i);
+    float rr = sqrt(fi / 20.0) * r * 7.0;
+    vec2 o = vec2(cos(fi * GOLD), sin(fi * GOLD)) * rr * uTexel;
+    vec4 s = texture(tScene, vUv + o);
+    float w = smoothstep(0.0, 0.3, coc(s.a)) + 0.05;
+    sum += s.rgb * w;
+    wsum += w;
+  }
+  gl_FragColor = vec4(sum / wsum, c.a);
+}
+`;

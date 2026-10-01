@@ -258,6 +258,9 @@ export class Pipeline {
     this.taaIndex = 0;
     this.taaPrevVP = new THREE.Matrix4();
     this._unjP = new THREE.Matrix4();
+    this.dofMaterial = fsMaterial(S.dofFrag, {
+      tScene: { value: null }, uFocus: { value: 10 }, uAmount: { value: 0 }, uTexel: { value: new THREE.Vector2() },
+    });
     this.windMaterial = fsMaterial(S.windscreenFrag, {
       tScene: { value: null }, uAmount: { value: 0 }, uTime: this.u.uTime, uAspect: { value: 1 },
     });
@@ -383,6 +386,7 @@ export class Pipeline {
     if (!this.fogRT) this.fogRT = hdrTarget(W, H, this.hdrType); else this.fogRT.setSize(W, H);
     if (!this.motionRT) this.motionRT = hdrTarget(W, H, this.hdrType); else this.motionRT.setSize(W, H);
     if (!this.windRT) this.windRT = hdrTarget(W, H, this.hdrType); else this.windRT.setSize(W, H);
+    if (!this.dofRT) this.dofRT = hdrTarget(W, H, this.hdrType); else this.dofRT.setSize(W, H);
     if (!this.taaRT) this.taaRT = [0, 1].map(() => hdrTarget(W, H, this.hdrType, { minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter }));
     else this.taaRT.forEach((t) => t.setSize(W, H));
     this.taaReset = true;
@@ -646,6 +650,16 @@ export class Pipeline {
       sceneTex = out.texture;
     } else this.taaReset = true;
     this.taaPrevVP.copy(unjVP);
+    // depth of field through the scope (focused where the crosshair lands)
+    if ((opts.dof?.amount || 0) > 0.02 && !this.mobile && !opts.outViewport) {
+      const du = this.dofMaterial.uniforms;
+      du.tScene.value = sceneTex;
+      du.uFocus.value = opts.dof.focus;
+      du.uAmount.value = opts.dof.amount;
+      du.uTexel.value.set(1 / W, 1 / H);
+      this.quad.render(r, this.dofMaterial, this.dofRT);
+      sceneTex = this.dofRT.texture;
+    }
     // speed blur when driving fast (reprojected against last frame's camera)
     if (this.motion > 0.02 && !this.mobile && !opts.outViewport) {
       const mu = this.motionMaterial.uniforms;

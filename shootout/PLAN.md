@@ -138,7 +138,7 @@ Ordered by how much they lift the whole game; one commit each.
       spray in the rain), stop for people in the road and floor it away from gunfire.
 - [x] 76. Street acoustics: the reverb follows the place (narrow street, open square, inside),
       measured by rays around the listener; distant shots echo off the buildings.
-- [ ] 77. Depth of field while aiming down the scope: what is far from the focus softens.
+- [x] 77. Depth of field while aiming down the scope: what is far from the focus softens.
 - [ ] 78. Car explosions tear it apart: bonnet, doors and boot fly off as tumbling panels.
 - [ ] 79. Gun feel: weapon sway with movement, procedural recoil that kicks and settles, a
       camera punch per shot, and a breathing drift on the scope.

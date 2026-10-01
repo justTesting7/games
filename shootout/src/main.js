@@ -1217,7 +1217,8 @@ async function init() {
         if (character.root) character.root.visible = true;
         pipeline.renderSplit(weapons.drone.cam, weapons.drone.opCam, dt, { underwater: false, shadowCenter: player.pos });
       } else {
-        pipeline.render(camera, dt, { underwater: player.underwater, shadowCenter: spec?.pos || player.pos, windscreen: player.inCockpit && !pipeline.indoor ? weather.amount : 0 });
+        pipeline.render(camera, dt, { underwater: player.underwater, shadowCenter: spec?.pos || player.pos, windscreen: player.inCockpit && !pipeline.indoor ? weather.amount : 0,
+          dof: player.scopeT > 0.3 && player.aimPoint ? { focus: Math.max(1, player.aimPoint.clone().sub(camera.position).dot(camera.getWorldDirection(new THREE.Vector3()))), amount: (player.scopeT - 0.3) / 0.7 } : null });
       }
 
       frames++;
