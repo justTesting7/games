@@ -37,8 +37,9 @@ export class CarBatch {
       batch.receiveShadow = true;
       batch.sortObjects = !!material.transparent;
       for (const { car, mesh } of list) {
-        const id = batch.addInstance(batch.addGeometry(mesh.geometry));
-        const part = { car, mesh, batch, id };
+        const gid = batch.addGeometry(mesh.geometry);
+        const id = batch.addInstance(gid);
+        const part = { car, mesh, batch, id, gid };
         this.parts.push(part);
         (car.batched || (car.batched = [])).push(part);
         mesh.visible = false; // drawn by the batch from here on

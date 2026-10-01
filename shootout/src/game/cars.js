@@ -3,6 +3,7 @@ import { CITY, cityCell } from '../world/cityLayout.js';
 import { HALF_WORLD } from '../world/constants.js';
 import { LAB } from '../world/lab.js';
 import { CarBatch } from './carBatch.js';
+import { dentCar } from './carDents.js';
 
 export const CAR = {
   count: 8,
@@ -1308,7 +1309,7 @@ export class Cars {
     const r = car.spec ? S.collideR : size.halfW * 0.95;
     const reach = Math.max(0, size.halfL - r);
     const offs = reach > 0.05 ? [-reach, 0, reach] : [0];
-    let pushX = 0, pushZ = 0;
+    let pushX = 0, pushZ = 0, contactOff = 0;
     for (let pass = 0; pass < 2; pass++) {
       const fx = Math.sin(car.yaw), fz = Math.cos(car.yaw);
       let moved = false;
@@ -1318,6 +1319,7 @@ export class Cars {
         cols.resolveXZ(c, r, car.y + 0.15, car.y + 1.25);
         const dx = c.x - x0, dz = c.z - z0;
         if (dx * dx + dz * dz < 1e-8) continue;
+        if (pass === 0) contactOff = off;
         car.x += dx; car.z += dz;
         pushX += dx; pushZ += dz;
         moved = true;
@@ -1337,6 +1339,11 @@ export class Cars {
         this.world.player?.kick?.(0, Math.min(3, hard * 0.2));
       }
       if (hard > 7) this.damage(car, (hard - 7) * 3, car.driver);
+      // the body gives where it struck: on the circle that hit, opposite the push
+      if (hard > 4) {
+        const at = new THREE.Vector3(car.x + fx * contactOff - nx * r, car.y + 0.6, car.z + fz * contactOff - nz * r);
+        dentCar(car, at, new THREE.Vector3(nx, 0, nz), Math.min(0.2, (hard - 4) * 0.025), 0.55 + hard * 0.02);
+      }
     }
     car.vel.set(fx * car.speed, 0, fz * car.speed);
   }
@@ -1374,6 +1381,14 @@ export class Cars {
         if (-into > 2.5 && car.driver?.isPlayer) {
           this.world.audio?.impact?.('metal', 0);
           this.world.player?.kick?.(0, Math.min(3, -into * 0.25));
+        }
+        if (-into > 3.5) { // both bodies give at the contact
+          const S = sizeOf(car), along = Math.abs(fx * hit.nx + fz * hit.nz);
+          const ext = along * S.halfL + (1 - along) * S.halfW; // centre to the struck face
+          const at = new THREE.Vector3(car.x - hit.nx * ext, car.y + 0.6, car.z - hit.nz * ext);
+          const depth = Math.min(0.2, (-into - 3.5) * 0.022), rad = 0.55 - into * 0.02;
+          dentCar(car, at, new THREE.Vector3(hit.nx, 0, hit.nz), depth, rad);
+          dentCar(other, at, new THREE.Vector3(-hit.nx, 0, -hit.nz), depth, rad);
         }
         if (-into > 6) { // a hard crash hurts both
           const dmg = (-into - 6) * 3;
@@ -1502,7 +1517,10 @@ export class Cars {
     this.applyGlass(car, 63);
     // charred: every part of it in the batch turns near black
     const char = new THREE.Color(0.1, 0.09, 0.085);
-    for (const p of car.batched || []) p.batch.setColorAt(p.id, char);
+    for (const p of car.batched || []) {
+      p.batch.setColorAt(p.id, char);
+      if (p.own) { p.mesh.material = p.mesh.material.clone(); p.mesh.material.color.multiply(char); } // dented: drawn on its own
+    }
     if (!car.batched) car.mesh.traverse((o) => { if (o.isMesh && o.material?.color) { o.material = o.material.clone(); o.material.color.multiplyScalar(0.12); } });
     world.combat?.explode(world, pos, car.spec ? 4 : 7.5, car.spec ? 60 : 110, car.lastHitBy || null, { weapon: 'car' });
   }
