@@ -50,7 +50,7 @@ the whole district, so frustum culling never skips any of it, and the shadow pas
 - [ ] 24. Rivals drive: a rival far from the fight takes a nearby car to close distance.
 - [ ] 25. Temporal anti-aliasing (or SMAA) instead of FXAA for stable edges on foliage and rails.
 - [ ] 26. Night: streetlights and car headlights as real light (a few nearest lights live).
-- [ ] 27. Camera feel: speed FOV and shake on impacts, landing dip, damage vignette and
+- [x] 27. Camera feel: speed FOV and shake on impacts, landing dip, damage vignette and
       directional hit indicator.
 - [ ] 28. Dropped weapons: the dead fighter's guns fall and bounce instead of staying on the body.
 - [ ] 29. Muzzle smoke and heat haze after sustained fire; explosion smoke columns that drift.

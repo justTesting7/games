@@ -257,7 +257,10 @@ export class Player {
       } else {
         const wasGround = this.onGround;
         if (next.y <= g2 || (wasGround && this.vel.y <= 0 && next.y - g2 < 0.45)) {
-          if (!wasGround && this.airTime > 0.25) this.onLand?.(-this.vel.y);
+          if (!wasGround && this.airTime > 0.25) {
+            this.onLand?.(-this.vel.y);
+            this.landDip = Math.min(0.28, Math.max(this.landDip || 0, -this.vel.y * 0.035)); // knees take the landing
+          }
           next.y = g2;
           this.vel.y = 0;
           this.onGround = true;
@@ -411,7 +414,8 @@ export class Player {
     const yaw = this.camYaw + swayYaw;
     const dir = new THREE.Vector3(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch));
     const right = new THREE.Vector3(-Math.cos(this.camYaw), 0, Math.sin(this.camYaw));
-    const eye = (through ? 1.64 : aiming ? 1.58 : 1.55) - crouch * 0.38;
+    this.landDip = (this.landDip || 0) * Math.exp(-dt * 7);
+    const eye = (through ? 1.64 : aiming ? 1.58 : 1.55) - crouch * 0.38 - (follow ? 0 : this.landDip);
     const pivot = body.clone().add(new THREE.Vector3(0, eye, 0));
     const smoothPivot = this.smoothPivot || pivot.clone();
     smoothPivot.x = pivot.x;

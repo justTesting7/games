@@ -672,10 +672,18 @@ async function init() {
 
   let hurt = 0;
   const dmgDir = $('dmgdir');
-  const pointDamage = (from) => {
-    const a = Math.atan2(from.pos.x - player.pos.x, from.pos.z - player.pos.z);
+  let dmgFrom = null, dmgT = 0;
+  // the arrow keeps pointing at whoever shot you while it fades, as you turn
+  const aimDamage = () => {
+    if (!dmgFrom) return;
+    const a = Math.atan2(dmgFrom.x - player.pos.x, dmgFrom.z - player.pos.z);
     const rel = Math.atan2(Math.sin(a - player.camYaw), Math.cos(a - player.camYaw));
     dmgDir.style.transform = `rotate(${-rel}rad)`;
+  };
+  const pointDamage = (from) => {
+    dmgFrom = from.pos.clone();
+    dmgT = 1.1;
+    aimDamage();
     dmgDir.classList.remove('show');
     void dmgDir.offsetWidth;
     dmgDir.classList.add('show');
@@ -684,7 +692,8 @@ async function init() {
     fx.decals.bleed(info.at || victim.pos, dir, amount);
     if (victim === player.fighter) {
       hurt = Math.min(1, hurt + amount / 30);
-      player.shake = Math.max(player.shake, 0.25);
+      player.shake = Math.max(player.shake, Math.min(0.6, 0.15 + amount / 60));
+      player.recoilPitch += (Math.random() - 0.3) * Math.min(0.04, amount / 1500); // the hit jolts your aim
       audio.hurt(false);
       if (attacker) pointDamage(attacker);
     }
@@ -942,6 +951,7 @@ async function init() {
 
     if (hitTimer > 0) { hitTimer -= dt; if (hitTimer <= 0) $('hitmarker').classList.remove('show'); }
     hurt = Math.max(0, hurt - dt * 1.6);
+    if (dmgT > 0) { dmgT -= dt; aimDamage(); }
     if (!draw) return;
 
     $('crosshair').classList.toggle('idle', !state.aiming && !flying);
