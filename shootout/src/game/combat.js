@@ -84,7 +84,7 @@ export class Combat {
   update(dt) {
     this.time += dt;
     for (const f of this.fighters) {
-      if (f.alive) f.character.bones.Head.getWorldPosition(f.head).y += 0.06;
+      if (f.alive || f.character?.ragdoll) f.character.bones.Head.getWorldPosition(f.head).y += f.alive ? 0.06 : 0;
     }
   }
 
@@ -118,8 +118,12 @@ export class Combat {
   raycast(o, d, maxDist, ignore) {
     let best = null;
     for (const f of this.fighters) {
-      if (!f.alive || f === ignore) continue;
-      const ox = o.x - f.pos.x, oz = o.z - f.pos.z;
+      const corpse = !f.alive && !!f.character?.ragdoll; // bodies stop rounds and take the hit
+      if ((!f.alive && !corpse) || f === ignore) continue;
+      // a corpse lies where its ragdoll is, not at its last standing position
+      const cx = corpse ? f.character.bones.Hips.getWorldPosition(tmpB).x : f.pos.x;
+      const cz = corpse ? tmpB.z : f.pos.z;
+      const ox = o.x - cx, oz = o.z - cz;
       const along = -(ox * d.x + oz * d.z);
       if (along < -1.5 || along > maxDist + 1.5) continue;
       // cheap reject: the ray must pass within reach of the body's vertical axis
@@ -190,7 +194,17 @@ export class Combat {
     const skipNet = opts.skipNet ?? !!session?.multi;
     const netHits = [];
     for (const f of this.fighters) {
-      if (!f.alive) continue;
+      if (!f.alive) {
+        // bodies get thrown by the blast too
+        const rd = f.character?.ragdoll;
+        if (rd) {
+          const c = this.chest(f);
+          const to = c.clone().sub(pos);
+          const d = to.length();
+          if (d < radius) rd.kick(c, to.normalize().multiplyScalar(9 * (1 - d / radius)).setY(4 * (1 - d / radius)));
+        }
+        continue;
+      }
       const c = this.chest(f);
       const to = c.clone().sub(pos);
       const d = to.length();

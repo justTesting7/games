@@ -72,6 +72,17 @@ export class Ragdoll {
     this.sleep = 0;
   }
 
+  /** A shove at a world point: the joints near it (within ~0.6 m) take most of it. */
+  kick(at, impulse) {
+    this.sleep = 0;
+    const dt = 1 / 60;
+    for (let i = 0; i < this.p.length; i++) {
+      const d = this.p[i].distanceTo(at);
+      const k = Math.max(0.15, 1 - d / 0.6);
+      this.prev[i].addScaledVector(impulse, -dt * k);
+    }
+  }
+
   hipsFrame(out) {
     const p = this.p;
     return frame(_c.subVectors(p[J.Spine2], p[J.Hips]).clone(), p[J.LeftUpLeg].clone().sub(p[J.RightUpLeg]), out);

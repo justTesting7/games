@@ -405,6 +405,10 @@ export class Weapons {
       }
       return hit;
     }
+    if (hit.fighter && !hit.fighter.alive) { // a body: it jerks with the round, no damage
+      hit.fighter.character.ragdoll?.kick(end, dir.clone().multiplyScalar(rifle ? 5 : 2.5));
+      return hit;
+    }
     if (hit.fighter?.net) {
       this.combat.damage(hit.fighter, shooter, shotDamage(def, hit), dir, { head: hit.head, limb: hit.limb, part: hit.part, weapon: def.key, at: end });
       return hit;
