@@ -83,7 +83,7 @@ the whole district, so frustum culling never skips any of it, and the shadow pas
       blue sky, so shaded walls and car flanks stop looking teal.
 - [x] 46. Night exposure: auto exposure adapts night back to overcast day; cap the adaptation so
       night reads as night and the lamp pools and headlights matter.
-- [ ] 47. Brake and tail lights glow (HDR, bloom) on driven cars; reversing lights.
+- [x] 47. Brake and tail lights glow (HDR, bloom) on driven cars; reversing lights.
 - [ ] 48. Shell casings: brass ejected from the gun, tumbling and bouncing with a tink.
 - [ ] 49. Blood: spatter decals on the walls and ground behind a hit, pools under bodies.
 - [ ] 50. Rain puddles: noise-masked mirror patches in the wet streets with raindrop ripples.

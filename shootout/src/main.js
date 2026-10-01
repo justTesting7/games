@@ -35,6 +35,7 @@ import { modeUrl, persistMode, persistRoom, resolveMode, resolveRoom } from './g
 import { isTouchDevice, setupTouch } from './game/touch.js';
 import { DRONE } from './game/drone.js';
 import { Cars } from './game/cars.js';
+import { CarLights } from './game/carLights.js';
 import { createGameRenderer } from './engine/webgl.js';
 import { RADAR_RANGE, radarBlips, radarSubjects, drawRadar } from './game/radar.js';
 
@@ -393,6 +394,8 @@ async function init() {
     pipeline.scene.add(props.group);
   }
   const cars = new Cars(world, pipeline.scene);
+  const carLights = new CarLights();
+  world.carLights = carLights;
   world.cars = cars;
   if (city && data.layout) {
     city.build(data.layout);
@@ -913,6 +916,7 @@ async function init() {
       const goal = THREE.MathUtils.clamp((v - 8) / 22, 0, 1);
       pipeline.motion += (goal - pipeline.motion) * Math.min(1, dt * 3);
     }
+    carLights.update(dt, cars.list, camera, pipeline.night);
     world.nightLights?.update(pipeline.night, player.vehicle && player.vehicle.kind !== 'scooter' ? player.vehicle : null, (x, z) => terrain.heightAt(x, z));
 
     const locked = inPlay;
