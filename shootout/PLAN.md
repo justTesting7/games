@@ -123,6 +123,8 @@ the whole district, so frustum culling never skips any of it, and the shadow pas
 
 - [x] 70. Wet grip: in the rain cars brake longer (-35% brake force) and slide wider in turns (-45% lateral hold).
 
+- [x] 71. At night the nearest cars driven by rivals and other players light the road ahead too (up to four sets of beams).
+
 ## Log
 - Tel Aviv load (local, cached): ready in ~8 s; main-thread stages: decode 1.6 s, seam clip 1.0,
   cars 0.4, shot BVH 1.5, chunking 1.3.

@@ -969,7 +969,14 @@ async function init() {
     }
     carLights.update(dt, cars.list, camera, pipeline.night);
     pigeons.update(dt, { night: pipeline.night, fighters: combat.fighters });
-    world.nightLights?.update(pipeline.night, player.vehicle && player.vehicle.kind !== 'scooter' ? player.vehicle : null, (x, z) => terrain.heightAt(x, z), weather.amount);
+    if (world.nightLights) {
+      // headlights on the road: your car, then the nearest others with someone at the wheel
+      const mine = player.vehicle && player.vehicle.kind !== 'scooter' ? player.vehicle : null;
+      const p = camera.position;
+      const others = pipeline.night > 0.1 ? cars.list.filter((c) => c !== mine && c.driver && !c.spec && !c.wrecked)
+        .sort((a, b) => (a.x - p.x) ** 2 + (a.z - p.z) ** 2 - ((b.x - p.x) ** 2 + (b.z - p.z) ** 2)) : [];
+      world.nightLights.update(pipeline.night, mine ? [mine, ...others] : others, (x, z) => terrain.heightAt(x, z), weather.amount);
+    }
 
     const locked = inPlay;
     if (mode === 'solo' && (input.restart || (input.reload && round.state === 'over')) && (round.state === 'over' || round.state === 'fight')) {

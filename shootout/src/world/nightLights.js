@@ -120,28 +120,34 @@ export class NightLights {
       this.cones.setMatrixAt(i, m);
     });
     scene.add(this.cones);
-    // headlights: two long faint beams and a bright patch ahead, for one car
+    // headlights: two long faint beams and a bright patch ahead, for the few nearest cars
+    // under way at night (the beams share two materials)
     this.beamMat = glowMaterial(0xfff1d6, this.map);
     this.patchMat = glowMaterial(0xfff4e0, this.map);
     const beamGeo = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2).translate(0, 0, 0.5);
-    this.head = new THREE.Group();
-    for (const side of [-1, 1]) {
-      const b = new THREE.Mesh(beamGeo, this.beamMat);
-      b.scale.set(2.6, 1, 16);
-      b.position.set(side * 0.55, 0.06, 2.3);
-      b.rotation.y = side * 0.04;
-      this.head.add(b);
-    }
-    const patch = new THREE.Mesh(new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2), this.patchMat);
-    patch.scale.set(5.5, 1, 7);
-    patch.position.set(0, 0.07, 7.5);
-    this.head.add(patch);
-    this.head.visible = false;
-    this.head.renderOrder = 2;
-    scene.add(this.head);
+    const patchGeo = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
+    this.heads = Array.from({ length: 4 }, () => {
+      const head = new THREE.Group();
+      for (const side of [-1, 1]) {
+        const b = new THREE.Mesh(beamGeo, this.beamMat);
+        b.scale.set(2.6, 1, 16);
+        b.position.set(side * 0.55, 0.06, 2.3);
+        b.rotation.y = side * 0.04;
+        head.add(b);
+      }
+      const patch = new THREE.Mesh(patchGeo, this.patchMat);
+      patch.scale.set(5.5, 1, 7);
+      patch.position.set(0, 0.07, 7.5);
+      head.add(patch);
+      head.visible = false;
+      head.renderOrder = 2;
+      scene.add(head);
+      return head;
+    });
+    this.head = this.heads[0];
   }
 
-  /** night 0..1; car = the car whose headlights shine (or null); rain 0..1. */
+  /** night 0..1; car = the car (or list of cars, nearest first) whose headlights shine; rain 0..1. */
   update(night, car, heightAt, rain = 0) {
     const k = THREE.MathUtils.smoothstep(night, 0.15, 0.7);
     this.lampMat.opacity = 0.55 * k;
@@ -149,12 +155,16 @@ export class NightLights {
     // the light is seen in the air only faintly on a clear night; rain lights it up
     this.coneMat.uniforms.uK.value = k * (0.035 + 0.11 * rain);
     this.cones.visible = k > 0.01;
-    const on = !!car && k > 0.01 && !car.wrecked;
-    this.head.visible = on;
-    if (!on) return;
+    // the player's car first, then the nearest other cars being driven
+    const list = Array.isArray(car) ? car : car ? [car] : [];
     this.beamMat.opacity = 0.22 * k;
     this.patchMat.opacity = 0.5 * k;
-    this.head.position.set(car.x, heightAt(car.x, car.z), car.z);
-    this.head.rotation.set(0, car.yaw, 0);
+    this.heads.forEach((head, i) => {
+      const c = list[i];
+      head.visible = !!c && k > 0.01 && !c.wrecked;
+      if (!head.visible) return;
+      head.position.set(c.x, heightAt(c.x, c.z), c.z);
+      head.rotation.set(0, c.yaw, 0);
+    });
   }
 }
