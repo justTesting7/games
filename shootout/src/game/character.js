@@ -391,6 +391,36 @@ function throwPoint(t, out) {
   return out.copy(THROW_PATH[THROW_PATH.length - 1][1]);
 }
 
+// wound stains (Character.stain): one shared soft blotch texture and material
+const STAIN = { v: new THREE.Vector3(), p: new THREE.Vector3(), s: new THREE.Vector3(), z: new THREE.Vector3(0, 0, 1), q: new THREE.Quaternion(), r: new THREE.Quaternion() };
+function stainMaterial() {
+  if (STAIN.mat) return STAIN.mat;
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const g = c.getContext('2d');
+  for (let i = 0; i < 14; i++) {
+    const a = Math.random() * 6.3, r = Math.random() * 14;
+    const x = 32 + Math.cos(a) * r, y = 32 + Math.sin(a) * r, rr = 6 + Math.random() * 12;
+    const grad = g.createRadialGradient(x, y, 0, x, y, rr);
+    grad.addColorStop(0, 'rgba(120,8,6,0.85)');
+    grad.addColorStop(1, 'rgba(120,8,6,0)');
+    g.fillStyle = grad;
+    g.fillRect(0, 0, 64, 64);
+  }
+  g.fillStyle = 'rgba(25,1,1,0.9)';
+  g.beginPath(); g.arc(32, 32, 3.5, 0, Math.PI * 2); g.fill();
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  STAIN.mat = new THREE.MeshStandardMaterial({
+    map: tex, transparent: true, depthWrite: false, roughness: 0.35, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4,
+  });
+  // keep the scene depth the HDR target stores in alpha (engine/patch.js)
+  STAIN.mat.blending = THREE.CustomBlending;
+  STAIN.mat.blendSrcAlpha = THREE.ZeroFactor;
+  STAIN.mat.blendDstAlpha = THREE.OneFactor;
+  return STAIN.mat;
+}
+
 // scratch for applyAim, which runs for every fighter every frame (UP is below)
 const AIM = {
   fwd: new THREE.Vector3(), flat: new THREE.Vector3(), right: new THREE.Vector3(), hd: new THREE.Vector3(),
@@ -768,7 +798,32 @@ export class Character {
     }
   }
 
+  /**
+   * A wound shows: a dark-red stain where the round went in (and a bigger one where a
+   * rifle round came out), soaked into the clothes on the bone it hit, moving with it.
+   */
+  stain(at, dir, part, exit = false) {
+    const bone = this.bones[part] || this.bones.Spine2;
+    if (!bone || !at) return;
+    const mesh = new THREE.Mesh(STAIN.geo || (STAIN.geo = new THREE.PlaneGeometry(1, 1)), stainMaterial());
+    bone.updateWorldMatrix(true, false);
+    const facing = STAIN.v.copy(dir).multiplyScalar(exit ? 1 : -1).normalize(); // toward the shooter (or away, out the back)
+    const p = STAIN.p.copy(at).addScaledVector(facing, 0.012);
+    mesh.position.copy(bone.worldToLocal(p));
+    const wq = bone.getWorldQuaternion(STAIN.q).invert();
+    mesh.quaternion.setFromUnitVectors(STAIN.z, facing.applyQuaternion(wq)).multiply(STAIN.r.setFromAxisAngle(STAIN.z, Math.random() * 6.3));
+    const k = (exit ? 0.2 : 0.12) * (0.8 + Math.random() * 0.4);
+    mesh.scale.setScalar(k / bone.getWorldScale(STAIN.s).x);
+    mesh.renderOrder = 2;
+    bone.add(mesh);
+    const list = this.stains || (this.stains = []);
+    list.push(mesh);
+    if (list.length > 12) list.shift().removeFromParent();
+  }
+
   revive() {
+    for (const m of this.stains || []) m.removeFromParent();
+    this.stains = [];
     for (const d of this.dropped || []) { d.obj.removeFromParent(); d.gun.visible = true; d.gun.userData.dropHidden = false; }
     this.dropped = [];
     this.dead = null;

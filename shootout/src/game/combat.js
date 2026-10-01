@@ -166,6 +166,12 @@ export class Combat {
     if (!victim.alive || amount <= 0) return;
     victim.lastAttacker = attacker;
     victim.lastHitT = this.time;
+    // the wound shows on the clothes; a rifle round leaves an exit wound too
+    if (info.at && dir && !info.blast) {
+      const part = info.head ? 'Head' : info.part;
+      victim.character.stain?.(info.at, dir, part);
+      if (info.weapon === 'rifle' && !info.head) victim.character.stain?.(info.at.clone().addScaledVector(dir, info.limb ? 0.1 : 0.28), dir, part, true);
+    }
     const push = PUSH[info.weapon] ?? 2.5; // how hard the killing blow throws the body (m/s)
     if (info.head) {
       victim.health = 0;
