@@ -306,7 +306,9 @@ export class Weapons {
       target.add(new THREE.Vector3().randomDirection().multiplyScalar(r * Math.random()));
       dir = target.sub(from).normalize();
     }
-    this.world.cars?.breakAlong(from, dir, 900, shooter);
+    // car glass breaks along the round's path, up to the first wall it meets
+    const wall = this.world.shots?.raycast(from, dir, 900);
+    this.world.cars?.breakAlong(from, dir, wall ? wall.t : 900, shooter);
     // rifle rounds drop over distance: trace the arc, then treat the hit as a straight
     // shot to where the round actually landed (so cover, tracer and reports agree)
     let hit = rifle ? this.ballistic(from, dir, shooter) : this.world.raycast(from, dir, 900, shooter);
@@ -321,7 +323,7 @@ export class Weapons {
         if (pane) this.fx.shatter?.(pane.center, pane.size, hit.normal, dir);
       }
       if (!hit.car && !pane) this.fx.bulletHole?.(entry, hit.normal, hit.surface);
-      if (hit.car) this.world.cars?.damage(hit.car, rifle ? 16 : 4, shooter);
+      if (hit.car) { this.fx.holes?.addToCar(hit.car, entry, hit.normal, 'metal', 0.11); this.world.cars?.damage(hit.car, rifle ? 16 : 4, shooter); }
       let through = hit.car ? 2.2 : 0.3; // a car is crossed whole, a board or pane barely
       let next = this.world.raycast(entry.clone().addScaledVector(dir, through), dir, 900, shooter);
       // the far face of the same crate or pane is where it comes out, not a second layer
@@ -388,7 +390,7 @@ export class Weapons {
         if (pane) this.fx.shatter?.(pane.center, pane.size, hit.normal, dir);
       }
       if (!hit.car && !hit.drone && !pane) this.fx.bulletHole?.(end, hit.normal, hit.surface);
-      if (hit.car) this.world.cars?.damage(hit.car, rifle ? 16 : 4, shooter);
+      if (hit.car) { this.fx.holes?.addToCar(hit.car, end, hit.normal, 'metal', 0.11); this.world.cars?.damage(hit.car, rifle ? 16 : 4, shooter); }
       this.audio.impact(hit.surface, hitDist);
       if (hit.surface !== 'water') this.bounceOff(shooter, end, dir, hit);
     }

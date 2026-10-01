@@ -927,6 +927,9 @@ export class Cars {
       car.squash = {};
       car.steer = 0;
       this.applyGlass(car, 0);
+      car.windHits = 0;
+      for (const q of car.holes || []) q.removeFromParent();
+      car.holes = [];
       this.placeMesh(car);
       this.refreshSeat(car);
     }
@@ -1113,12 +1116,23 @@ export class Cars {
 
   breakGlass(car, pane, from, dir, hit, opts = {}) {
     if (!car || !pane || !glassIntact(car.glass || 0, pane)) return false;
-    this.applyGlass(car, glassMaskAfterHit(car.glass || 0, pane));
     const t = hit?.t || 0.6;
     const at = new THREE.Vector3(from.x + dir.x * t, from.y + dir.y * t, from.z + dir.z * t);
     const n = hit?.normal
       ? new THREE.Vector3(hit.normal.x, hit.normal.y, hit.normal.z)
       : dir.clone().negate();
+    // the windscreen is laminated: rounds star it with cracks and go through; it only
+    // gives way after a few (side and rear windows are toughened and burst at once)
+    if (pane === 'wind' && !opts.force && opts.shot && car.windShot === opts.shot) return false; // its other face
+    if (pane === 'wind' && !opts.force && opts.shot) car.windShot = opts.shot;
+    if (pane === 'wind' && !opts.force && (car.windHits = (car.windHits || 0) + 1) < 4) {
+      this.world.fx?.holes?.addToCar(car, at, n.dot(dir) > 0 ? n.clone().negate() : n, 'glass', 0.32, 0.045); // facing the shooter, on the outer face
+      this.world.fx?.impact?.(at, n, 'glass', dir);
+      this.world.audio?.impact?.('glass', at.distanceTo(this.world.player?.camera?.position || at));
+      return false;
+    }
+    if (pane === 'wind') this.world.fx?.holes?.clearCar(car, 'glass');
+    this.applyGlass(car, glassMaskAfterHit(car.glass || 0, pane));
     this.world.fx?.impact?.(at, n, 'glass', dir);
     this.world.audio?.impact?.('glass', at.distanceTo(this.world.player?.camera?.position || at));
     if (this.world.fx?.alpha) {
@@ -1137,6 +1151,7 @@ export class Cars {
   }
 
   breakAlong(o, d, maxDist, ignore, opts = {}) {
+    opts = { ...opts, shot: {} }; // one round: a windscreen it crosses cracks once
     const origin = { x: o.x, y: o.y, z: o.z };
     let traveled = 0;
     const broken = [];
@@ -1524,6 +1539,7 @@ export class Cars {
     world.audio?.explosion?.(cam ? cam.distanceTo(pos) : 10, 0, false);
     if (car.body) { car.body.rest = false; car.body.pv -= car.spec ? 0 : 2.5; car.body.rv += (Math.random() - 0.5) * 2; }
     this.applyGlass(car, 63);
+    world.fx?.holes?.clearCar(car, 'glass');
     // charred: every part of it in the batch turns near black
     const char = new THREE.Color(0.1, 0.09, 0.085);
     for (const p of car.batched || []) {
@@ -1558,7 +1574,7 @@ export class Cars {
           if (!car.panes[name] || !glassIntact(car.glass || 0, name)) continue;
           const from = new THREE.Vector3(pos.x, pos.y + 0.5, pos.z);
           const dir = new THREE.Vector3(car.x - pos.x, 0.1, car.z - pos.z).normalize();
-          this.breakGlass(car, name, from, dir, { t: Math.max(0.5, d - 1) }, { silent: !report });
+          this.breakGlass(car, name, from, dir, { t: Math.max(0.5, d - 1) }, { silent: !report, force: true });
         }
       }
     }

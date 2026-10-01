@@ -105,6 +105,40 @@ export class BulletHoles {
     pool.mesh.count = Math.max(pool.mesh.count, i + 1);
   }
 
+  /**
+   * A hole that rides on a car: its own small quad parented to the car's body (in the car's
+   * frame), so it moves, tilts and rolls with it. The oldest goes past 20 a car.
+   */
+  addToCar(car, point, normal, surface, size, lift = 0.006) {
+    const kind = KINDS[surface];
+    if (kind === undefined || !car?.mesh) return null;
+    const mat = this.pools[kind].mesh.material;
+    const q = new THREE.Mesh(this.quad || (this.quad = new THREE.PlaneGeometry(1, 1)), mat);
+    q.renderOrder = 1;
+    car.mesh.updateMatrixWorld(true);
+    const inv = new THREE.Matrix4().copy(car.mesh.matrixWorld).invert();
+    const n = new THREE.Vector3(normal.x, normal.y, normal.z).normalize().transformDirection(inv);
+    q.position.copy(point).applyMatrix4(inv).addScaledVector(n, lift);
+    q.quaternion.setFromUnitVectors(this._z, n).multiply(new THREE.Quaternion().setFromAxisAngle(this._z, Math.random() * Math.PI * 2));
+    q.scale.setScalar((size ?? SIZE[kind]) * (0.8 + Math.random() * 0.4));
+    q.userData.holeKind = surface;
+    car.mesh.add(q);
+    const list = car.holes || (car.holes = []);
+    list.push(q);
+    if (list.length > 20) list.shift().removeFromParent();
+    return q;
+  }
+
+  /** Takes a car's holes of one kind off it (its windscreen cracks, once the pane is gone). */
+  clearCar(car, surface) {
+    if (!car?.holes) return;
+    car.holes = car.holes.filter((q) => {
+      if (q.userData.holeKind !== surface) return true;
+      q.removeFromParent();
+      return false;
+    });
+  }
+
   clear() {
     for (const p of this.pools) { p.mesh.count = 0; p.next = 0; }
   }

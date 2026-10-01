@@ -107,6 +107,10 @@ the whole district, so frustum culling never skips any of it, and the shadow pas
       or anyone running through them, wheel round and settle again.
 - [x] 63. Rain on the windscreen in the cockpit view (cars with an interior): drops bead and run, a wiper sweeps them.
 
+- [x] 64. Shots mark cars: holes in the bodywork that ride with the car; the laminated windscreen
+      stars with cracks for three rounds and only gives way on the fourth (side and rear windows
+      still burst at once). Fix: car glass no longer breaks behind a wall the round already hit.
+
 ## Log
 - Tel Aviv load (local, cached): ready in ~8 s; main-thread stages: decode 1.6 s, seam clip 1.0,
   cars 0.4, shot BVH 1.5, chunking 1.3.
