@@ -14,6 +14,7 @@ import { studioRivalSpots, blockedAt } from './world/glbMap.js';
 import { loadDizengoff } from './world/dizengoff.js';
 import { buildLab, LAB } from './world/lab.js';
 import { NightLights } from './world/nightLights.js';
+import { Weather } from './world/weather.js';
 import { setSea, hasSea } from './game/swim.js';
 import { Fish } from './world/fish.js';
 import { Character } from './game/character.js';
@@ -402,6 +403,24 @@ async function init() {
   if (studio?.takeScooters) cars.addScooters(studio.takeScooters());
   if (studio?.buildShots) world.shots = studio.buildShots();
   if (studio?.chunk) studio.chunk();
+  const weather = new Weather(pipeline.scene);
+  world.weather = weather;
+  let weatherGoal = Weather.fromSaved() === 'rain' ? 1 : 0;
+  $('weather').value = weatherGoal ? 'rain' : 'clear';
+  $('weather').onchange = (e) => {
+    try { localStorage.setItem('relic-weather', e.target.value); } catch { /* private window */ }
+    weatherGoal = e.target.value === 'rain' ? 1 : 0;
+  };
+  const baseFog = pipeline.fogMaterial.uniforms.uFogDensity.value;
+  const stepWeather = (dt) => {
+    const before = weather.amount;
+    weather.amount += Math.sign(weatherGoal - weather.amount) * Math.min(Math.abs(weatherGoal - weather.amount), dt / 4);
+    pipeline.weather = weather.amount;
+    pipeline.fogMaterial.uniforms.uFogDensity.value = baseFog * (1 + 2.2 * weather.amount);
+    if (Math.abs(before - weather.amount) > 1e-4 || weather.wetMats === null) weather.wet(studio?.root || arena?.group || city?.group, weather.amount);
+    weather.update(dt, camera, pipeline.lightColor, { fx, heightAt: (x, z) => terrain.heightAt(x, z), at: player.pos });
+  };
+  world.stepWeather = stepWeather;
   if (studio?.lamps?.length) world.nightLights = new NightLights(pipeline.scene, studio.lamps, (x, z) => terrain.heightAt(x, z));
   if (arena && data.layout) {
     arena.build(data.layout);
@@ -871,6 +890,7 @@ async function init() {
     }
     pipeline.setTimeOfDay(timeOfDay, elapsed);
     studio?.update?.(((timeOfDay * 1440) + 360) % 1440, pipeline.night);
+    world.stepWeather?.(dt);
     world.nightLights?.update(pipeline.night, player.vehicle && player.vehicle.kind !== 'scooter' ? player.vehicle : null, (x, z) => terrain.heightAt(x, z));
 
     const locked = inPlay;
@@ -949,7 +969,7 @@ async function init() {
       if (arena) arena.update(dt, fx, camera);
       if (fish) fish.update(dt, camera);
       const coast = THREE.MathUtils.clamp(1 - (terrain.heightAt(viewPos.x, viewPos.z) - 1) / 25, 0, 1);
-      audio.updateAmbience(dt, { altitude: player.pos.y, coast, underwater: player.underwater });
+      audio.updateAmbience(dt, { altitude: player.pos.y, coast, underwater: player.underwater, rain: world.weather?.amount || 0 });
     }
 
     if (hitTimer > 0) { hitTimer -= dt; if (hitTimer <= 0) $('hitmarker').classList.remove('show'); }

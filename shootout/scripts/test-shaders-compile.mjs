@@ -8,7 +8,8 @@ import { join } from 'node:path';
 import * as S0 from '../src/engine/shaders.js';
 import { FXAAShader } from 'three/addons/shaders/FXAAShader.js';
 import { fireballShaders } from '../src/game/fireball.js';
-const S = { ...S0, fxaaFrag: FXAAShader.fragmentShader, fireballVert: fireballShaders.vert, fireballFrag: fireballShaders.frag };
+import { rainShaders } from '../src/world/weather.js';
+const S = { ...S0, fxaaFrag: FXAAShader.fragmentShader, fireballVert: fireballShaders.vert, fireballFrag: fireballShaders.frag, rainVert: rainShaders.vert, rainFrag: rainShaders.frag };
 
 try { execFileSync('glslangValidator', ['--version'], { stdio: 'ignore' }); } catch {
   console.log('skip: glslangValidator not installed');

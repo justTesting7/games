@@ -451,6 +451,7 @@ export class Audio {
     };
     this.wind = loop(400, 'lowpass', 0.8);
     this.surf = loop(700, 'lowpass', 0.5);
+    this.rainLoop = loop(3200, 'bandpass', 0.35); // the hiss of rain
     this.ambT = 0;
   }
 
@@ -473,8 +474,9 @@ export class Audio {
     this._hold = { o, g };
   }
 
-  updateAmbience(dt, { altitude, coast, underwater }) {
+  updateAmbience(dt, { altitude, coast, underwater, rain = 0 }) {
     if (!this.ctx || !this.wind) return;
+    this.rainLoop?.g.gain.setTargetAtTime(underwater ? 0 : 0.11 * rain, this.ctx.currentTime, 0.5);
     this.ambT += dt;
     const t = this.ambT;
     const gust = 0.5 + 0.5 * Math.sin(t * 0.21) * Math.sin(t * 0.13 + 1);
