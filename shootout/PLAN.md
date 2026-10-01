@@ -98,7 +98,7 @@ the whole district, so frustum culling never skips any of it, and the shadow pas
       (a small pool of real point lights kept in the scene at zero, so no shader recompiles).
 - [x] 58. Storms: lightning flashes the sky and the city in heavy rain, thunder rolls in after.
 - [x] 59. Lamp light cones: at night (and in rain) a soft visible cone under each streetlamp.
-- [ ] 60. Wet fighters: clothes and skin darken and gloss in the rain.
+- [x] 60. Wet fighters: clothes and skin darken and gloss in the rain.
 
 ## Log
 - Tel Aviv load (local, cached): ready in ~8 s; main-thread stages: decode 1.6 s, seam clip 1.0,

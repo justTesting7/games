@@ -541,6 +541,18 @@ export class Character {
     this.rifleBack = spine.matrixWorld.clone().invert().multiply(world);
   }
 
+  /** Rain soaks them: clothes, skin and hair darken and gloss over (k 0..1). */
+  setWet(k) {
+    if (Math.abs((this.wetK ?? 0) - k) < 0.005) return;
+    this.wetK = k;
+    for (const [m, dry, dark] of [[this.mesh?.material, 1, 0.22], [this.braid?.material, 0.55, 0.3]]) {
+      if (!m) continue;
+      if (!m.userData.dryColor) m.userData.dryColor = m.color.clone();
+      m.roughness = dry * (1 - 0.5 * k); // scales the roughness map: wet cloth and skin shine
+      m.color.copy(m.userData.dryColor).multiplyScalar(1 - dark * k);
+    }
+  }
+
   buildBraid(color) {
     const hair = new THREE.MeshStandardMaterial({ color, roughness: 0.55, metalness: 0 });
     const lobe = new THREE.SphereGeometry(1, 10, 8);

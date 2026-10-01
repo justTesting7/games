@@ -439,6 +439,8 @@ async function init() {
     if (Math.abs(before - weather.amount) > 1e-4 || weather.wetMats === null) weather.wet(studio?.root || arena?.group || city?.group, weather.amount);
     weather.update(dt, camera, pipeline.lightColor, { fx, heightAt: (x, z) => terrain.heightAt(x, z), at: player.pos });
     pipeline.lightning = pipeline.indoor ? 0 : weather.lightning(dt);
+    const soak = pipeline.indoor ? 0 : weather.amount;
+    for (const f of combat.fighters) f.character?.setWet?.(soak);
     pipeline.lightningDir = weather.bolt?.dir || 0;
   };
   world.stepWeather = stepWeather;
