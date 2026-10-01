@@ -579,7 +579,8 @@ export class Session {
     const flash = rifle && ch.rifleMuzzle ? ch.rifleMuzzle() : ch.muzzleWorld?.(0) || from;
     this.world.fx.muzzle(flash, dir, rifle ? 2.4 : 1);
     if (!rifle) ch.fired?.(0);
-    this.world.cars?.breakAlong(from, dir, 900, r.fighter, { silent: true });
+    const wall = this.world.shots?.raycast(from, dir, 900); // glass behind a wall the round hit stays whole
+    this.world.cars?.breakAlong(from, dir, wall ? wall.t : 900, r.fighter, { silent: true });
     const hit = this.world.raycast(from, dir, 900, r.fighter);
     const end = hit ? from.clone().addScaledVector(dir, hit.t) : from.clone().addScaledVector(dir, 80);
     this.world.fx.tracer(flash, end);
