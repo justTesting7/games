@@ -560,6 +560,8 @@ uniform float uFlash;
 uniform vec2 uSunUV;
 uniform float uFlare;
 uniform float uAspect;
+uniform float uSharpen;
+uniform vec2 uTexel;
 
 vec3 RRTAndODTFit(vec3 v) {
   vec3 a = v * (v + 0.0245786) - 0.000090537;
@@ -604,6 +606,12 @@ void main() {
   if (uUnderwater > 0.5) uv += vec2(sin(uv.y * 24.0 + uTime * 2.0), cos(uv.x * 20.0 + uTime * 1.7)) * 0.0018;
   vec4 s = texture(tScene, uv);
   vec3 col = s.rgb;
+  if (uSharpen > 0.0) {
+    // TAA leaves the frame a touch soft: an unsharp mask on the four neighbours brings it back
+    vec3 nb = texture(tScene, uv + vec2(uTexel.x, 0.0)).rgb + texture(tScene, uv - vec2(uTexel.x, 0.0)).rgb
+      + texture(tScene, uv + vec2(0.0, uTexel.y)).rgb + texture(tScene, uv - vec2(0.0, uTexel.y)).rgb;
+    col = max(col + (col - nb * 0.25) * uSharpen, 0.0);
+  }
   float dist = s.a;
   if (uUnderwater > 0.5) {
     vec3 absorb = exp(-min(dist, 200.0) * vec3(0.30, 0.075, 0.05));
@@ -903,5 +911,84 @@ void main() {
   float blade = (1.0 - smoothstep(0.004, 0.008, across)) * step(0.0, along) * step(along, 0.72) * step(0.05, uAmount);
   col.rgb = mix(col.rgb, vec3(0.015), blade);
   gl_FragColor = vec4(col.rgb, base.a);
+}
+`;
+
+// Temporal anti-aliasing: every frame is rendered a sub-pixel off (a Halton pattern), and
+// blended with last frame's result, found through the depth (view distance in alpha) and
+// last frame's camera. The history is clamped to the colours around the pixel now, so
+// anything that moved or appeared doesn't smear; the blend is luminance-weighted so bright
+// sparks don't flicker. History is sampled with a Catmull-Rom filter to stay sharp.
+export const taaFrag = /* glsl */ `
+varying vec2 vUv;
+uniform sampler2D tCur;
+uniform sampler2D tHist;
+uniform mat4 uInvViewProj;
+uniform mat4 uPrevViewProj;
+uniform vec3 uCamPos;
+uniform vec3 uCamForward;
+uniform vec2 uTexel;
+uniform float uReset;
+
+vec3 worldAt(vec2 uv, float viewZ) {
+  vec4 far = uInvViewProj * vec4(uv * 2.0 - 1.0, 1.0, 1.0);
+  vec3 dir = normalize(far.xyz / far.w - uCamPos);
+  return uCamPos + dir * (viewZ / max(dot(dir, uCamForward), 1e-3));
+}
+float luma(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
+// tonemapped space for the clamp and blend: HDR highlights would otherwise dominate
+vec3 tm(vec3 c) { return c / (1.0 + luma(c)); }
+vec3 itm(vec3 c) { return c / max(1.0 - luma(c), 1e-4); }
+
+vec3 historyCR(vec2 uv) {
+  vec2 sp = uv / uTexel;
+  vec2 tc = floor(sp - 0.5) + 0.5;
+  vec2 f = sp - tc;
+  vec2 w0 = f * (-0.5 + f * (1.0 - 0.5 * f));
+  vec2 w1 = 1.0 + f * f * (-2.5 + 1.5 * f);
+  vec2 w2 = f * (0.5 + f * (2.0 - 1.5 * f));
+  vec2 w3 = f * f * (-0.5 + 0.5 * f);
+  vec2 w12 = w1 + w2;
+  vec2 tc0 = (tc - 1.0) * uTexel, tc3 = (tc + 2.0) * uTexel, tc12 = (tc + w2 / w12) * uTexel;
+  vec3 c = texture(tHist, vec2(tc12.x, tc0.y)).rgb * (w12.x * w0.y)
+    + texture(tHist, vec2(tc0.x, tc12.y)).rgb * (w0.x * w12.y)
+    + texture(tHist, vec2(tc12.x, tc12.y)).rgb * (w12.x * w12.y)
+    + texture(tHist, vec2(tc3.x, tc12.y)).rgb * (w3.x * w12.y)
+    + texture(tHist, vec2(tc12.x, tc3.y)).rgb * (w12.x * w3.y);
+  float w = w12.x * w0.y + w0.x * w12.y + w12.x * w12.y + w3.x * w12.y + w12.x * w3.y;
+  return max(c / w, 0.0);
+}
+
+void main() {
+  vec4 cur = texture(tCur, vUv);
+  vec3 c = tm(cur.rgb);
+  // the neighbourhood now: its colour box, and the nearest depth (edges reproject by the
+  // foreground, so a moving object's silhouette doesn't drag the background with it)
+  vec3 mn = c, mx = c, m1 = c, m2 = c * c;
+  float dNear = cur.a;
+  for (int y = -1; y <= 1; y++) for (int x = -1; x <= 1; x++) {
+    if (x == 0 && y == 0) continue;
+    vec4 s = texture(tCur, vUv + vec2(float(x), float(y)) * uTexel);
+    vec3 t = tm(s.rgb);
+    mn = min(mn, t); mx = max(mx, t);
+    m1 += t; m2 += t * t;
+    dNear = min(dNear, s.a);
+  }
+  // variance clipping tightens the box around the real spread of colours
+  m1 /= 9.0; m2 /= 9.0;
+  vec3 sd = sqrt(max(m2 - m1 * m1, 0.0));
+  mn = max(mn, m1 - sd * 1.25); mx = min(mx, m1 + sd * 1.25);
+
+  vec3 P = worldAt(vUv, min(dNear, 9000.0));
+  vec4 prev = uPrevViewProj * vec4(P, 1.0);
+  vec2 puv = prev.xy / prev.w * 0.5 + 0.5;
+  bool inside = prev.w > 0.0 && puv.x > 0.0 && puv.x < 1.0 && puv.y > 0.0 && puv.y < 1.0;
+  if (uReset > 0.5 || !inside) { gl_FragColor = cur; return; }
+  vec3 h = clamp(tm(historyCR(puv)), mn, mx);
+  // trust the history less the further it moved (fast pans blur less)
+  float moved = length((puv - vUv) / uTexel);
+  float k = mix(0.92, 0.75, clamp(moved / 24.0, 0.0, 1.0));
+  vec3 o = mix(c, h, k);
+  gl_FragColor = vec4(itm(o), cur.a);
 }
 `;

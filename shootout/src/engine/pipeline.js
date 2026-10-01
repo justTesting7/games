@@ -99,9 +99,9 @@ function fsMaterial(frag, uniforms, extra = {}) {
 
 export const QUALITY = {
   low: { label: 'Low', shadow: 512, shadowDist: 28, ssr: 0, msaa: 0, ao: 0, fxaa: false, pixelRatio: 0.7, grass: 0.3, trees: 0.45 },
-  medium: { label: 'Medium', shadow: 2048, shadowDist: 64, ssr: 8, msaa: 0, ao: 8, fxaa: true, pixelRatio: 1, grass: 0.55, trees: 0.7 },
-  high: { label: 'High', shadow: 4096, shadowDist: 90, ssr: 16, msaa: 0, ao: 12, fxaa: true, smaa: true, pixelRatio: 1, grass: 0.85, trees: 0.9 },
-  ultra: { label: 'Ultra', shadow: 4096, shadowDist: 110, ssr: 24, msaa: 2, ao: 16, fxaa: true, smaa: true, pixelRatio: 1.25, grass: 1.1, trees: 1.05 },
+  medium: { label: 'Medium', shadow: 2048, shadowDist: 64, ssr: 8, msaa: 0, ao: 8, fxaa: true, taa: true, pixelRatio: 1, grass: 0.55, trees: 0.7 },
+  high: { label: 'High', shadow: 4096, shadowDist: 90, ssr: 16, msaa: 0, ao: 12, fxaa: true, smaa: true, taa: true, pixelRatio: 1, grass: 0.85, trees: 0.9 },
+  ultra: { label: 'Ultra', shadow: 4096, shadowDist: 110, ssr: 24, msaa: 2, ao: 16, fxaa: true, smaa: true, taa: true, pixelRatio: 1.25, grass: 1.1, trees: 1.05 },
 };
 
 export class Pipeline {
@@ -240,6 +240,14 @@ export class Pipeline {
       tDiffuse: { value: null }, resolution: { value: new THREE.Vector2(1, 1) },
     });
     this.aoBlurMaterial = fsMaterial(S.aoBlurFrag, { tAO: { value: null }, uStep: { value: new THREE.Vector2() } });
+    this.taaMaterial = fsMaterial(S.taaFrag, {
+      tCur: { value: null }, tHist: { value: null }, uInvViewProj: { value: new THREE.Matrix4() },
+      uPrevViewProj: { value: new THREE.Matrix4() }, uCamPos: { value: new THREE.Vector3() },
+      uCamForward: { value: new THREE.Vector3() }, uTexel: { value: new THREE.Vector2() }, uReset: { value: 1 },
+    });
+    this.taaIndex = 0;
+    this.taaPrevVP = new THREE.Matrix4();
+    this._unjP = new THREE.Matrix4();
     this.windMaterial = fsMaterial(S.windscreenFrag, {
       tScene: { value: null }, uAmount: { value: 0 }, uTime: this.u.uTime, uAspect: { value: 1 },
     });
@@ -280,6 +288,7 @@ export class Pipeline {
       uTime: this.u.uTime,
       uExposureBias: { value: 1.0 },
       uSunUV: { value: new THREE.Vector2() }, uFlare: { value: 0 }, uAspect: { value: 1 },
+      uSharpen: { value: 0 }, uTexel: { value: new THREE.Vector2() },
       uAutoExposure: { value: 1 },
       uScotopic: { value: 1 },
       uVignette: { value: 0.55 },
@@ -357,6 +366,9 @@ export class Pipeline {
     if (!this.fogRT) this.fogRT = hdrTarget(W, H, this.hdrType); else this.fogRT.setSize(W, H);
     if (!this.motionRT) this.motionRT = hdrTarget(W, H, this.hdrType); else this.motionRT.setSize(W, H);
     if (!this.windRT) this.windRT = hdrTarget(W, H, this.hdrType); else this.windRT.setSize(W, H);
+    if (!this.taaRT) this.taaRT = [0, 1].map(() => hdrTarget(W, H, this.hdrType, { minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter }));
+    else this.taaRT.forEach((t) => t.setSize(W, H));
+    this.taaReset = true;
 
     this.bloomRTs?.forEach((r) => r.dispose());
     this.bloomRTs = [];
@@ -509,6 +521,19 @@ export class Pipeline {
     this.updateShadowCamera(opts.shadowCenter || camera.position);
 
     camera.updateMatrixWorld();
+    // TAA: this frame is drawn a sub-pixel off along a Halton sequence (undone at the end)
+    const taa = !!this.quality.taa && !this.mobile && !opts.outViewport;
+    const unjVP = this._unjVP || (this._unjVP = new THREE.Matrix4());
+    unjVP.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+    if (taa) {
+      this._unjP.copy(camera.projectionMatrix);
+      const i = (this.frame % 8) + 1;
+      const halton = (n, b) => { let f = 1, r = 0; while (n > 0) { f /= b; r += f * (n % b); n = Math.floor(n / b); } return r; };
+      const jx = halton(i, 2) - 0.5, jy = halton(i, 3) - 0.5;
+      camera.projectionMatrix.elements[8] += (jx * 2) / W;
+      camera.projectionMatrix.elements[9] += (jy * 2) / H;
+      camera.projectionMatrixInverse.copy(camera.projectionMatrix).invert();
+    }
     const vp = this._m.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
     const invVP = vp.clone().invert();
     this.skyMaterial.uniforms.uInvViewProj.value.copy(invVP);
@@ -554,6 +579,23 @@ export class Pipeline {
     fu.uAO.value = aoTex ? 0.85 : 0;
     this.quad.render(r, this.fogMaterial, this.fogRT);
     let sceneTex = this.fogRT.texture;
+    if (taa) {
+      const tu = this.taaMaterial.uniforms;
+      const out = this.taaRT[this.taaIndex], hist = this.taaRT[1 - this.taaIndex];
+      tu.tCur.value = sceneTex;
+      tu.tHist.value = hist.texture;
+      tu.uInvViewProj.value.copy(invVP);
+      tu.uPrevViewProj.value.copy(this.taaPrevVP);
+      tu.uCamPos.value.copy(camera.position);
+      camera.getWorldDirection(tu.uCamForward.value);
+      tu.uTexel.value.set(1 / W, 1 / H);
+      tu.uReset.value = this.taaReset ? 1 : 0;
+      this.quad.render(r, this.taaMaterial, out);
+      this.taaIndex = 1 - this.taaIndex;
+      this.taaReset = false;
+      sceneTex = out.texture;
+    } else this.taaReset = true;
+    this.taaPrevVP.copy(unjVP);
     // speed blur when driving fast (reprojected against last frame's camera)
     if (this.motion > 0.02 && !this.mobile && !opts.outViewport) {
       const mu = this.motionMaterial.uniforms;
@@ -575,7 +617,7 @@ export class Pipeline {
       this.quad.render(r, this.windMaterial, this.windRT);
       sceneTex = this.windRT.texture;
     }
-    this.prevViewProj.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+    this.prevViewProj.copy(unjVP);
 
     let bloomTex = this.blackRT?.texture || sceneTex;
     let lumTex = this.lumRT[0].texture;
@@ -644,12 +686,14 @@ export class Pipeline {
     cu.tRays.value = raysTex;
     cu.uRays.value = rays * 1.2;
     cu.uFlare.value = flare;
+    cu.uTexel.value.set(1 / W, 1 / H);
     cu.uUnderwater.value = opts.underwater ? 1 : 0;
     cu.uFlash.value = opts.flash || 0;
     const amb = new THREE.Vector3(0.02, 0.1, 0.13).multiplyScalar(0.4 + this.lightColor.y * 0.08 + (1 - this.night) * 0.4);
     cu.uWaterAmbient.value.copy(amb);
     const splitVp = opts.outViewport;
-    const fxaa = this.quality.fxaa;
+    const fxaa = this.quality.fxaa && !taa; // TAA already smooths the edges
+    this.compositeMaterial.uniforms.uSharpen.value = taa ? 0.35 : 0;
     if (fxaa) this.quad.render(r, this.compositeMaterial, this.ldrRT);
     if (splitVp) {
       r.setViewport(splitVp[0], splitVp[1], splitVp[2], splitVp[3]);
@@ -666,6 +710,10 @@ export class Pipeline {
     if (splitVp) {
       r.setViewport(0, 0, r.domElement.clientWidth, r.domElement.clientHeight);
       r.setScissorTest(false);
+    }
+    if (taa) { // the game aims and projects with the true camera
+      camera.projectionMatrix.copy(this._unjP);
+      camera.projectionMatrixInverse.copy(this._unjP).invert();
     }
   }
 

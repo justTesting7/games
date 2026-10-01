@@ -125,6 +125,26 @@ the whole district, so frustum culling never skips any of it, and the shadow pas
 
 - [x] 71. At night the nearest cars driven by rivals and other players light the road ahead too (up to four sets of beams).
 
+## Phase 4 (2026-10-02): twice as far again
+Ordered by how much they lift the whole game; one commit each.
+- [x] 72. Temporal anti-aliasing: jittered frames reprojected through the depth and blended with
+      clamped history, then sharpened; stable edges, wires, railings and foliage instead of
+      crawling pixels (replaces FXAA/SMAA where it runs).
+- [ ] 73. Far shadow cascade: a second, coarse shadow map over ~600 m refreshed every few frames,
+      sampled past the near map, so buildings shade the streets into the distance.
+- [ ] 74. City surfaces with life: per-building tint, grime that darkens toward the ground and
+      under ledges, streaks below windows, fine detail normals; no more flat, clean plaster.
+- [ ] 75. Ambient traffic: a few cars drive the streets on planned routes (lights at night,
+      spray in the rain), stop for people in the road and floor it away from gunfire.
+- [ ] 76. Street acoustics: the reverb follows the place (narrow street, open square, inside),
+      measured by rays around the listener; distant shots echo off the buildings.
+- [ ] 77. Depth of field while aiming down the scope: what is far from the focus softens.
+- [ ] 78. Car explosions tear it apart: bonnet, doors and boot fly off as tumbling panels.
+- [ ] 79. Gun feel: weapon sway with movement, procedural recoil that kicks and settles, a
+      camera punch per shot, and a breathing drift on the scope.
+- [ ] 80. Film touches: faint grain and chromatic fringing at the screen edges.
+- [ ] 81. Shop windows and glass facades reflect the street (screen-space, always on).
+
 ## Log
 - Tel Aviv load (local, cached): ready in ~8 s; main-thread stages: decode 1.6 s, seam clip 1.0,
   cars 0.4, shot BVH 1.5, chunking 1.3.
