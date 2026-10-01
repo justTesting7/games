@@ -432,7 +432,7 @@ export class Pipeline {
     // overcast: the sun is veiled and the sky clouds over (weather 0..1)
     const w = this.weather || 0;
     if (w > 0) this.lightColor.multiplyScalar(1 - 0.62 * w);
-    this.skyMaterial.uniforms.uCloudCover.value = 0.5 + 0.45 * w;
+    this.skyMaterial.uniforms.uCloudCover.value = 0.5 - 0.44 * w; // the shader's threshold: lower = more cloud
     const lc = this.lightColor;
     const li = Math.max(lc.x, lc.y, lc.z);
     this.sun.intensity = this.mobile ? Math.min(li, 1.6) : li;

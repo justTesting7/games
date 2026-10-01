@@ -283,7 +283,7 @@ export class Effects {
       }
       return;
     }
-    this.fireballs.spawn(pos.clone().setY(pos.y + 0.9), 2.4 + Math.random() * 0.6);
+    this.fireballs.spawn(pos.clone().setY(pos.y + 0.9), 1.9 + Math.random() * 0.5);
     this.onBlast?.(pos);
     // the shockwave: a ring of dust racing out along the ground
     const gy = this.terrain.heightAt(pos.x, pos.z) + 0.15;
