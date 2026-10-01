@@ -13,6 +13,7 @@ import { arenaHeightAt, standSpawn } from './world/arenaLayout.js';
 import { studioRivalSpots, blockedAt } from './world/glbMap.js';
 import { loadDizengoff } from './world/dizengoff.js';
 import { buildLab, LAB } from './world/lab.js';
+import { NightLights } from './world/nightLights.js';
 import { setSea, hasSea } from './game/swim.js';
 import { Fish } from './world/fish.js';
 import { Character } from './game/character.js';
@@ -401,6 +402,7 @@ async function init() {
   if (studio?.takeScooters) cars.addScooters(studio.takeScooters());
   if (studio?.buildShots) world.shots = studio.buildShots();
   if (studio?.chunk) studio.chunk();
+  if (studio?.lamps?.length) world.nightLights = new NightLights(pipeline.scene, studio.lamps, (x, z) => terrain.heightAt(x, z));
   if (arena && data.layout) {
     arena.build(data.layout);
     pipeline.scene.add(arena.group);
@@ -869,6 +871,7 @@ async function init() {
     }
     pipeline.setTimeOfDay(timeOfDay, elapsed);
     studio?.update?.(((timeOfDay * 1440) + 360) % 1440, pipeline.night);
+    world.nightLights?.update(pipeline.night, player.vehicle && player.vehicle.kind !== 'scooter' ? player.vehicle : null, (x, z) => terrain.heightAt(x, z));
 
     const locked = inPlay;
     if (mode === 'solo' && (input.restart || (input.reload && round.state === 'over')) && (round.state === 'over' || round.state === 'fight')) {

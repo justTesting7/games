@@ -4,6 +4,7 @@ import { extractCityCars, removeInBoxes } from './cityCars.js';
 import { buildStadium, stadiumSlotSpawns, STADIUM } from './stadium.js';
 import { buildShotMesh } from './shotMesh.js';
 import { chunkMeshes } from './chunkMeshes.js';
+import { findLamps } from './nightLights.js';
 import { buildPitchProps } from './pitchProps.js';
 import { pickRivalSpots, slotSpawns } from './rivalSpots.js';
 
@@ -77,6 +78,7 @@ export async function loadDizengoff(renderer, folder = 'dizengoff-center', { sta
   const pitchProps = nav.stadium?.pitch ? buildPitchProps(nav.stadium.pitch) : null;
   if (pitchProps) group.add(pitchProps.group);
   const heightAt = makeNavHeight(nav);
+  const lamps = findLamps(city.set);
   // Stadium maps: everyone starts inside, one player per stand; the local player takes the first
   const stands = stadiumStart && nav.stadium ? stadiumSlotSpawns(nav.stadium) : null;
   const spawn = stands ? { ...stands[0] } : { ...nav.spawn };
@@ -96,6 +98,7 @@ export async function loadDizengoff(renderer, folder = 'dizengoff-center', { sta
       return all.length ? all[slot % all.length] : null;
     },
     heightAt,
+    lamps,
     cameraFar: FAR_DISTANCE,
     addColliders: (colliders) => {
       for (const c of pitchProps?.colliders || []) colliders.add(c);
