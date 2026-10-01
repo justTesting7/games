@@ -1009,6 +1009,8 @@ export class Cars {
     car.driver = player.fighter;
     car.lastDriver = player.fighter;
     car.remote = false;
+    player.enterFrom = player.pos.clone(); // the body slides from here into the seat
+    player.enterT = 0;
     player.vehicle = car;
     player.swimming = false;
     this.refreshSeat(car);
@@ -1040,6 +1042,8 @@ export class Cars {
     const side = 1;
     const at = exitOf(car, side);
     const y = this.world.terrain.heightAt(at.x, at.z);
+    player.exitFrom = player.pos.clone(); // the seat: the body slides out to the door
+    player.exitT = 0;
     player.pos.set(at.x, y, at.z);
     player.vel.set(0, 0, 0);
     player.yaw = car.yaw;

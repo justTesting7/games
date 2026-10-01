@@ -293,6 +293,11 @@ export class Player {
 
     const ch = this.character;
     ch.root.position.copy(this.pos);
+    if ((this.exitT ?? 1) < 1 && this.exitFrom) { // climbing out
+      this.exitT = Math.min(1, this.exitT + dt / 0.35);
+      const e = this.exitT * this.exitT * (3 - 2 * this.exitT);
+      ch.root.position.lerpVectors(this.exitFrom, this.pos, e);
+    }
     const pitchGoal = this.diving ? 1.05 : this.swimming ? 0.32 : 0;
     this.swimPitch += (pitchGoal - this.swimPitch) * Math.min(1, dt * 5);
     ch.root.rotation.order = 'YXZ';
@@ -344,6 +349,11 @@ export class Player {
     this.time = (this.time || 0) + dt;
     const ch = this.character;
     ch.root.position.copy(this.pos);
+    if ((this.enterT ?? 1) < 1 && this.enterFrom) { // climbing in
+      this.enterT = Math.min(1, this.enterT + dt / 0.5);
+      const e = this.enterT * this.enterT * (3 - 2 * this.enterT);
+      ch.root.position.lerpVectors(this.enterFrom, this.pos, e);
+    }
     const standing = car.kind === 'scooter'; // a scooter rider is on show, not in a cockpit
     ch.root.rotation.order = 'YXZ';
     ch.root.rotation.x = 0;
