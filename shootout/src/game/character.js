@@ -391,6 +391,13 @@ function throwPoint(t, out) {
   return out.copy(THROW_PATH[THROW_PATH.length - 1][1]);
 }
 
+// scratch for applyAim, which runs for every fighter every frame (UP is below)
+const AIM = {
+  fwd: new THREE.Vector3(), flat: new THREE.Vector3(), right: new THREE.Vector3(), hd: new THREE.Vector3(),
+  headFwd: new THREE.Vector3(), clamp: new THREE.Vector3(), pitch: new THREE.Vector3(),
+  qa: new THREE.Quaternion(), qb: new THREE.Quaternion(),
+};
+
 export class Character {
   constructor() {
     this.root = new THREE.Group();
@@ -1423,29 +1430,29 @@ export class Character {
     this.aimDir.copy(dir);
 
     // Twist and bend the spine towards the aim direction.
-    const fwd = new THREE.Vector3(0, 0, 1).applyQuaternion(this.root.quaternion);
-    const flat = new THREE.Vector3(dir.x, 0, dir.z).normalize();
+    const fwd = AIM.fwd.set(0, 0, 1).applyQuaternion(this.root.quaternion);
+    const flat = AIM.flat.set(dir.x, 0, dir.z).normalize();
     const yawErr = Math.atan2(fwd.x * flat.z - fwd.z * flat.x, fwd.dot(flat));
     const pitch = Math.asin(THREE.MathUtils.clamp(dir.y, -1, 1));
     const lookingGun = this.action?.type === 'reload' || this.action?.type === 'pistolReload';
     const lookW = lookingGun ? 0.82 : Math.max(w, 0.7);
-    const right = new THREE.Vector3().crossVectors(new THREE.Vector3(0, 1, 0), flat).normalize();
+    const right = AIM.right.crossVectors(UP, flat).normalize();
     for (const [name, share] of [['Spine', 0.2], ['Spine1', 0.3], ['Spine2', 0.3]]) {
-      const qy = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), -yawErr * share * w);
-      const qp = new THREE.Quaternion().setFromAxisAngle(right, -pitch * share * w * 0.9);
+      const qy = AIM.qa.setFromAxisAngle(UP, -yawErr * share * w);
+      const qp = AIM.qb.setFromAxisAngle(right, -pitch * share * w * 0.9);
       rotateBoneWorld(B[name], qy.multiply(qp), t);
     }
     // Head follows the mouse look even when the guns are down.
     const head = B.Head;
     const hd = this.lookDir.lengthSq() > 1e-6
-      ? this.lookDir.clone().normalize()
-      : new THREE.Vector3().subVectors(this.aimTarget, head.getWorldPosition(t.a)).normalize();
-    const headFwd = new THREE.Vector3(0, 0, 1).applyQuaternion(head.getWorldQuaternion(t.q));
-    const clampDir = headFwd.clone().lerp(hd, 0.75).normalize();
+      ? AIM.hd.copy(this.lookDir).normalize()
+      : AIM.hd.subVectors(this.aimTarget, head.getWorldPosition(t.a)).normalize();
+    const headFwd = AIM.headFwd.set(0, 0, 1).applyQuaternion(head.getWorldQuaternion(t.q));
+    const clampDir = AIM.clamp.copy(headFwd).lerp(hd, 0.75).normalize();
     const angle = headFwd.angleTo(hd);
     if (angle < 1.6) {
-      const q = new THREE.Quaternion().setFromUnitVectors(headFwd, clampDir);
-      q.copy(new THREE.Quaternion().slerp(q, lookW));
+      const q = AIM.qa.setFromUnitVectors(headFwd, clampDir);
+      q.copy(AIM.qb.identity().slerp(q, lookW));
       rotateBoneWorld(head, q, t);
     }
 
@@ -1455,12 +1462,12 @@ export class Character {
     const kick = this.recoil[0] - this.recoil[1];
     const kickAll = this.recoil[0] + this.recoil[1];
     if (kickAll > 1e-3) {
-      const qk = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), -kick * 0.25 * w);
-      qk.multiply(new THREE.Quaternion().setFromAxisAngle(right, -kickAll * 0.12 * w));
+      const qk = AIM.qa.setFromAxisAngle(UP, -kick * 0.25 * w);
+      qk.multiply(AIM.qb.setFromAxisAngle(right, -kickAll * 0.12 * w));
       rotateBoneWorld(B.Spine2, qk, t);
     }
     // Both arms extend towards the same aim point the shots use.
-    const pitchAxis = new THREE.Vector3().crossVectors(dir, new THREE.Vector3(0, 1, 0)).normalize();
+    const pitchAxis = AIM.pitch.crossVectors(dir, UP).normalize();
     const sides = ['Right', 'Left'];
     sides.forEach((side, i) => {
       const upper = B[`${side}Arm`], fore = B[`${side}ForeArm`], hand = B[`${side}Hand`];
@@ -1474,9 +1481,9 @@ export class Character {
       if (finger) rotateBoneToward(hand, finger, d2, w, t);
       const r = this.recoil[i] * w;
       if (r > 1e-3) {
-        rotateBoneWorld(upper, new THREE.Quaternion().setFromAxisAngle(pitchAxis, r * 0.35), t);
-        rotateBoneWorld(fore, new THREE.Quaternion().setFromAxisAngle(pitchAxis, r * 0.45), t);
-        rotateBoneWorld(hand, new THREE.Quaternion().setFromAxisAngle(pitchAxis, r * 0.6), t);
+        rotateBoneWorld(upper, AIM.qa.setFromAxisAngle(pitchAxis, r * 0.35), t);
+        rotateBoneWorld(fore, AIM.qa.setFromAxisAngle(pitchAxis, r * 0.45), t);
+        rotateBoneWorld(hand, AIM.qa.setFromAxisAngle(pitchAxis, r * 0.6), t);
       }
     });
   }

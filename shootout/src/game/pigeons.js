@@ -82,6 +82,9 @@ export class Pigeons {
     this._e = new THREE.Euler(0, 0, 0, 'YXZ');
     this._s = new THREE.Vector3();
     this._one = new THREE.Vector3(1, 1, 1);
+    this._to = new THREE.Vector3();
+    this._steer = new THREE.Vector3();
+    this._avg = new THREE.Vector3();
     this.t = 0;
   }
 
@@ -180,18 +183,18 @@ export class Pigeons {
       }
       tx = b.land.x; ty = b.land.y; tz = b.land.z;
     }
-    const to = new THREE.Vector3(tx - b.pos.x, ty - b.pos.y, tz - b.pos.z);
+    const to = this._to.set(tx - b.pos.x, ty - b.pos.y, tz - b.pos.z);
     const d = to.length();
     const landing = f.state === 'landing';
     const want = landing ? Math.min(7, 1 + d * 0.8) : 9;
-    const steer = to.multiplyScalar(want / Math.max(d, 1e-3)).sub(b.vel).multiplyScalar(landing ? 2.2 : 1.1);
+    const steer = this._steer.copy(to).multiplyScalar(want / Math.max(d, 1e-3)).sub(b.vel).multiplyScalar(landing ? 2.2 : 1.1);
     // keep apart from close neighbours, keep with the flock's heading
-    const avg = new THREE.Vector3();
+    const avg = this._avg.set(0, 0, 0);
     let n = 0;
     for (const o of this.birds) {
       if (o === b || o.flock !== f || !o.air) continue;
       const dx = b.pos.x - o.pos.x, dy = b.pos.y - o.pos.y, dz = b.pos.z - o.pos.z, q = dx * dx + dy * dy + dz * dz;
-      if (q < 0.5 && q > 1e-6) steer.add(new THREE.Vector3(dx, dy, dz).multiplyScalar(2.5 / q));
+      if (q < 0.5 && q > 1e-6) { const k = 2.5 / q; steer.x += dx * k; steer.y += dy * k; steer.z += dz * k; }
       if (q < 25) { avg.add(o.vel); n++; }
     }
     if (n && !landing) steer.addScaledVector(avg.divideScalar(n).sub(b.vel), 0.6);

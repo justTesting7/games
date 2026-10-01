@@ -14,7 +14,7 @@ the whole district, so frustum culling never skips any of it, and the shadow pas
 - [x] 2. Parked city cars as a few BatchedMesh draws (one per material) instead of ~9 meshes per
       car x 200 cars; a car being driven or knocked leaves the batch or updates its instance.
 - [~] 3. Shadow casters: skip tiny/flat meshes (road marks, kerbs, glass), limit far skyline.
-- [ ] 4. Per-frame allocations in hot paths (raycasts, colliders, character IK) -> scratch objects.
+- [~] 4. Per-frame allocations in hot paths (raycasts, colliders, character IK) -> scratch objects.
 - [x] 5. Distance fade / LOD for rivals' expensive per-frame work (IK, braid) when far away.
 
 ## Shooting accuracy
