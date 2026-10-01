@@ -126,3 +126,11 @@ the whole district, so frustum culling never skips any of it, and the shadow pas
   chunking (256 m cells), car batching and no shadows from flat ground.
 - CPU per step (Tel Aviv): parked cars 2.9 -> 0.1 ms (sleep when settled); rival characters
   skip lean / foot IK / gun probe / braid beyond 35 m.
+- 2026-10-01 (phase 3): Lab frame at 1024x768 Medium: 2.7 ms clear, 3.5 ms in rain (puddles, SSR),
+  3.8 ms with four haze sources and a shockwave. Night exposure: night now renders at about a
+  third of day brightness (was ~2/3), with lamps, cones, lit windows and car lamps carrying it.
+- Verified in the Lab by render capture: car lamps, dents, heat haze, fire light, lamp cones,
+  pigeons, windscreen rain, lens flare, car bullet holes / windscreen cracks, wound stains,
+  ragdoll on a car roof (trace). Ground bounce, night exposure, puddles and lightning were
+  checked on Dizengoff Square before the Lab-only rule was remembered; the tree wind only in
+  the Lab (on a stand-in mesh): worth a look on the real maps.
