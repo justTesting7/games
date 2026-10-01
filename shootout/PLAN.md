@@ -72,6 +72,8 @@ the whole district, so frustum culling never skips any of it, and the shadow pas
 - [x] 40. Slide: crouch at a sprint to slide low on your momentum for ~0.8 s.
 - [x] 41. Bodies stay physical: rounds hit corpses (the ragdoll jerks, blood, no damage) and blasts
       throw them.
+- [x] 42. Speed blur at the wheel: reprojection motion blur from the depth in alpha, ramping in
+      from ~8 m/s, off on foot so aiming stays crisp.
 
 ## Log
 - Tel Aviv load (local, cached): ready in ~8 s; main-thread stages: decode 1.6 s, seam clip 1.0,

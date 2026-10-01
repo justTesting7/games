@@ -231,6 +231,12 @@ export class Pipeline {
       tDiffuse: { value: null }, resolution: { value: new THREE.Vector2(1, 1) },
     });
     this.aoBlurMaterial = fsMaterial(S.aoBlurFrag, { tAO: { value: null }, uStep: { value: new THREE.Vector2() } });
+    this.motionMaterial = fsMaterial(S.motionBlurFrag, {
+      tScene: { value: null }, uInvViewProj: { value: new THREE.Matrix4() }, uPrevViewProj: { value: new THREE.Matrix4() },
+      uCamPos: { value: new THREE.Vector3() }, uCamForward: { value: new THREE.Vector3() }, uStrength: { value: 0 },
+    });
+    this.prevViewProj = new THREE.Matrix4();
+    this.motion = 0; // 0..1, set by the game (fast driving)
     this.bloomDown = fsMaterial(S.bloomDownFrag, {
       tSrc: { value: null }, uTexel: { value: new THREE.Vector2() }, uFirst: { value: false },
     });
@@ -330,6 +336,7 @@ export class Pipeline {
     } else this.sceneRT.setSize(W, H);
     if (!this.copyRT) this.copyRT = hdrTarget(W, H, this.hdrType); else this.copyRT.setSize(W, H);
     if (!this.fogRT) this.fogRT = hdrTarget(W, H, this.hdrType); else this.fogRT.setSize(W, H);
+    if (!this.motionRT) this.motionRT = hdrTarget(W, H, this.hdrType); else this.motionRT.setSize(W, H);
 
     this.bloomRTs?.forEach((r) => r.dispose());
     this.bloomRTs = [];
@@ -499,7 +506,20 @@ export class Pipeline {
     fu.tAO.value = aoTex;
     fu.uAO.value = aoTex ? 0.85 : 0;
     this.quad.render(r, this.fogMaterial, this.fogRT);
-    const sceneTex = this.fogRT.texture;
+    let sceneTex = this.fogRT.texture;
+    // speed blur when driving fast (reprojected against last frame's camera)
+    if (this.motion > 0.02 && !this.mobile && !opts.outViewport) {
+      const mu = this.motionMaterial.uniforms;
+      mu.tScene.value = sceneTex;
+      mu.uInvViewProj.value.copy(invVP);
+      mu.uPrevViewProj.value.copy(this.prevViewProj);
+      mu.uCamPos.value.copy(camera.position);
+      camera.getWorldDirection(mu.uCamForward.value);
+      mu.uStrength.value = this.motion * 0.9;
+      this.quad.render(r, this.motionMaterial, this.motionRT);
+      sceneTex = this.motionRT.texture;
+    }
+    this.prevViewProj.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
 
     let bloomTex = this.blackRT?.texture || sceneTex;
     let lumTex = this.lumRT[0].texture;

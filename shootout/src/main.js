@@ -907,6 +907,11 @@ async function init() {
     pipeline.setTimeOfDay(timeOfDay, elapsed);
     studio?.update?.(((timeOfDay * 1440) + 360) % 1440, pipeline.night);
     world.stepWeather?.(dt);
+    { // speed blur at the wheel only, growing past ~8 m/s
+      const v = player.vehicle ? Math.abs(player.vehicle.speed) : 0;
+      const goal = THREE.MathUtils.clamp((v - 8) / 22, 0, 1);
+      pipeline.motion += (goal - pipeline.motion) * Math.min(1, dt * 3);
+    }
     world.nightLights?.update(pipeline.night, player.vehicle && player.vehicle.kind !== 'scooter' ? player.vehicle : null, (x, z) => terrain.heightAt(x, z));
 
     const locked = inPlay;

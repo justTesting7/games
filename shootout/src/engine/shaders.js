@@ -679,3 +679,35 @@ void main() {
   gl_FragColor = vec4(sum / wsum, d, 0.0, 1.0);
 }
 `;
+
+// Camera motion blur by reprojection: rebuild each pixel's world point from its view
+// distance (alpha), project it with last frame's camera, and blur along the difference.
+export const motionBlurFrag = /* glsl */ `
+varying vec2 vUv;
+uniform sampler2D tScene;
+uniform mat4 uInvViewProj;
+uniform mat4 uPrevViewProj;
+uniform vec3 uCamPos;
+uniform vec3 uCamForward;
+uniform float uStrength;
+
+void main() {
+  vec4 c = texture(tScene, vUv);
+  float viewZ = c.a;
+  vec4 far = uInvViewProj * vec4(vUv * 2.0 - 1.0, 1.0, 1.0);
+  vec3 dir = normalize(far.xyz / far.w - uCamPos);
+  float dist = min(viewZ, 400.0) / max(dot(dir, uCamForward), 1e-3);
+  vec3 world = uCamPos + dir * dist;
+  vec4 prev = uPrevViewProj * vec4(world, 1.0);
+  vec2 prevUv = prev.xy / prev.w * 0.5 + 0.5;
+  vec2 vel = (vUv - prevUv) * uStrength;
+  float len = length(vel);
+  if (len > 0.04) vel *= 0.04 / len; // cap the smear
+  vec3 sum = c.rgb;
+  for (int i = 1; i < 8; i++) {
+    float t = float(i) / 7.0 - 0.5;
+    sum += texture(tScene, vUv + vel * t).rgb;
+  }
+  gl_FragColor = vec4(sum / 8.0, viewZ);
+}
+`;
