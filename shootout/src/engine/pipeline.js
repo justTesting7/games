@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import * as S from './shaders.js';
 import { patchShaderChunks } from './patch.js';
 import { FXAAShader } from 'three/addons/shaders/FXAAShader.js';
+import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
 
 const R0 = 6372e3, R_PLANET = 6371e3, R_ATMOS = 6471e3;
 const K_RLH = [5.5e-6, 13.0e-6, 22.4e-6], K_MIE = 21e-6;
@@ -98,8 +99,8 @@ function fsMaterial(frag, uniforms, extra = {}) {
 export const QUALITY = {
   low: { label: 'Low', shadow: 512, shadowDist: 28, ssr: 0, msaa: 0, ao: 0, fxaa: false, pixelRatio: 0.7, grass: 0.3, trees: 0.45 },
   medium: { label: 'Medium', shadow: 2048, shadowDist: 64, ssr: 8, msaa: 0, ao: 8, fxaa: true, pixelRatio: 1, grass: 0.55, trees: 0.7 },
-  high: { label: 'High', shadow: 4096, shadowDist: 90, ssr: 16, msaa: 0, ao: 12, fxaa: true, pixelRatio: 1, grass: 0.85, trees: 0.9 },
-  ultra: { label: 'Ultra', shadow: 4096, shadowDist: 110, ssr: 24, msaa: 2, ao: 16, fxaa: true, pixelRatio: 1.25, grass: 1.1, trees: 1.05 },
+  high: { label: 'High', shadow: 4096, shadowDist: 90, ssr: 16, msaa: 0, ao: 12, fxaa: true, smaa: true, pixelRatio: 1, grass: 0.85, trees: 0.9 },
+  ultra: { label: 'Ultra', shadow: 4096, shadowDist: 110, ssr: 24, msaa: 2, ao: 16, fxaa: true, smaa: true, pixelRatio: 1.25, grass: 1.1, trees: 1.05 },
 };
 
 export class Pipeline {
@@ -348,6 +349,8 @@ export class Pipeline {
     if (!this.ldrRT) this.ldrRT = new THREE.WebGLRenderTarget(W, H, { depthBuffer: false, generateMipmaps: false, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter });
     else this.ldrRT.setSize(W, H);
     this.fxaaMaterial.uniforms.resolution.value.set(1 / W, 1 / H);
+    if (!this.smaa) { this.smaa = new SMAAPass(); this.smaa.clear = true; this.smaa.renderToScreen = true; }
+    this.smaa.setSize(W, H);
     const aw = Math.max(1, W >> 1), ah = Math.max(1, H >> 1);
     for (const k of ['aoRT', 'aoBlurRT']) {
       if (!this[k]) this[k] = hdrTarget(aw, ah, this.hdrType, { minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter });
@@ -566,7 +569,10 @@ export class Pipeline {
       r.setScissor(splitVp[0], splitVp[1], splitVp[2], splitVp[3]);
       r.setScissorTest(true);
     }
-    if (fxaa) {
+    if (fxaa && this.quality.smaa && this.smaa) {
+      // SMAA: crisper, steadier edges than FXAA on rails, wires and foliage
+      this.smaa.render(r, null, this.ldrRT);
+    } else if (fxaa) {
       this.fxaaMaterial.uniforms.tDiffuse.value = this.ldrRT.texture;
       this.quad.render(r, this.fxaaMaterial, null);
     } else this.quad.render(r, this.compositeMaterial, null);
