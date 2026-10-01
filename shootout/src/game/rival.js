@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { hasSea } from './swim.js';
 import { driverPose, exitOf } from './cars.js';
+import { findVault, stepVault } from './vault.js';
 import { Loadout, WEAPONS, Weapons } from './weapons.js';
 import { bowlWaypoint } from '../world/arenaLayout.js';
 
@@ -1185,6 +1186,21 @@ export class Rival {
     }
     this.vel.y -= GRAVITY * dt;
 
+    // a low wall or railing in the way: vault it rather than run into it
+    if (!this.vault && this.onGround && wish.speed > 1.5 && this.world.shots) {
+      this.vaultCheckT = (this.vaultCheckT || 0) - dt;
+      if (this.vaultCheckT <= 0) {
+        this.vaultCheckT = 0.25;
+        this.vault = findVault(this.world, this.pos, wish.dir);
+        if (this.vault) { this.onGround = false; jumpStarted = true; }
+      }
+    }
+    if (this.vault) {
+      const nv = this.pos.clone();
+      if (stepVault(this.vault, nv, this.vel, dt)) { this.vault = null; this.onGround = true; this.airTime = 0; }
+      this.pos.copy(nv);
+      return jumpStarted;
+    }
     const next = this.pos.clone().addScaledVector(this.vel, dt);
     const ground = terrain.heightAt(next.x, next.z);
     const n = terrain.normalAt(next.x, next.z);
