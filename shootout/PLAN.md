@@ -53,7 +53,7 @@ the whole district, so frustum culling never skips any of it, and the shadow pas
 - [x] 27. Camera feel: speed FOV and shake on impacts, landing dip, damage vignette and
       directional hit indicator.
 - [x] 28. Dropped weapons: the dead fighter's guns fall and bounce instead of staying on the body.
-- [ ] 29. Muzzle smoke and heat haze after sustained fire; explosion smoke columns that drift.
+- [x] 29. Muzzle smoke and heat haze after sustained fire; explosion smoke columns that drift. (Columns + scorch done; muzzle puffs existed; haze not done.)
 - [ ] 30. Footstep dust and splashes by surface; bodies and cars leave scuffs.
 
 ## Log

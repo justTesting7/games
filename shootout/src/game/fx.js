@@ -3,6 +3,8 @@ import { BulletHoles } from './bulletHoles.js';
 import { SkidMarks } from './skidMarks.js';
 import { Debris } from './debris.js';
 
+const WIND = new THREE.Vector3(0.9, 0, 0.4); // smoke drifts this way
+
 // what a round knocks off each surface
 const DEBRIS = {
   concrete: { n: 3, kind: 'chip', size: 0.03, color: [0.55, 0.53, 0.5] },
@@ -279,6 +281,9 @@ export class Effects {
       }
       return;
     }
+    // a column of smoke that keeps rising and drifting, and a scorch on the ground
+    (this.emitters || (this.emitters = [])).push({ pos: pos.clone(), t: 0, dur: 7, acc: 0 });
+    this.holes.add(new THREE.Vector3(pos.x, this.terrain.heightAt(pos.x, pos.z) + 0.03, pos.z), new THREE.Vector3(0, 1, 0), 'scorch');
     // chunks of whatever it went off on, thrown out and up
     for (let i = 0; i < 18; i++) {
       const v = new THREE.Vector3().randomDirection().multiplyScalar(3 + Math.random() * 6);
@@ -504,7 +509,30 @@ export class Effects {
     this.holes.add(at, normal, surface);
   }
 
+  // Lingering smoke columns from blasts: thick at first, thinning as they burn out.
+  updateEmitters(dt) {
+    if (!this.emitters?.length) return;
+    const wind = WIND;
+    this.emitters = this.emitters.filter((e) => {
+      e.t += dt;
+      e.acc += dt;
+      const k = 1 - e.t / e.dur;
+      const every = 0.06 / Math.max(0.2, k);
+      while (e.acc > every) {
+        e.acc -= every;
+        this.alpha.spawn({
+          pos: e.pos.clone().add(new THREE.Vector3((Math.random() - 0.5) * 0.8, 0.2, (Math.random() - 0.5) * 0.8)),
+          vel: new THREE.Vector3(wind.x * 0.4 + (Math.random() - 0.5) * 0.5, 1.6 + Math.random() * 1.2, wind.z * 0.4 + (Math.random() - 0.5) * 0.5),
+          size: 0.7 + Math.random() * 0.4, grow: 2.2, life: 3.5 + Math.random() * 1.5,
+          color: [0.07, 0.065, 0.06], alpha: 0.45 * k + 0.1, drag: 0.35, gravity: -0.15,
+        });
+      }
+      return e.t < e.dur;
+    });
+  }
+
   update(dt) {
+    this.updateEmitters(dt);
     this.skids.update(dt);
     this.debris.update(dt);
     this.add.update(dt);
