@@ -236,7 +236,7 @@ export class Weapons {
       const port = new THREE.Vector3(-0.22, 0.07, 0.02).applyMatrix4(m);
       const right = new THREE.Vector3().setFromMatrixColumn(m, 2).normalize();
       const up = new THREE.Vector3().setFromMatrixColumn(m, 1).normalize();
-      this.fx.ejectCasing(port, right, up);
+      this.fx.ejectCasing(port, right, up, this.nearAtt(f));
     }
     ch.showGrenade = L.grenades > 0 || (ch.action?.type === 'throw');
     if (ch.consumeRelease()) {
@@ -351,7 +351,7 @@ export class Weapons {
     if (!rifle) {
       const up = new THREE.Vector3().setFromMatrixColumn(ch.pistols[side].matrixWorld, 1);
       const right = new THREE.Vector3().crossVectors(flashAxis, up).multiplyScalar(side === 0 ? 1 : -1);
-      this.fx.ejectCasing(flashAt.clone().addScaledVector(flashAxis, -0.08).addScaledVector(up, 0.02), right, up);
+      this.fx.ejectCasing(flashAt.clone().addScaledVector(flashAxis, -0.08).addScaledVector(up, 0.02), right, up, this.nearAtt(shooter));
       ch.fired(side);
     }
     shooter.lastShotT = this.combat.time;
@@ -469,6 +469,11 @@ export class Weapons {
     // a wall between the sound and the listener muffles it (city maps: the shot BVH)
     const occluded = dist > 3 && !!this.world.shots?.raycast(cam.position, dir, dist - 1);
     return { dist, pan: dir.dot(right), occluded };
+  }
+
+  /** How loud a small sound near f is to the player (no occlusion test: it's cheap). */
+  nearAtt(f) {
+    return f.isPlayer ? 1 : Math.min(1, 3 / Math.max(1, this.player.camera.position.distanceTo(f.pos)));
   }
 
   sound(f, kind) {

@@ -356,6 +356,11 @@ export class Audio {
       case 'scope': click(2100, 0.1, 0.03); this.noiseBurst({ freq: 280, q: 0.7, type: 'lowpass', gain: 0.12 * att, attack: 0.02, release: 0.16, send: 0.08 }); break;
       case 'pin': click(3500, 0.15, 0.02); scrape(2400, 0.08, 0.06); break;
       case 'throw': this.noiseBurst({ freq: 500, q: 0.8, gain: 0.25 * att, attack: 0.04, release: 0.2 }); break;
+      case 'casing': // brass on the ground: a bright ring, quieter on each bounce
+        this.tone(4200 + Math.random() * 900, 0.06, 0.035 * att, 'sine');
+        this.tone(6900 + Math.random() * 900, 0.04, 0.02 * att, 'sine');
+        click(5200, 0.08, 0.012, 6);
+        break;
       case 'bounce': this.noiseBurst({ freq: 600, q: 1.8, type: 'bandpass', gain: 0.5 * att, attack: 0.001, release: 0.06 }); click(2300, 0.15, 0.03); break;
       default: break;
     }

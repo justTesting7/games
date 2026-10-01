@@ -519,12 +519,12 @@ export class Effects {
     }
   }
 
-  ejectCasing(pos, right, up) {
+  ejectCasing(pos, right, up, att = 1) {
     if (this.casings.length >= this.casingMax) this.casings.shift();
     const v = right.clone().multiplyScalar(1.8 + Math.random()).addScaledVector(up, 2 + Math.random()).add(new THREE.Vector3().randomDirection().multiplyScalar(0.4));
     this.casings.push({
       p: pos.clone(), v, rot: new THREE.Vector3(Math.random() * 6, Math.random() * 6, Math.random() * 6),
-      w: new THREE.Vector3().randomDirection().multiplyScalar(25), age: 0, rest: false, bounces: 0,
+      w: new THREE.Vector3().randomDirection().multiplyScalar(25), age: 0, rest: false, bounces: 0, att,
     });
   }
 
@@ -598,6 +598,7 @@ export class Effects {
           c.p.y = h;
           if (c.p.y < 0) { c.rest = true; c.age = 11.5; }
           c.bounces++;
+          if (c.bounces <= 3 && Math.abs(c.v.y) > 0.6) this.audio?.mech?.('casing', c.att / c.bounces);
           c.v.y = Math.abs(c.v.y) * 0.35;
           c.v.x *= 0.5; c.v.z *= 0.5;
           c.w.multiplyScalar(0.5);
