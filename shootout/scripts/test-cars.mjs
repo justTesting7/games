@@ -139,3 +139,13 @@ import { stepGrip } from '../src/game/cars.js';
   if (!(dr.speed < 18)) throw new Error('a handbrake slide costs speed');
 }
 console.log('ok grip');
+
+// a wet road: longer braking and a wider slide through the same turn
+{
+  const { stepGrip: grip } = await import('../src/game/cars.js');
+  const brakeDist = (wet) => { let st = { speed: 20, yaw: 0, lat: 0, yawRate: 0 }, d = 0; for (let i = 0; i < 600 && st.speed > 0.1; i++) { const r = grip(st, { throttle: -1, steer: 0, dt: 1 / 60, wet }); d += r.speed / 60; st = { ...st, ...r }; } return d; };
+  const slide = (wet) => { let st = { speed: 18, yaw: 0, lat: 0, yawRate: 0 }, m = 0; for (let i = 0; i < 90; i++) { const r = grip(st, { throttle: 0.5, steer: 1, dt: 1 / 60, wet }); m = Math.max(m, r.slip); st = { ...st, ...r }; } return m; };
+  if (!(brakeDist(1) > brakeDist(0) * 1.3)) throw new Error(`wet braking should be longer: ${brakeDist(0).toFixed(1)} vs ${brakeDist(1).toFixed(1)}`);
+  if (!(slide(1) > slide(0) * 1.2)) throw new Error(`wet turns should slide more: ${slide(0).toFixed(2)} vs ${slide(1).toFixed(2)}`);
+  console.log('ok wet grip');
+}

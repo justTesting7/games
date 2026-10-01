@@ -317,10 +317,11 @@ export function stepDrive({ speed, yaw, throttle, steer, dt, sprint = false, spe
  * a faster turn and scrubbing speed, so the tail steps out into a drift.
  * state: { speed (along the nose), lat (sideways, +x of the car), yawRate, yaw }.
  */
-export function stepGrip(state, { throttle, steer, handbrake = false, dt, sprint = false, spec = CAR }) {
-  const S = spec;
+export function stepGrip(state, { throttle, steer, handbrake = false, dt, sprint = false, spec = CAR, wet = 0 }) {
+  // a wet road: the tyres bite less, so the car brakes longer and slides wider in a turn
+  const S = wet > 0.01 ? { ...spec, brake: spec.brake * (1 - 0.35 * wet), accel: spec.accel * (1 - 0.15 * wet) } : spec;
   const scooter = S.kind === 'scooter';
-  const lon = stepDrive({ speed: state.speed, yaw: state.yaw, throttle, steer: 0, dt, sprint, spec });
+  const lon = stepDrive({ speed: state.speed, yaw: state.yaw, throttle, steer: 0, dt, sprint, spec: S });
   let speed = lon.speed;
   if (handbrake) speed -= Math.sign(speed) * Math.min(Math.abs(speed), S.brake * 0.35 * dt);
   const grip = 1 / (1 + Math.abs(speed) * 0.055);
@@ -335,7 +336,7 @@ export function stepGrip(state, { throttle, steer, handbrake = false, dt, sprint
   const fx = Math.sin(yaw), fz = Math.cos(yaw);
   speed = vx * fx + vz * fz;
   let lat = vx * fz - vz * fx;
-  const hold = handbrake ? 1.7 : scooter ? 14 : 7.5;
+  const hold = (handbrake ? 1.7 : scooter ? 14 : 7.5) * (1 - 0.45 * wet);
   const scrub = 1 - Math.exp(-dt * hold);
   speed -= Math.sign(speed) * Math.min(Math.abs(speed), Math.abs(lat) * scrub * 0.25); // sliding costs speed
   lat -= lat * scrub;
@@ -1222,6 +1223,7 @@ export class Cars {
         dt,
         sprint: !!input.sprint,
         spec: specOf(local),
+        wet: this.world.weather?.amount || 0,
       });
       local.speed = stepped.speed;
       local.lat = stepped.lat;
@@ -1243,7 +1245,7 @@ export class Cars {
     for (const car of this.list) {
       if (car.ai && car.driver && !car.driver.isPlayer && !car.remote) {
         // a rival at the wheel: same grip physics as the player's car
-        const stepped = stepGrip(car, { throttle: car.ai.throttle, steer: car.ai.steer, handbrake: car.ai.handbrake, dt, spec: specOf(car) });
+        const stepped = stepGrip(car, { throttle: car.ai.throttle, steer: car.ai.steer, handbrake: car.ai.handbrake, dt, spec: specOf(car), wet: this.world.weather?.amount || 0 });
         Object.assign(car, { speed: stepped.speed, lat: stepped.lat, yawRate: stepped.yawRate, slip: stepped.slip, yaw: stepped.yaw });
         car.steer = car.ai.steer;
         car.x += stepped.vx * dt;
