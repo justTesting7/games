@@ -51,6 +51,7 @@ export const skyGenFrag = /* glsl */ `
 varying vec2 vUv;
 uniform vec3 uSunDir;
 uniform vec3 uMoonDir;
+uniform vec3 uBounce; // sunlit ground's radiance (albedo/pi * irradiance), set on the CPU
 
 vec2 rsi(vec3 r0, vec3 rd, float sr) {
   float a = dot(rd, rd);
@@ -120,7 +121,9 @@ void main() {
   float lum = dot(col, vec3(0.2126, 0.7152, 0.0722));
   col += vec3(0.55, 0.7, 1.0) * lum * 0.25 * (1.0 - smoothstep(0.0, 0.5, dir.y));
   col += vec3(0.0006, 0.0009, 0.0018);
-  if (dir.y < 0.0) col *= mix(1.0, 0.3, smoothstep(0.0, 0.4, -dir.y)) * vec3(0.9, 0.95, 0.85);
+  // below the horizon: light bounced off the sunlit ground (warm), not more blue sky, so
+  // shaded walls and undersides pick up the street's colour the way they do outdoors
+  if (dir.y < 0.0) col = mix(col, uBounce + col * vec3(0.24, 0.22, 0.19), smoothstep(0.0, 0.12, -dir.y));
   gl_FragColor = vec4(col, 1.0);
 }
 `;

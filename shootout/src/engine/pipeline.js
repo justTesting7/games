@@ -169,6 +169,7 @@ export class Pipeline {
     this.skyGenMaterial = fsMaterial(S.skyGenFrag, {
       uSunDir: this.u.uSunDir,
       uMoonDir: { value: this.moonDir },
+      uBounce: { value: new THREE.Vector3() },
     });
     this.indoorSkyMaterial = fsMaterial(S.indoorSkyFrag, {});
 
@@ -439,6 +440,9 @@ export class Pipeline {
     if (li > 0) this.sun.color.setRGB(lc.x / li, lc.y / li, lc.z / li, THREE.LinearSRGBColorSpace);
     this.sun.castShadow = li > 1e-3;
     this.night = smoothstep(0.08, -0.18, this.sunDir.y);
+    // the ground's bounce: a warm grey street lit by the sun (or moon) from above
+    const cosL = Math.max(0, this.lightDir.y) / Math.PI;
+    this.skyGenMaterial.uniforms.uBounce.value.set(0.26, 0.23, 0.19).multiply(lc).multiplyScalar(cosL * (this.mobile ? 1 / 0.085 : 1));
   }
 
   updateShadowCamera(center) {

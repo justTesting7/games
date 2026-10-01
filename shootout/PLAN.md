@@ -78,6 +78,22 @@ the whole district, so frustum culling never skips any of it, and the shadow pas
 - [x] 44. Rain: wet streets mirror the city (screen-space reflection marched through the depth
       in alpha, Fresnel-weighted, edge-faded; Medium and up).
 
+## Phase 3 (2026-10-01, cont.): push further
+- [x] 45. Ground bounce: the sky env's lower half is the sunlit street's warm bounce, not more
+      blue sky, so shaded walls and car flanks stop looking teal.
+- [ ] 46. Night exposure: auto exposure adapts night back to overcast day; cap the adaptation so
+      night reads as night and the lamp pools and headlights matter.
+- [ ] 47. Brake and tail lights glow (HDR, bloom) on driven cars; reversing lights.
+- [ ] 48. Shell casings: brass ejected from the gun, tumbling and bouncing with a tink.
+- [ ] 49. Blood: spatter decals on the walls and ground behind a hit, pools under bodies.
+- [ ] 50. Rain puddles: noise-masked mirror patches in the wet streets with raindrop ripples.
+- [ ] 51. Crash dents: cars deform around the point of impact (vertex dents on the car's own mesh).
+- [ ] 52. Knock-over props: bollards, signs and bins hit by cars topple and roll as physics props.
+- [ ] 53. Bullet flight time for rifles (finishes 23): rounds travel and resolve on arrival.
+- [ ] 54. Heat haze over fires and burning wrecks (screen-space refraction).
+- [ ] 55. Ragdolls collide with walls and cars, not just the ground.
+- [ ] 56. Rivals drive along roads (nav graph from the street mesh) instead of straight at targets.
+
 ## Log
 - Tel Aviv load (local, cached): ready in ~8 s; main-thread stages: decode 1.6 s, seam clip 1.0,
   cars 0.4, shot BVH 1.5, chunking 1.3.
