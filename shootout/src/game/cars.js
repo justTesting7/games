@@ -1274,6 +1274,7 @@ export class Cars {
 
     this.batch?.sync();
     if (player) this.updatePrompt(player);
+    this.engineSounds(local, input);
     if (opts.squash) this.squash(opts.squash);
     this.dust(dt);
   }
@@ -1408,6 +1409,29 @@ export class Cars {
       this.squealT = (this.squealT || 0) - dt;
       if (this.squealT <= 0) { this.squealT = 0.16; this.world.audio?.squeal?.(Math.min(1, (car.slip || 3) / 6)); }
     }
+  }
+
+  // Engines: the car you drive, and the nearest other car moving under power.
+  engineSounds(local, input) {
+    const audio = this.world.audio;
+    if (!audio?.engine) return;
+    if (local && !local.wrecked) {
+      const S = specOf(local);
+      const f = (input?.forward ? 1 : 0) - (input?.back ? 1 : 0) + (input?.moveY || 0);
+      audio.engine(0, { on: true, speed: local.speed, max: S.maxSpeed, throttle: f * Math.sign(local.speed || 1), scooter: !!local.spec, dist: 0 });
+    } else audio.engine(0, { on: false });
+    const cam = this.world.player?.camera;
+    let near = null, nd = 60;
+    for (const car of this.list) {
+      if (car === local || !car.driver || car.wrecked || Math.abs(car.speed) < 0.5 || !cam) continue;
+      const d = Math.hypot(car.x - cam.position.x, car.z - cam.position.z);
+      if (d < nd) { nd = d; near = car; }
+    }
+    if (near) {
+      const right = new THREE.Vector3().setFromMatrixColumn(cam.matrixWorld, 0);
+      const to = new THREE.Vector3(near.x - cam.position.x, 0, near.z - cam.position.z).normalize();
+      audio.engine(1, { on: true, speed: near.speed, max: specOf(near).maxSpeed, throttle: near.ai?.throttle ?? 0.6, scooter: !!near.spec, dist: nd, pan: to.dot(right) * 0.8 });
+    } else audio.engine(1, { on: false });
   }
 
   // ---- damage: smoke, fire, explosion, wreck ---------------------------------------

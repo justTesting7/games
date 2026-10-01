@@ -70,6 +70,57 @@ export class Audio {
     param.exponentialRampToValueAtTime(0.0001, t + attack + release);
   }
 
+  /**
+   * An engine voice (slot 0: the car you drive; 1: the nearest other car under power).
+   * s = { on, speed, max, throttle, scooter, dist, pan }. RPM climbs through four gears
+   * and drops at each shift; the low-pass opens with the throttle.
+   */
+  engine(slot, s) {
+    if (!this.ctx) return;
+    const ctx = this.ctx, now = ctx.currentTime;
+    this.engines = this.engines || [];
+    let e = this.engines[slot];
+    if (!e) {
+      const a = ctx.createOscillator(), b = ctx.createOscillator();
+      a.type = 'sawtooth'; b.type = 'square';
+      const shape = ctx.createWaveShaper();
+      const curve = new Float32Array(256);
+      for (let i = 0; i < 256; i++) { const x = i / 128 - 1; curve[i] = Math.tanh(x * 2.2); }
+      shape.curve = curve;
+      const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.Q.value = 2.5;
+      const g = ctx.createGain(); g.gain.value = 0;
+      const p = ctx.createStereoPanner();
+      const mixB = ctx.createGain(); mixB.gain.value = 0.55;
+      a.connect(shape); b.connect(mixB).connect(shape);
+      shape.connect(f).connect(g).connect(p).connect(this.master);
+      a.start(); b.start();
+      e = this.engines[slot] = { a, b, f, g, p };
+    }
+    if (!s.on) { e.g.gain.setTargetAtTime(0, now, 0.15); return; }
+    const v = Math.abs(s.speed), max = s.max || 24;
+    let freq, cut;
+    if (s.scooter) {
+      freq = 180 + v * 38;
+      cut = 1400 + v * 120;
+      e.a.type = 'sine'; e.b.type = 'sine';
+    } else {
+      const gearSpan = max / 4;
+      const gear = Math.min(3, Math.floor(v / gearSpan));
+      const inGear = (v - gear * gearSpan) / gearSpan;
+      const rpm = v < 0.5 ? 0.15 : 0.22 + 0.7 * inGear + gear * 0.04;
+      freq = 30 + rpm * 100;
+      cut = 280 + (s.throttle > 0 ? s.throttle : 0) * 1300 + rpm * 700;
+      e.a.type = 'sawtooth'; e.b.type = 'square';
+    }
+    const att = s.dist > 1 ? Math.min(1, 6 / s.dist) : 1;
+    e.a.frequency.setTargetAtTime(freq, now, 0.05);
+    e.b.frequency.setTargetAtTime(freq * 0.5, now, 0.05);
+    e.f.frequency.setTargetAtTime(cut, now, 0.08);
+    const level = s.scooter ? 0.05 : 0.07 + 0.09 * Math.max(0, s.throttle) + 0.02 * Math.min(1, v / max);
+    e.g.gain.setTargetAtTime(level * att, now, 0.08);
+    e.p.pan.setTargetAtTime(s.pan || 0, now, 0.1);
+  }
+
   // Tyres sliding on asphalt: a narrow, pitched hiss; k 0..1 by how hard.
   squeal(k = 1) {
     if (!this.ctx) return;
