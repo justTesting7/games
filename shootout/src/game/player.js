@@ -143,7 +143,19 @@ export class Player {
     if (input.sprint && !this.scoped) this.crouchToggle = false;
     if (input.jump) this.crouchToggle = false;
     this.crouching = !!(input.crouch || this.crouchToggle) && this.onGround && !this.swimming;
-    this.crouchT += ((this.crouching ? 1 : 0) - this.crouchT) * Math.min(1, dt * 8);
+    // crouch at a sprint: slide on your momentum, low, for most of a second
+    const crouchDown = !!(input.crouch || input.toggleCrouch) && !this._crouchHeld;
+    this._crouchHeld = !!input.crouch;
+    const flatSpeed = Math.hypot(this.vel.x, this.vel.z);
+    if (crouchDown && input.sprint && this.onGround && !this.swimming && flatSpeed > 5 && !this.slide) {
+      this.slide = { t: 0, dx: this.vel.x / flatSpeed, dz: this.vel.z / flatSpeed, speed: flatSpeed + 1.2 };
+    }
+    if (this.slide) {
+      this.slide.t += dt;
+      if (this.slide.t > 0.8 || !this.onGround) this.slide = null;
+      else this.crouching = true;
+    }
+    this.crouchT += ((this.crouching ? 1 : 0) - this.crouchT) * Math.min(1, dt * (this.slide ? 14 : 8));
 
     const f = (input.forward ? 1 : 0) - (input.back ? 1 : 0) + (input.moveY || 0);
     const s = (input.right ? 1 : 0) - (input.left ? 1 : 0) + (input.moveX || 0);
@@ -225,7 +237,12 @@ export class Player {
     } else {
       const horiz = new THREE.Vector3(this.vel.x, 0, this.vel.z);
       const desired = wish.clone().multiplyScalar(target);
-      const accel = this.onGround ? (target > horiz.length() ? 9 : 12) : 1.5;
+      let accel = this.onGround ? (target > horiz.length() ? 9 : 12) : 1.5;
+      if (this.slide) { // the slide keeps its line and bleeds speed; steering barely bends it
+        const k = 1 - this.slide.t / 0.8;
+        desired.set(this.slide.dx, 0, this.slide.dz).multiplyScalar(this.slide.speed * (0.35 + 0.65 * k)).addScaledVector(wish, 0.8);
+        accel = 10;
+      }
       horiz.lerp(desired, Math.min(1, dt * accel));
       this.vel.x = horiz.x;
       this.vel.z = horiz.z;

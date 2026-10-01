@@ -69,6 +69,7 @@ the whole district, so frustum culling never skips any of it, and the shadow pas
 - [x] 38. Getting in and out of a car glides the body between the door and the seat.
 - [x] 39. Vault low walls, railings and bollard lines: jump at one 0.4-1.35 m high (measured on
       the real geometry) carries you up and over to clear ground beyond.
+- [x] 40. Slide: crouch at a sprint to slide low on your momentum for ~0.8 s.
 
 ## Log
 - Tel Aviv load (local, cached): ready in ~8 s; main-thread stages: decode 1.6 s, seam clip 1.0,
