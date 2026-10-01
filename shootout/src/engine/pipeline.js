@@ -576,7 +576,7 @@ export class Pipeline {
 
     camera.updateMatrixWorld();
     // TAA: this frame is drawn a sub-pixel off along a Halton sequence (undone at the end)
-    const taa = !!this.quality.taa && !this.mobile && !opts.outViewport;
+    const taa = !!this.quality.taa && !this.mobile && !opts.outViewport && !Pipeline.noTAA;
     const unjVP = this._unjVP || (this._unjVP = new THREE.Matrix4());
     unjVP.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
     if (taa) {

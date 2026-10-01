@@ -152,6 +152,7 @@ Character.wallProbe = (o, d, len) => {
 // /shootout/?lab opens the debug range and starts playing without the menu;
 // ?play=<map id> does the same for any map. &calm keeps the rivals still as targets.
 const bootQuery = new URLSearchParams(location.search);
+Pipeline.noTAA = bootQuery.has('notaa'); // compare without temporal anti-aliasing
 const bootMap = bootQuery.has('lab') ? 'lab' : bootQuery.get('play');
 const labBoot = !!bootMap;
 const labCalm = labBoot && bootQuery.has('calm');
@@ -693,6 +694,7 @@ async function init() {
     player.sniperPending = false;
     weapons.drone.clear();
     fx.decals.clear();
+    fx.panels.clear();
     cars.reset();
     traffic?.reset();
   };
