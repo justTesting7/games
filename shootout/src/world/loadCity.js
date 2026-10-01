@@ -71,7 +71,9 @@ export function addWind(m) {
     float gust = sin(uWindT * 0.9 + wp.x * 0.11 + wp.z * 0.07) * 0.5 + 0.5;
     vec2 sway = vec2(sin(uWindT * 1.6 + wp.x * 0.35 + wp.z * 0.21), cos(uWindT * 1.3 + wp.z * 0.33 + wp.x * 0.17)) * (0.025 + 0.05 * gust);
     vec3 flutter = vec3(sin(uWindT * 7.3 + wp.y * 3.1 + wp.x * 2.3), sin(uWindT * 8.1 + wp.z * 2.9), cos(uWindT * 6.7 + wp.x * 3.3)) * 0.012;
-    transformed += (vec3(sway.x, 0.0, sway.y) + flutter) * uWindK;
+    // the offset is in metres; city meshes are stored quantised and scaled up, so take it
+    // back into the mesh's own units before moving the vertex
+    transformed += inverse(mat3(modelMatrix)) * ((vec3(sway.x, 0.0, sway.y) + flutter) * uWindK);
   }`);
   };
   m.customProgramCacheKey = () => `${m.uuid}-wind`;
