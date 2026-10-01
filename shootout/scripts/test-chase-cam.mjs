@@ -5,7 +5,8 @@ import { readFileSync } from 'node:fs';
 const player = readFileSync(new URL('../src/game/player.js', import.meta.url), 'utf8');
 const cars = readFileSync(new URL('../src/game/cars.js', import.meta.url), 'utf8');
 for (const needle of [
-  'if (!(this.cockpitView && ride.cockpit)) { this.updateChaseCamera(dt, ride, follow); return; }',
+  'this.inCockpit = !!(this.cockpitView && ride.cockpit);',
+  'if (!this.inCockpit) { this.updateChaseCamera(dt, ride, follow); return; }',
   'updateChaseCamera(dt, car, follow) {',
   'if (input.toggleWalk) this.cockpitView = !this.cockpitView;',
   'this.world.shots?.raycast(target, probe, dist + 0.5)',
