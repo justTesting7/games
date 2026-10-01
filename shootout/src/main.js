@@ -37,6 +37,7 @@ import { DRONE } from './game/drone.js';
 import { Cars, localOffset, sizeOf, carOverlap, resolveCarBox } from './game/cars.js';
 import { CarLights } from './game/carLights.js';
 import { Pigeons } from './game/pigeons.js';
+import { Traffic } from './game/traffic.js';
 import { CITY_WIND } from './world/loadCity.js';
 import { createGameRenderer } from './engine/webgl.js';
 import { RADAR_RANGE, radarBlips, radarSubjects, drawRadar } from './game/radar.js';
@@ -496,6 +497,17 @@ async function init() {
     ch.addTo(pipeline.scene);
     return new Rival(world, combat, weapons, jev, persona(entry), ch);
   });
+  // civilians driving the city's streets (solo; the parked cars are theirs to take)
+  const traffic = studio?.takeCars ? new Traffic(world, (i) => {
+    const ch = new Character();
+    ch.load(charAssets, looks[(i + 1) % looks.length]);
+    ch.addTo(pipeline.scene);
+    if (ch.rifle) ch.rifle.visible = false;
+    ch.pistols?.forEach((p) => { p.visible = false; });
+    return ch;
+  }, mapDef.lab ? 1 : 4, { minDist: mapDef.lab ? 0 : 35 }) : null;
+  world.traffic = traffic;
+  fx.traffic = traffic;
   const you = byId(selection.player);
   session = new Session({
     net, world, combat, weapons, player, rivals, charAssets,
@@ -665,6 +677,7 @@ async function init() {
     weapons.drone.clear();
     fx.decals.clear();
     cars.reset();
+    traffic?.reset();
   };
 
   const startRound = () => {
@@ -1042,6 +1055,8 @@ async function init() {
       banner('Waiting', wait, 'show countdown');
     }
     if (mode === 'solo') rivals.forEach((r) => r.update(dt, active && !labCalm));
+    if (traffic && mode === 'solo' && !labCalm) traffic.update(dt, { player, fighters: combat.fighters });
+    else if (traffic?.agents.length) traffic.reset();
     combat.update(dt);
     props.update(dt);
     fx.update(dt);

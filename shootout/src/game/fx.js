@@ -286,6 +286,7 @@ export class Effects {
     this.fireballs.spawn(pos.clone().setY(pos.y + 0.9), 1.9 + Math.random() * 0.5);
     this.pipeline.waves?.spawn(pos.clone().setY(pos.y + 0.8), 14);
     this.pigeons?.scare(pos, 120);
+    this.traffic?.scare(pos, 140);
     this.onBlast?.(pos);
     // the shockwave: a ring of dust racing out along the ground
     const gy = this.terrain.heightAt(pos.x, pos.z) + 0.15;

@@ -134,7 +134,7 @@ Ordered by how much they lift the whole game; one commit each.
       sampled past the near map, so buildings shade the streets into the distance.
 - [x] 74. City surfaces with life: per-building tint, damp blotches, rain streaks down the walls (no ground band: the
       ground height is not known per pixel; AO covers it), varied roughness and a fine plaster bump.
-- [ ] 75. Ambient traffic: a few cars drive the streets on planned routes (lights at night,
+- [x] 75. Ambient traffic: a few cars drive the streets on planned routes (lights at night,
       spray in the rain), stop for people in the road and floor it away from gunfire.
 - [ ] 76. Street acoustics: the reverb follows the place (narrow street, open square, inside),
       measured by rays around the listener; distant shots echo off the buildings.
