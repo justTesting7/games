@@ -1564,6 +1564,16 @@ export class Cars {
 
   squash(combat) {
     const now = combat.time;
+    // bodies in the road get shoved along by a moving car
+    for (const f of combat.fighters) {
+      const rd = !f.alive && f.character?.ragdoll;
+      if (!rd) continue;
+      const at = f.character.bones.Hips.getWorldPosition(new THREE.Vector3());
+      for (const car of this.list) {
+        if (Math.abs(car.speed) < 2 || !carOverlap(at.x, at.z, at.y, car, 0.3)) continue;
+        rd.kick(at, car.vel.clone().multiplyScalar(0.9).setY(Math.abs(car.speed) * 0.15));
+      }
+    }
     const session = this.world.session;
     for (const car of this.list) {
       const hits = runOverHits(car, combat.fighters, now);
