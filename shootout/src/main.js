@@ -37,6 +37,7 @@ import { DRONE } from './game/drone.js';
 import { Cars, localOffset, sizeOf, carOverlap, resolveCarBox } from './game/cars.js';
 import { CarLights } from './game/carLights.js';
 import { Pigeons } from './game/pigeons.js';
+import { CITY_WIND } from './world/loadCity.js';
 import { createGameRenderer } from './engine/webgl.js';
 import { RADAR_RANGE, radarBlips, radarSubjects, drawRadar } from './game/radar.js';
 
@@ -459,6 +460,8 @@ async function init() {
     if (Math.abs(before - weather.amount) > 1e-4 || weather.wetMats === null) weather.wet(studio?.root || arena?.group || city?.group, weather.amount);
     weather.update(dt, camera, pipeline.lightColor, { fx, heightAt: (x, z) => terrain.heightAt(x, z), at: player.pos });
     pipeline.lightning = pipeline.indoor ? 0 : weather.lightning(dt);
+    CITY_WIND.time.value += dt;
+    CITY_WIND.strength.value = 1 + 1.8 * weather.amount; // storms bend the trees
     const soak = pipeline.indoor ? 0 : weather.amount;
     for (const f of combat.fighters) f.character?.setWet?.(soak);
     pipeline.lightningDir = weather.bolt?.dir || 0;

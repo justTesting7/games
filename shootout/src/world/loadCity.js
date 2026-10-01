@@ -49,6 +49,35 @@ function keepTriangles(root, keep, skip = null) {
 }
 
 /** Swaps the exported car paint, glass and metal for the physical versions (see UPGRADE). */
+// Wind in the trees: leaves and palm fronds sway on a slow gust and flutter on a quick one,
+// by where they stand (so neighbouring trees move apart), harder in a storm. The game sets
+// CITY_WIND.time and .strength every frame.
+export const CITY_WIND = { time: { value: 0 }, strength: { value: 1 } };
+const FOLIAGE = /^(leaves|foliage|fronds)$/;
+const windDone = new WeakSet();
+export function addWind(m) {
+  if (windDone.has(m)) return;
+  windDone.add(m);
+  const prev = m.onBeforeCompile;
+  m.onBeforeCompile = (sh, r) => {
+    prev?.call(m, sh, r);
+    sh.uniforms.uWindT = CITY_WIND.time;
+    sh.uniforms.uWindK = CITY_WIND.strength;
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nuniform float uWindT;\nuniform float uWindK;')
+      .replace('#include <begin_vertex>', `#include <begin_vertex>
+  {
+    vec3 wp = (modelMatrix * vec4(transformed, 1.0)).xyz;
+    float gust = sin(uWindT * 0.9 + wp.x * 0.11 + wp.z * 0.07) * 0.5 + 0.5;
+    vec2 sway = vec2(sin(uWindT * 1.6 + wp.x * 0.35 + wp.z * 0.21), cos(uWindT * 1.3 + wp.z * 0.33 + wp.x * 0.17)) * (0.025 + 0.05 * gust);
+    vec3 flutter = vec3(sin(uWindT * 7.3 + wp.y * 3.1 + wp.x * 2.3), sin(uWindT * 8.1 + wp.z * 2.9), cos(uWindT * 6.7 + wp.x * 3.3)) * 0.012;
+    transformed += (vec3(sway.x, 0.0, sway.y) + flutter) * uWindK;
+  }`);
+  };
+  m.customProgramCacheKey = () => `${m.uuid}-wind`;
+  m.needsUpdate = true;
+}
+
 export function upgradeCityMaterials(root) {
   const done = new Map();
   root.traverse((o) => {
@@ -96,6 +125,7 @@ export async function loadCity(scene, renderer, folder = 'dizengoff-center') {
       o.material = upgraded.get(o.material);
     }
     const m = o.material, u = m.userData;                // glTF extras
+    if (FOLIAGE.test(m.name || '')) addWind(m);
     for (const k of ['map','normalMap','emissiveMap']) if (m[k]) m[k].anisotropy = Math.min(8, max);
     if (u.night_emissive) nightMats.push(m);
     if (u.hours) shutters.push({mesh: o, hours: u.hours, show: u.show}); // hours = [startMin, endMin] wraps midnight
