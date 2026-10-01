@@ -97,6 +97,36 @@ export class Weather {
     }
   }
 
+  /**
+   * Storms: in heavy rain a bolt every 10-30 s flashes the sky and the city (a quick double
+   * or triple strobe); returns the flash 0..1 for the lighting, and calls onThunder(dist).
+   */
+  lightning(dt) {
+    if (this.amount < 0.6) { this.bolt = null; this.flashK = 0; return 0; }
+    this.nextBolt = (this.nextBolt ?? 6 + Math.random() * 10) - dt;
+    if (this.nextBolt <= 0 && !this.bolt) {
+      this.nextBolt = 10 + Math.random() * 20;
+      const strobes = [0];
+      for (let i = 1, n = 1 + Math.floor(Math.random() * 3); i <= n; i++) strobes.push(strobes[i - 1] + 0.06 + Math.random() * 0.12);
+      const dist = 300 + Math.random() * 2200;
+      this.bolt = { t: 0, strobes, k: Math.min(1, 900 / dist + 0.35), dir: Math.random() * Math.PI * 2 };
+      this.onThunder?.(dist);
+    }
+    let k = 0;
+    if (this.bolt) {
+      const b = this.bolt;
+      b.t += dt;
+      for (const s of b.strobes) {
+        const a = b.t - s;
+        if (a >= 0 && a < 0.25) k = Math.max(k, Math.exp(-a * 22) * (s === 0 ? 1 : 0.7));
+      }
+      k *= b.k * this.amount;
+      if (b.t > b.strobes[b.strobes.length - 1] + 0.3) this.bolt = null;
+    }
+    this.flashK = k;
+    return k;
+  }
+
   update(dt, camera, light, { fx, heightAt, at } = {}) {
     const u = this.material.uniforms;
     u.uTime.value += dt;

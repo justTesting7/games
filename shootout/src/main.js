@@ -422,6 +422,7 @@ async function init() {
   if (studio?.chunk) studio.chunk();
   const weather = new Weather(pipeline.scene);
   world.weather = weather;
+  weather.onThunder = (dist) => { if (!pipeline.indoor) audio.thunder(dist); };
   let weatherGoal = Weather.fromSaved() === 'rain' ? 1 : 0;
   $('weather').value = weatherGoal ? 'rain' : 'clear';
   $('weather').onchange = (e) => {
@@ -437,6 +438,8 @@ async function init() {
     pipeline.fogMaterial.uniforms.uFogDensity.value = baseFog * (1 + 2.2 * weather.amount);
     if (Math.abs(before - weather.amount) > 1e-4 || weather.wetMats === null) weather.wet(studio?.root || arena?.group || city?.group, weather.amount);
     weather.update(dt, camera, pipeline.lightColor, { fx, heightAt: (x, z) => terrain.heightAt(x, z), at: player.pos });
+    pipeline.lightning = pipeline.indoor ? 0 : weather.lightning(dt);
+    pipeline.lightningDir = weather.bolt?.dir || 0;
   };
   world.stepWeather = stepWeather;
   if (studio?.lamps?.length) world.nightLights = new NightLights(pipeline.scene, studio.lamps, (x, z) => terrain.heightAt(x, z));

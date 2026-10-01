@@ -189,6 +189,7 @@ export class Pipeline {
         uSunColor: { value: this.sunColor },
         uNight: { value: 0 },
         uCloudCover: { value: 0.5 },
+        uLightning: { value: 0 },
       },
       depthTest: false,
       depthWrite: false,
@@ -440,6 +441,14 @@ export class Pipeline {
     const w = this.weather || 0;
     if (w > 0) this.lightColor.multiplyScalar(1 - 0.62 * w);
     this.skyMaterial.uniforms.uCloudCover.value = 0.5 - 0.44 * w; // the shader's threshold: lower = more cloud
+    // a lightning flash: cold white light from high up, for a few hundredths of a second
+    const L = this.lightning || 0;
+    if (L > 0.002) {
+      this.lightColor.lerp(this._v.set(7.5, 8, 9.5).multiplyScalar(this.mobile ? 0.085 : 1), L);
+      const d = this.lightningDir || 0;
+      this.lightDir.lerp(this._v.set(Math.cos(d) * 0.45, 0.9, Math.sin(d) * 0.45).normalize(), L).normalize();
+    }
+    this.skyMaterial.uniforms.uLightning.value = L;
     const lc = this.lightColor;
     const li = Math.max(lc.x, lc.y, lc.z);
     this.sun.intensity = this.mobile ? Math.min(li, 1.6) : li;

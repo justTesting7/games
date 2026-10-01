@@ -139,6 +139,7 @@ uniform vec3 uLightColor;
 uniform vec3 uSunColor;
 uniform float uNight;
 uniform float uCloudCover;
+uniform float uLightning;
 uniform float uTime;
 
 float hash13(vec3 p) {
@@ -229,6 +230,8 @@ void main() {
       cc = mix(hazeCol, cc, smoothstep(0.0, 0.35, dir.y));
       col = mix(col, cc, dens * fade * 0.95);
     }
+    // lightning lights the cloud deck from inside, brightest overhead
+    col += vec3(0.55, 0.6, 0.78) * uLightning * (0.35 + 1.1 * dens) * smoothstep(0.0, 0.4, dir.y) * 1.4;
   }
   gl_FragColor = vec4(col, 10000.0);
 }

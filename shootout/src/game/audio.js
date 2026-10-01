@@ -314,6 +314,41 @@ export class Audio {
     }, (distance / 343) * 1000);
   }
 
+  // Thunder after a lightning flash: a crack for a near strike, then a long low rumble
+  // that swells and dies away; arrives at the speed of sound.
+  thunder(distance) {
+    if (!this.ctx) return;
+    setTimeout(() => {
+      const ctx = this.ctx, t = ctx.currentTime;
+      const near = Math.max(0, 1 - distance / 1200);
+      const dur = 3.5 + Math.random() * 2.5;
+      const src = ctx.createBufferSource();
+      src.buffer = this.thunderNoise || (this.thunderNoise = this.noiseBuffer(7));
+      src.playbackRate.value = 0.6 + Math.random() * 0.2;
+      const f = ctx.createBiquadFilter();
+      f.type = 'lowpass';
+      f.frequency.value = 180 + near * 600;
+      const g = ctx.createGain();
+      // the rumble rolls: a few swells on a slow decay
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.5 + near * 0.6, t + 0.08 + (1 - near) * 0.5);
+      let at = t + 0.4;
+      while (at < t + dur - 0.6) {
+        const k = Math.pow(1 - (at - t) / dur, 1.5);
+        g.gain.linearRampToValueAtTime((0.25 + Math.random() * 0.6) * k * (0.6 + near * 0.5), at);
+        at += 0.25 + Math.random() * 0.6;
+      }
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      src.connect(f).connect(g).connect(this.master);
+      const send = ctx.createGain();
+      send.gain.value = 0.6;
+      g.connect(send).connect(this.reverbSend);
+      src.start(t);
+      src.stop(t + dur + 0.1);
+      if (near > 0.5) this.noiseBurst({ freq: 1800, q: 0.5, gain: 0.9 * near, attack: 0.002, release: 0.35, send: 0.5 });
+    }, (distance / 343) * 1000);
+  }
+
   // Gun handling and grenade noises: short filtered clicks and scrapes.
   mech(kind, att = 1) {
     if (!this.ctx || att < 0.02) return;
