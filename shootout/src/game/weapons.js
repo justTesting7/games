@@ -243,6 +243,33 @@ export class Weapons {
     if (L.current !== 'grenade' && L.current !== 'drone' && !L.has(L.current)) this.equip(f, L.current === 'rifle' ? 'pistols' : 'rifle');
   }
 
+  /**
+   * A rifle round's flight: 820 m/s under gravity, traced in 10 ms segments up to 900 m.
+   * On a hit, `dir` is turned to point straight at the impact and hit.t is that distance.
+   */
+  ballistic(from, dir, shooter) {
+    const SPEED = 820, STEP = 0.01;
+    const p = from.clone(), v = dir.clone().multiplyScalar(SPEED);
+    const seg = new THREE.Vector3();
+    for (let travelled = 0; travelled < 900;) {
+      v.y -= 9.8 * STEP;
+      seg.copy(v).multiplyScalar(STEP);
+      const len = seg.length();
+      seg.divideScalar(len);
+      const hit = this.world.raycast(p, seg, len, shooter);
+      if (hit) {
+        const at = p.clone().addScaledVector(seg, hit.t);
+        const straight = at.sub(from);
+        hit.t = straight.length();
+        dir.copy(straight.divideScalar(hit.t));
+        return hit;
+      }
+      p.addScaledVector(seg, len);
+      travelled += len;
+    }
+    return null;
+  }
+
   // Fires one gun of `shooter` towards `aimPoint`; spread is in radians.
   // `side` picks a pistol, or -1 for the rifle.
   shoot(shooter, side, aimPoint, spread, def) {
@@ -273,7 +300,9 @@ export class Weapons {
       dir = target.sub(from).normalize();
     }
     this.world.cars?.breakAlong(from, dir, 900, shooter);
-    let hit = this.world.raycast(from, dir, 900, shooter);
+    // rifle rounds drop over distance: trace the arc, then treat the hit as a straight
+    // shot to where the round actually landed (so cover, tracer and reports agree)
+    let hit = rifle ? this.ballistic(from, dir, shooter) : this.world.raycast(from, dir, 900, shooter);
     // Cover the chest is standing behind still stops the shot. A fighter
     // on that chest line that the crosshair missed is ignored.
     if (shooter.isPlayer && hit && !hit.drone) {

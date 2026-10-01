@@ -22,7 +22,7 @@ the whole district, so frustum culling never skips any of it, and the shadow pas
       of one body cylinder + head sphere: arms held out, crouching and seated targets hit where
       they are; limb shots do less damage.
 - [x] 7. Bullet holes / impact decals on walls and cars (pooled, fading).
-- [ ] 8. Rifle rounds travel (fast projectile with drop) so long shots lead the target a little.
+- [~] 8. Rifle rounds drop (ballistic arc, see 23); travel time not simulated.
 - [x] 9. Recoil pattern and first-shot accuracy; crosshair shows the real spread.
 
 ## Physics and interactions
@@ -46,7 +46,7 @@ the whole district, so frustum culling never skips any of it, and the shadow pas
       weight transfer, speed-sensitive steering, tyre smoke and skid marks on the road.
 - [x] 22. Impact debris: chips that bounce off the ground for concrete/wood, sparks for metal,
       glass shards; dust puffs on ground hits.
-- [ ] 23. Rifle rounds travel (~800 m/s) with drop and a visible tracer; long shots lead.
+- [~] 23. Rifle rounds follow a ballistic arc at 820 m/s (0.65 m drop at 300 m); hit resolved at once.
 - [ ] 24. Rivals drive: a rival far from the fight takes a nearby car to close distance.
 - [ ] 25. Temporal anti-aliasing (or SMAA) instead of FXAA for stable edges on foliage and rails.
 - [ ] 26. Night: streetlights and car headlights as real light (a few nearest lights live).
