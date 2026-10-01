@@ -36,6 +36,7 @@ import { isTouchDevice, setupTouch } from './game/touch.js';
 import { DRONE } from './game/drone.js';
 import { Cars, localOffset, sizeOf, carOverlap, resolveCarBox } from './game/cars.js';
 import { CarLights } from './game/carLights.js';
+import { Pigeons } from './game/pigeons.js';
 import { createGameRenderer } from './engine/webgl.js';
 import { RADAR_RANGE, radarBlips, radarSubjects, drawRadar } from './game/radar.js';
 
@@ -419,6 +420,25 @@ async function init() {
   if (studio?.takeCars) cars.spawnCustom(studio.takeCars());
   if (studio?.takeScooters) cars.addScooters(studio.takeScooters());
   if (studio?.buildShots) world.shots = studio.buildShots();
+  // pigeons on open ground under open sky, a flock every 30 m or more
+  const pigeons = new Pigeons(pipeline.scene);
+  world.pigeons = pigeons;
+  if (studio?.pigeonHomes) {
+    const homes = [];
+    const up = new THREE.Vector3(0, 1, 0), tmp = [];
+    const cands = studio.pigeonHomes();
+    for (let i = 0; i < cands.length && homes.length < 7; i++) {
+      const c = cands[(i * 37) % cands.length];
+      if (homes.some((h) => Math.hypot(h.x - c.x, h.z - c.z) < 30)) continue;
+      const y = terrain.heightAt(c.x, c.z);
+      if (world.shots?.raycast(new THREE.Vector3(c.x, y + 0.5, c.z), up, 40)) continue; // under a tree or a roof
+      if (world.veg?.colliders.query(c.x, c.z, 2.5, tmp).some((k) => k.y1 > y + 0.3 && k.y0 < y + 1)) continue;
+      homes.push(c);
+    }
+    pigeons.populate(homes, (x, z) => terrain.heightAt(x, z));
+  }
+  pigeons.listener = camera.position;
+  pigeons.onTakeoff = (d) => audio.flutter?.(Math.min(1, 6 / Math.max(d, 1)));
   if (studio?.chunk) studio.chunk();
   const weather = new Weather(pipeline.scene);
   world.weather = weather;
@@ -459,6 +479,7 @@ async function init() {
   player.fighter = combat.add({ id: 'player', name: fighters[0].name, character, pos: player.pos, isPlayer: true, color: fighters[0].color });
   player.spawn(spawn.x, spawn.z, facing);
   const fx = new Effects(pipeline, terrain, audio);
+  fx.pigeons = pigeons;
   fx.haze = pipeline.haze;
   const weapons = new Weapons(world, player, character, fx, audio, combat);
   weapons.setGrenadeModel(charAssets.grenadeGltf);
@@ -937,6 +958,7 @@ async function init() {
       pipeline.motion += (goal - pipeline.motion) * Math.min(1, dt * 3);
     }
     carLights.update(dt, cars.list, camera, pipeline.night);
+    pigeons.update(dt, { night: pipeline.night, fighters: combat.fighters });
     world.nightLights?.update(pipeline.night, player.vehicle && player.vehicle.kind !== 'scooter' ? player.vehicle : null, (x, z) => terrain.heightAt(x, z), weather.amount);
 
     const locked = inPlay;

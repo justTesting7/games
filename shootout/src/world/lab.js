@@ -143,6 +143,7 @@ export async function buildLab() {
     outdoor: true,
     stadium: null,
     heightAt: labHeightAt,
+    pigeonHomes: () => [{ x: 0, z: -12 }, { x: -15, z: -15 }],
     rivalSpots: (_origin, count) => Array.from({ length: count }, (_, i) => spots[i % spots.length]),
     slotSpawn: (slot) => (slot === 0 ? LAB.spawn : spots[(slot - 1) % spots.length]),
     addColliders: (colliders) => {

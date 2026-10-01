@@ -89,6 +89,8 @@ export async function loadDizengoff(renderer, folder = 'dizengoff-center', { sta
     spawn,
     outdoor: true,
     stadium: nav.stadium || null,
+    /** Open ground the pigeons can have: the same places fighters may start from. */
+    pigeonHomes: () => (nav.spots || []).map(([x, z]) => ({ x, z })),
     rivalSpots: (origin, count) => (stands
       ? Array.from({ length: count }, (_, i) => stands[(i + 1) % stands.length]) // the other stands
       : pickRivalSpots(nav.spots || [], origin, count)),

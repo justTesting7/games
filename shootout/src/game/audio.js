@@ -314,6 +314,14 @@ export class Audio {
     }, (distance / 343) * 1000);
   }
 
+  // A flock taking off: a clatter of wing-claps, quick and uneven, fading as they climb.
+  flutter(att = 1) {
+    if (!this.ctx || att < 0.03) return;
+    for (let i = 0; i < 16; i++) {
+      setTimeout(() => this.noiseBurst({ freq: 900 + Math.random() * 900, q: 0.9, gain: (0.28 + Math.random() * 0.2) * att * (1 - i / 20), attack: 0.003, release: 0.05 + Math.random() * 0.04, send: 0.15, pan: (Math.random() - 0.5) * 0.6 }), i * (35 + Math.random() * 45));
+    }
+  }
+
   // Thunder after a lightning flash: a crack for a near strike, then a long low rumble
   // that swells and dies away; arrives at the speed of sound.
   thunder(distance) {

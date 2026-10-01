@@ -103,7 +103,7 @@ the whole district, so frustum culling never skips any of it, and the shadow pas
 - [x] 60. Wet fighters: clothes and skin darken and gloss in the rain.
 
 - [x] 61. Blast shockwave: a ring of refraction races out from every explosion.
-- [ ] 62. Pigeons: flocks peck about the squares by day and burst into the air at gunfire, blasts
+- [x] 62. Pigeons: flocks peck about the squares by day and burst into the air at gunfire, blasts
       or anyone running through them, wheel round and settle again.
 - [ ] 63. Rain on the windscreen in the cockpit view: drops bead and run, wipers sweep them.
 

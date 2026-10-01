@@ -355,6 +355,7 @@ export class Weapons {
       ch.fired(side);
     }
     shooter.lastShotT = this.combat.time;
+    this.world.pigeons?.scare(flashAt, rifle ? 60 : 40);
     const { dist, pan, occluded } = this.listen(flashAt);
     this.audio.gunshot(side < 0 ? 0 : side, shooter.isPlayer ? 0 : dist, shooter.isPlayer ? null : pan, rifle, occluded && !shooter.isPlayer);
 
