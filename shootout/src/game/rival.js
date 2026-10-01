@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { DriveGrid, followRoute } from './drivePath.js';
 import { hasSea } from './swim.js';
 import { driverPose, exitOf } from './cars.js';
 import { findVault, stepVault } from './vault.js';
@@ -1345,9 +1346,24 @@ export class Rival {
     d.t += dt;
     const tp = this.threatPos();
     if (!tp || car.wrecked || (car.hp ?? 100) < 25) { this.leaveCar(); return; }
-    const dx = tp.x - car.x, dz = tp.z - car.z;
-    const dist = Math.hypot(dx, dz);
-    const err = wrapAngle(Math.atan2(dx, dz) - car.yaw);
+    const dist = Math.hypot(tp.x - car.x, tp.z - car.z);
+    // a route along the streets to the target, replanned now and then or when thrown off it
+    // (one plan a frame across all drivers: a search can take a few milliseconds)
+    const grid = this.world.cars.driveGrid || (this.world.cars.driveGrid = new DriveGrid(this.world));
+    d.replan = (d.replan ?? 0) - dt;
+    const now = this.combat.time;
+    const offRoute = d.route && followRoute(d.route, car.x, car.z, 0).off > 7;
+    if ((!d.route || d.replan <= 0 || offRoute) && DriveGrid.planned !== now) {
+      DriveGrid.planned = now;
+      d.route = grid.find({ x: car.x, z: car.z }, { x: tp.x, z: tp.z }, { near: 20 });
+      d.replan = 5;
+    }
+    let aimX = tp.x, aimZ = tp.z, turn = 0;
+    if (d.route) {
+      const f = followRoute(d.route, car.x, car.z, 7 + Math.abs(car.speed) * 0.45);
+      aimX = f.x; aimZ = f.z; turn = f.turn;
+    }
+    const err = wrapAngle(Math.atan2(aimX - car.x, aimZ - car.z) - car.yaw);
     const ai = car.ai;
     if (d.reverse > 0) {
       d.reverse -= dt;
@@ -1356,7 +1372,9 @@ export class Rival {
     } else {
       const avoid = this.carAvoid(car);
       ai.steer = THREE.MathUtils.clamp(err * 2.2 + avoid * 2.5, -1, 1);
-      ai.throttle = dist < 32 ? (car.speed > 1 ? -1 : 0) : Math.abs(err) > 1.3 || Math.abs(avoid) > 0.6 ? 0.4 : 1;
+      // ease off for a sharp corner coming up, and brake into it at speed
+      const corner = turn > 0.9 && car.speed > 9 ? -0.6 : turn > 0.5 ? 0.55 : 1;
+      ai.throttle = dist < 32 ? (car.speed > 1 ? -1 : 0) : Math.abs(err) > 1.3 || Math.abs(avoid) > 0.6 ? 0.4 : corner;
       if (Math.abs(car.speed) < 1.2 && ai.throttle > 0) d.stuck += dt; else d.stuck = Math.max(0, d.stuck - dt);
       if (d.stuck > 1.4) { d.stuck = 0; d.reverse = 1.1; d.tries++; }
     }

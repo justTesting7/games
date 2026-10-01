@@ -2,7 +2,7 @@
 
 Working list for the autonomous iteration Noam asked for on 2026-10-01: physics, how objects
 interact, shooting accuracy, rendering efficiency. One commit per item; tests before every push.
-Status: [ ] todo, [x] done, [~] partly.
+Status: [ ] todo, [x] done, [~] partly, [-] dropped or deferred (reason given).
 
 Baseline (Tel Aviv, Medium, M-series laptop, 1 camera view): 1684 draw calls and 5.7 M triangles
 per frame, 10.4 ms render, 1 GB JS heap. The city is 2.9 M triangles in 424 meshes, each spanning
@@ -88,11 +88,13 @@ the whole district, so frustum culling never skips any of it, and the shadow pas
 - [x] 49. Blood: spatter decals on the walls and ground behind a hit, pools under bodies (existed).
 - [x] 50. Rain puddles: noise-masked mirror patches in the wet streets with raindrop ripples.
 - [x] 51. Crash dents: cars deform around the point of impact (vertex dents on the car's own mesh).
-- [ ] 52. Knock-over props: bollards, signs and bins hit by cars topple and roll as physics props.
-- [ ] 53. Bullet flight time for rifles (finishes 23): rounds travel and resolve on arrival.
+- [-] 52. Knock-over props: dropped. The city's bollards are steel posts that should stop a car (Noam
+      asked for cars not to pass through poles); the props are baked into per-material meshes.
+- [-] 53. Bullet flight time: deferred. Hits resolve at the shot and the room is told then; delaying
+      them needs the multiplayer shot report reworked. Rounds already drop over range.
 - [x] 54. Heat haze over fires and burning wrecks (screen-space refraction).
 - [x] 55. Ragdolls collide with walls and cars, not just the ground.
-- [ ] 56. Rivals drive along roads (nav graph from the street mesh) instead of straight at targets.
+- [x] 56. Rivals drive along roads (nav graph from the street mesh) instead of straight at targets.
 
 - [x] 57. Flash lighting: muzzle flashes and blasts (existed), now car and blast fires flicker on the street around them
       (a small pool of real point lights kept in the scene at zero, so no shader recompiles).
