@@ -98,6 +98,44 @@ export class Player {
     this.swimPitch = 0;
   }
 
+  /**
+   * A low wall, railing or bollard line right ahead that can be vaulted: its real top is
+   * 0.4-1.35 m above the feet (the walking grid makes every such obstacle 2.4 m tall, so a
+   * plain jump never clears it) and there is clear ground within 1.6 m beyond it.
+   */
+  findVault(dir) {
+    const { terrain, veg } = this.world;
+    const shots = this.world.shots;
+    const cols = veg?.colliders;
+    if (!cols || this.vehicle) return null;
+    const d = new THREE.Vector3(dir.x, 0, dir.z);
+    if (d.lengthSq() < 1e-6) return null;
+    d.normalize();
+    const blocked = (x, z) => cols.query(x, z, 0.5).some((c) => (c.box
+      ? x > c.x0 - 0.25 && x < c.x1 + 0.25 && z > c.z0 - 0.25 && z < c.z1 + 0.25
+      : Math.hypot(x - c.x, z - c.z) < (c.r || 0) + 0.25) && c.y1 > this.pos.y + 0.3 && c.y0 < this.pos.y + 1.5);
+    const ax = this.pos.x + d.x * 0.7, az = this.pos.z + d.z * 0.7;
+    if (!blocked(ax, az)) return null;
+    // the real top: drop a ray onto the obstacle
+    let top = null;
+    if (shots) {
+      const h = shots.raycast(new THREE.Vector3(ax, this.pos.y + 2.4, az), new THREE.Vector3(0, -1, 0), 2.4);
+      if (h) top = this.pos.y + 2.4 - h.t;
+    }
+    if (top === null) return null;
+    const rise = top - this.pos.y;
+    if (rise < 0.4 || rise > 1.35) return null;
+    // somewhere clear to land beyond it
+    for (let s = 1.0; s <= 2.3; s += 0.2) {
+      const lx = this.pos.x + d.x * s, lz = this.pos.z + d.z * s;
+      if (blocked(lx, lz)) continue;
+      const gy = terrain.heightAt(lx, lz);
+      if (Math.abs(gy - this.pos.y) > 1.2) return null;
+      return { from: this.pos.clone(), to: new THREE.Vector3(lx, gy, lz), top, t: 0, dur: 0.38 + rise * 0.18 };
+    }
+    return null;
+  }
+
   kick(side, strength = 1) {
     this.recoilPitch += 0.018 * strength;
     // and a little sideways: sustained fire wanders, it doesn't only climb
@@ -232,17 +270,31 @@ export class Player {
       }
 
       if (input.jump && this.onGround) {
-        this.vel.y = JUMP_V;
+        this.vault = this.findVault(wish.lengthSq() > 0.01 ? wish : camFwd);
+        this.vel.y = this.vault ? 0 : JUMP_V;
         this.onGround = false;
         jumpStarted = true;
       }
       this.vel.y -= GRAVITY * dt;
 
       next.addScaledVector(this.vel, dt);
+      if (this.vault) { // up and over: the vault carries the body, the walls don't apply
+        const v = this.vault;
+        v.t = Math.min(1, v.t + dt / v.dur);
+        const k = v.t;
+        const up = Math.sin(Math.min(1, k * 1.6) * Math.PI * 0.5);
+        next.x = v.from.x + (v.to.x - v.from.x) * k;
+        next.z = v.from.z + (v.to.z - v.from.z) * k;
+        next.y = k < 0.6 ? v.from.y + (v.top + 0.12 - v.from.y) * up : v.top + 0.12 + (v.to.y - v.top - 0.12) * ((k - 0.6) / 0.4) ** 2;
+        this.vel.set((v.to.x - v.from.x) / v.dur * 0.3, 0, (v.to.z - v.from.z) / v.dur * 0.3);
+        if (k >= 1) { this.vault = null; next.y = v.to.y; this.onGround = true; this.airTime = 0; }
+        this.pos.copy(next);
+        this.vaulting = true;
+      } else this.vaulting = false;
       const ground = terrain.heightAt(next.x, next.z);
       const n = terrain.normalAt(next.x, next.z);
       const uphill = n.x * this.vel.x + n.z * this.vel.z < 0;
-      if ((n.y < 0.62 && uphill && ground > this.pos.y + 0.05) || !terrain.inBounds(next.x, next.z)) {
+      if (!this.vaulting && ((n.y < 0.62 && uphill && ground > this.pos.y + 0.05) || !terrain.inBounds(next.x, next.z))) {
         next.x = this.pos.x;
         next.z = this.pos.z;
         this.vel.x *= 0.2;
@@ -250,7 +302,9 @@ export class Player {
       }
 
       const g2 = terrain.heightAt(next.x, next.z);
-      if (shouldSwim(next.y, g2, false) && next.y < 0.35) {
+      if (this.vaulting) {
+        // carried by the vault
+      } else if (shouldSwim(next.y, g2, false) && next.y < 0.35) {
         this.swimming = true;
         this.onGround = false;
         this.world.fx?.impact?.(next.clone().setY(0.02), new THREE.Vector3(0, 1, 0), 'water', new THREE.Vector3(0, -1, 0));
@@ -273,9 +327,11 @@ export class Player {
     }
 
     const standH = 1.7 - this.crouchT * 0.50;
-    this.world.veg.colliders.resolveXZ(next, RADIUS, next.y, next.y + standH);
-    this.world.props.collidePlayer(next, RADIUS, this.vel, standH);
-    this.world.cars?.collideWalker(next, RADIUS, this.vehicle);
+    if (!this.vaulting) {
+      this.world.veg.colliders.resolveXZ(next, RADIUS, next.y, next.y + standH);
+      this.world.props.collidePlayer(next, RADIUS, this.vel, standH);
+      this.world.cars?.collideWalker(next, RADIUS, this.vehicle);
+    }
     for (const f of this.world.combat.fighters) {
       if (f === this.fighter || !f.alive) continue;
       const dx = next.x - f.pos.x, dz = next.z - f.pos.z;
