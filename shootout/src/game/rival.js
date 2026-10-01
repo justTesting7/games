@@ -1017,7 +1017,7 @@ export class Rival {
     if ((!this.navRoute || moved > 3 || this.navT <= 0 || this.navForce) && DriveGrid.walkPlanned !== now) {
       DriveGrid.walkPlanned = now;
       this.navForce = false;
-      const route = grid.find({ x: this.pos.x, z: this.pos.z }, { x: g.x, z: g.z }, { near: 1.5, maxNodes: 2500 });
+      const route = grid.find({ x: this.pos.x, z: this.pos.z }, { x: g.x, z: g.z }, { near: 1.5, maxNodes: 1500 }); // capped: an unreachable goal costs a few ms, not a hitch
       if (route) route.goal = { x: g.x, z: g.z };
       this.navRoute = route;
       this.navT = 2.5; // follow it a while before trusting the straight line again
