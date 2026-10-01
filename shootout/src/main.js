@@ -461,6 +461,22 @@ async function init() {
     if (Math.abs(before - weather.amount) > 1e-4 || weather.wetMats === null) weather.wet(studio?.root || arena?.group || city?.group, weather.amount);
     weather.update(dt, camera, pipeline.lightColor, { fx, heightAt: (x, z) => terrain.heightAt(x, z), at: player.pos });
     pipeline.lightning = pipeline.indoor ? 0 : weather.lightning(dt);
+    // the acoustics of where you stand, measured against the city's walls now and then
+    spaceT -= dt;
+    if (spaceT <= 0 && world.shots) {
+      spaceT = 0.4;
+      const o = camera.position, right = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0).setY(0).normalize();
+      let hits = 0, left = 0, nl = 0, rightD = 0, nr = 0;
+      for (let i = 0; i < 8; i++) {
+        const a = (i / 8) * Math.PI * 2, d = new THREE.Vector3(Math.sin(a), 0.05, Math.cos(a)).normalize();
+        const t = world.shots.raycast(o, d, 80)?.t ?? 80;
+        if (t < 40) hits++;
+        const side = d.dot(right);
+        if (side < -0.3) { left += t; nl++; } else if (side > 0.3) { rightD += t; nr++; }
+      }
+      const roof = world.shots.raycast(o, new THREE.Vector3(0, 1, 0), 30) ? 1 : 0;
+      audio.setSpace({ enclosure: Math.min(1, hits / 8 * 0.85 + roof * 0.5), left: nl ? left / nl : 60, right: nr ? rightD / nr : 60 });
+    }
     CITY_WIND.time.value += dt;
     CITY_WIND.strength.value = 1 + 1.8 * weather.amount; // storms bend the trees
     const soak = pipeline.indoor ? 0 : weather.amount;
@@ -883,6 +899,7 @@ async function init() {
 
   let hitTimer = 0;
   let slowmo = 0; // real seconds of slow motion left
+  let spaceT = 0; // seconds to the next acoustics measurement
   weapons.onHit = (kind) => {
     hitTimer = kind === 'kill' ? 0.5 : 0.25;
     const hm = $('hitmarker');

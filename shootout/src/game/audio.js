@@ -21,6 +21,21 @@ export class Audio {
     this.reverbSend = ctx.createGain();
     this.reverbSend.gain.value = 0.55;
     this.reverbSend.connect(this.reverb).connect(this.master);
+    // slap-back off the buildings: a delay each side (set from the walls around the
+    // listener, see setSpace), fed back through a low-pass so repeats get duller
+    this.echoSend = ctx.createGain();
+    this.echoSend.gain.value = 0;
+    this.echoes = [-0.7, 0.7].map((pan) => {
+      const d = ctx.createDelay(1.5), fb = ctx.createGain(), lp = ctx.createBiquadFilter(), p = ctx.createStereoPanner();
+      d.delayTime.value = 0.2;
+      fb.gain.value = 0.2;
+      lp.type = 'lowpass';
+      lp.frequency.value = 2400;
+      p.pan.value = pan;
+      this.echoSend.connect(d).connect(lp).connect(fb).connect(d);
+      lp.connect(p).connect(this.master);
+      return { d, fb };
+    });
 
     this.noise = this.noiseBuffer(2);
     this.shots = [0, 1, 2, 3].map(() => this.renderGunshot());
@@ -29,6 +44,23 @@ export class Audio {
     this.rifleShots = [0, 1, 2].map(() => this.renderGunshot(rifle));
     this.boom = [0, 1].map(() => this.renderGunshot({ blastT: 0.16, thumpF: 70, thumpT: 0.35, rumbleT: 1.3, len: 3.2, mix: { crack: 0.6, blast: 1, thump: 1.6, rumble: 0.7 } }));
     this.startAmbience();
+  }
+
+  /**
+   * The place the listener is in: enclosure 0 (open square) .. 1 (narrow street, under a
+   * roof), and the distances to the walls on the left and right (m). Reverb swells in
+   * closed-in streets; the echo comes back off the walls after the round trip.
+   */
+  setSpace({ enclosure = 0.3, left = 60, right = 60 } = {}) {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    this.reverbSend.gain.setTargetAtTime(0.35 + 0.45 * enclosure, t, 0.4);
+    this.echoSend.gain.setTargetAtTime(Math.min(left, right) > 70 ? 0.05 : 0.18 + 0.4 * enclosure, t, 0.4);
+    [left, right].forEach((dist, i) => {
+      const e = this.echoes[i];
+      e.d.delayTime.setTargetAtTime(Math.min(1.2, Math.max(0.035, (2 * dist) / 343)), t, 0.3);
+      e.fb.gain.setTargetAtTime(0.12 + 0.3 * enclosure, t, 0.4);
+    });
   }
 
   setVolume(v) {
@@ -230,6 +262,10 @@ export class Audio {
     const s = ctx.createGain();
     s.gain.value = far ? 0.9 * Math.sqrt(att) : 0.55;
     p.connect(s).connect(this.reverbSend);
+    // and off the buildings around
+    const e = ctx.createGain();
+    e.gain.value = far ? 0.8 * Math.sqrt(att) : 0.5;
+    p.connect(e).connect(this.echoSend);
     src.start(t);
   }
 
@@ -309,6 +345,7 @@ export class Audio {
       const s = ctx.createGain();
       s.gain.value = 1.2 * Math.sqrt(att);
       p.connect(s).connect(this.reverbSend);
+      if (!underwater) { const e = ctx.createGain(); e.gain.value = 0.9 * Math.sqrt(att); p.connect(e).connect(this.echoSend); }
       src.start();
       if (underwater) this.noiseBurst({ freq: 1200, q: 0.5, gain: 0.5 * att, attack: 0.05, release: 1.2, send: 0.5 });
     }, (distance / 343) * 1000);

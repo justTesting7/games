@@ -136,7 +136,7 @@ Ordered by how much they lift the whole game; one commit each.
       ground height is not known per pixel; AO covers it), varied roughness and a fine plaster bump.
 - [x] 75. Ambient traffic: a few cars drive the streets on planned routes (lights at night,
       spray in the rain), stop for people in the road and floor it away from gunfire.
-- [ ] 76. Street acoustics: the reverb follows the place (narrow street, open square, inside),
+- [x] 76. Street acoustics: the reverb follows the place (narrow street, open square, inside),
       measured by rays around the listener; distant shots echo off the buildings.
 - [ ] 77. Depth of field while aiming down the scope: what is far from the focus softens.
 - [ ] 78. Car explosions tear it apart: bonnet, doors and boot fly off as tumbling panels.
