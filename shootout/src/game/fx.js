@@ -557,6 +557,8 @@ export class Effects {
       e.acc += dt;
       const k = 1 - e.t / e.dur;
       const every = 0.06 / Math.max(0.2, k);
+      // the ground still burns hot for a while: the air over it shimmers
+      if (e.t < 6) this.haze?.add(e.pos, 2.4, 4.5, (1 - e.t / 6) * 1.2);
       while (e.acc > every) {
         e.acc -= every;
         this.alpha.spawn({

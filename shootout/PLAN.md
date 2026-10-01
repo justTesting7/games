@@ -90,7 +90,7 @@ the whole district, so frustum culling never skips any of it, and the shadow pas
 - [x] 51. Crash dents: cars deform around the point of impact (vertex dents on the car's own mesh).
 - [ ] 52. Knock-over props: bollards, signs and bins hit by cars topple and roll as physics props.
 - [ ] 53. Bullet flight time for rifles (finishes 23): rounds travel and resolve on arrival.
-- [ ] 54. Heat haze over fires and burning wrecks (screen-space refraction).
+- [x] 54. Heat haze over fires and burning wrecks (screen-space refraction).
 - [ ] 55. Ragdolls collide with walls and cars, not just the ground.
 - [ ] 56. Rivals drive along roads (nav graph from the street mesh) instead of straight at targets.
 

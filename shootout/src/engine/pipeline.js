@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { Haze } from './haze.js';
 import * as S from './shaders.js';
 import { patchShaderChunks } from './patch.js';
 import { FXAAShader } from 'three/addons/shaders/FXAAShader.js';
@@ -121,6 +122,7 @@ export class Pipeline {
     this.quad = new FullscreenQuad();
     this.scene = new THREE.Scene();
     this.waterScene = new THREE.Scene();
+    this.haze = new Haze(this.waterScene); // drawn with the water: both read the opaque copy
     this.fxScene = new THREE.Scene();
 
     this.sunDir = new THREE.Vector3();
@@ -512,10 +514,13 @@ export class Pipeline {
       wu.uTexel.value.set(1 / W, 1 / H);
       wu.uWet.value = this.wet;
       this.quad.render(r, this.wetMaterial, this.sceneRT);
+      // the haze redraws the scene behind it: give it the reflections too
+      if (this.haze.n > 0) this.quad.render(r, this.copyMaterial, this.copyRT);
     }
     this.waterMaterial.uniforms.uSceneTex.value = this.copyRT.texture;
     this.waterMaterial.uniforms.uProj.value.copy(camera.projectionMatrix);
     r.setRenderTarget(this.sceneRT);
+    this.haze.flush(this.copyRT.texture, W, H, this.u.uTime.value);
     r.render(this.waterScene, camera);
     r.render(this.fxScene, camera);
 

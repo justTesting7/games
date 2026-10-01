@@ -396,6 +396,7 @@ async function init() {
   const cars = new Cars(world, pipeline.scene);
   const carLights = new CarLights();
   world.carLights = carLights;
+  world.haze = pipeline.haze;
   world.cars = cars;
   if (city && data.layout) {
     city.build(data.layout);
@@ -440,6 +441,7 @@ async function init() {
   player.fighter = combat.add({ id: 'player', name: fighters[0].name, character, pos: player.pos, isPlayer: true, color: fighters[0].color });
   player.spawn(spawn.x, spawn.z, facing);
   const fx = new Effects(pipeline, terrain, audio);
+  fx.haze = pipeline.haze;
   const weapons = new Weapons(world, player, character, fx, audio, combat);
   weapons.setGrenadeModel(charAssets.grenadeGltf);
   player.fighter.loadout = new Loadout(3);
