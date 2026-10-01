@@ -787,6 +787,7 @@ async function init() {
       }
     } else if (mode === 'solo' && rivals.every((r) => !r.fighter.alive) && player.fighter.alive) {
       round.state = 'over';
+      slowmo = 1.6;
       banner('Victory', `You outlasted ${rivals.length > 1 ? `all ${rivals.length} rivals` : 'your rival'}. Press R to fight again.`, 'show won');
     }
   };
@@ -864,6 +865,7 @@ async function init() {
   player.onLand = (v) => audio.land(v);
 
   let hitTimer = 0;
+  let slowmo = 0; // real seconds of slow motion left
   weapons.onHit = (kind) => {
     hitTimer = kind === 'kill' ? 0.5 : 0.25;
     const hm = $('hitmarker');
@@ -944,6 +946,11 @@ async function init() {
   let elapsed = 0;
   let fpsT = 0, frames = 0, fps = 0;
   const clock = startClock((dt, draw) => {
+    // the round's last kill plays out in slow motion, easing back to speed
+    if (slowmo > 0) {
+      slowmo -= dt;
+      dt *= 0.3 + 0.7 * THREE.MathUtils.smoothstep(1.6 - slowmo, 1.0, 1.6);
+    }
     elapsed += dt;
     if (input.fastTime && !mapDef.fixedTime && (mode !== 'multi' || session?.isHost)) {
       timeOfDay = (timeOfDay + dt * 0.03) % 1;
