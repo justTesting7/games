@@ -105,6 +105,20 @@ export function buildShotMesh(roots, { doors = [], doorMesh = null } = {}) {
      * its vertices, and rounds and sight lines pass through from now on. Returns the pane's
      * centre and size, or null when that glass isn't a breakable pane.
      */
+    /** Glass triangles (unbroken) within `radius` of `center`: for a blast blowing windows in. */
+    glassNear(center, radius) {
+      const sphere = new THREE.Sphere(center, radius);
+      const found = [];
+      bvh.shapecast({
+        intersectsBounds: (box) => box.intersectsSphere(sphere),
+        intersectsTriangle: (tri, i) => {
+          const id = (bvh.geometry.index.getX(i * 3) / 3) | 0;
+          if ((surf[id] & 7) === 2 && !(surf[id] & 24) && tri.closestPointToPoint(center, v).distanceTo(center) < radius) found.push(id);
+          return false;
+        },
+      });
+      return found;
+    },
     breakPane(tri, renderRoots) {
       const c = glassChunks.find((g) => tri >= g.start && tri < g.start + g.out.length / 9);
       if (!c || surf[tri] & 16) return null;

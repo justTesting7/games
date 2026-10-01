@@ -236,6 +236,14 @@ export class Combat {
     if (netHits.length) world.weapons?.session?.reportBlast(netHits, opts.weapon || 'grenade');
     // the blast also shoves cars and scooters and blows their windows in
     world.cars?.blast?.(pos, radius * 1.3, { report: !!attacker?.isPlayer });
+    // and blows in the shop and office windows around it
+    if (world.shots?.glassNear && world.studio?.root) {
+      let n = 0;
+      for (const tri of world.shots.glassNear(pos, radius * 1.4)) {
+        const pane = world.shots.breakPane(tri, [world.studio.root]);
+        if (pane && n++ < 8) world.fx?.shatter?.(pane.center, pane.size, pane.center.clone().sub(pos).normalize(), pane.center.clone().sub(pos).normalize());
+      }
+    }
   }
 
   // Whether `f` is currently pointing its guns at `other`.
