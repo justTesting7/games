@@ -34,7 +34,8 @@ the whole district, so frustum culling never skips any of it, and the shadow pas
 - [x] 15. Hit reactions by bone (stagger, limb flinch) and knockback from explosions.
 
 - [x] 16. Sound occlusion: gunshots behind buildings are muffled (shot BVH ray to the listener).
-- [~] 17. Shadows reach further: Medium 2048 over 64 m, High/Ultra 4096 over 90/110 m (was 40-58 m);
+- [~] 17. (CSM judged too invasive: it rewrites the global light chunks and every material.)
+      Shadows reach further: Medium 2048 over 64 m, High/Ultra 4096 over 90/110 m (was 40-58 m);
       a real second cascade would still help the far streets.
 - [x] 19. Explosions shove nearby cars and scooters and shatter their windows.
 - [~] 18. Rival drivers: see 24.
@@ -64,6 +65,8 @@ the whole district, so frustum culling never skips any of it, and the shadow pas
 - [x] 35. Tracers that read: brighter, longer streaks for rifles and every third pistol round.
 
 ## Log
+- Tel Aviv load (local, cached): ready in ~8 s; main-thread stages: decode 1.6 s, seam clip 1.0,
+  cars 0.4, shot BVH 1.5, chunking 1.3.
 - Tel Aviv frame, same view: 10.4 ms / 1684 calls (baseline) -> 6.0 ms / 1078 calls after
   chunking (256 m cells), car batching and no shadows from flat ground.
 - CPU per step (Tel Aviv): parked cars 2.9 -> 0.1 ms (sleep when settled); rival characters
