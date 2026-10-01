@@ -284,6 +284,17 @@ export class Effects {
       return;
     }
     this.fireballs.spawn(pos.clone().setY(pos.y + 0.9), 2.4 + Math.random() * 0.6);
+    this.onBlast?.(pos);
+    // the shockwave: a ring of dust racing out along the ground
+    const gy = this.terrain.heightAt(pos.x, pos.z) + 0.15;
+    for (let i = 0; i < 28; i++) {
+      const a = (i / 28) * Math.PI * 2 + Math.random() * 0.2;
+      const out = new THREE.Vector3(Math.sin(a), 0, Math.cos(a));
+      this.alpha.spawn({
+        pos: new THREE.Vector3(pos.x, gy, pos.z).addScaledVector(out, 0.6), vel: out.multiplyScalar(9 + Math.random() * 4).setY(0.4),
+        size: 0.35, grow: 2.4, life: 1.1 + Math.random() * 0.5, color: [0.5, 0.47, 0.42], alpha: 0.35, drag: 3,
+      });
+    }
     // a column of smoke that keeps rising and drifting, and a scorch on the ground
     (this.emitters || (this.emitters = [])).push({ pos: pos.clone(), t: 0, dur: 7, acc: 0 });
     this.holes.add(new THREE.Vector3(pos.x, this.terrain.heightAt(pos.x, pos.z) + 0.03, pos.z), new THREE.Vector3(0, 1, 0), 'scorch');

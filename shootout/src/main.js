@@ -746,6 +746,11 @@ async function init() {
     }
   };
   weapons.onNearMiss = (miss) => audio.whiz(miss);
+  // any blast (grenade, drone, a car going up) shakes the camera by how close it is
+  fx.onBlast = (pos) => {
+    const dist = camera.position.distanceTo(pos);
+    if (dist < 35) player.shake = Math.max(player.shake, Math.min(0.9, 6 / Math.max(dist, 1)));
+  };
   weapons.onExplosion = (pos, dist) => {
     player.shake = Math.max(player.shake, Math.min(0.9, 6 / Math.max(dist, 1)));
     if (dist < 4 && player.fighter.alive) hurt = Math.max(hurt, 0.4);
