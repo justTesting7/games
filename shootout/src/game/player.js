@@ -416,11 +416,13 @@ export class Player {
     const ride = rideCar(follow?.vehicle) || (!follow && rideCar(this.vehicle));
     if (ride) {
       // Chase camera by default; V switches to the cockpit in cars that have an interior.
-      if (!(this.cockpitView && ride.cockpit)) { this.updateChaseCamera(dt, ride, follow); return; }
+      this.inCockpit = !!(this.cockpitView && ride.cockpit);
+      if (!this.inCockpit) { this.updateChaseCamera(dt, ride, follow); return; }
       this.updateCockpitCamera(dt, ride, follow, sprinting, speed);
       return;
     }
     this.chasePos = null;
+    this.inCockpit = false;
     if (this._cockpitHide?.root) this._cockpitHide.root.visible = true;
     this._cockpitHide = null;
     const body = follow?.pos || this.pos;

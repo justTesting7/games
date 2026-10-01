@@ -812,3 +812,66 @@ void main() {
   gl_FragColor = vec4(hitCol * found * k * (1.0 + pud * 0.6), pud * 0.45 * fade);
 }
 `;
+
+// Rain on the windscreen, seen from the driver's seat: beads that refract the street behind
+// them, a few that run down the glass, and a wiper sweeping it clear every so often (the
+// beads come back in the time since it passed). Only on what lies beyond the glass (depth),
+// so the dashboard stays dry.
+export const windscreenFrag = /* glsl */ `
+varying vec2 vUv;
+uniform sampler2D tScene;
+uniform float uAmount;
+uniform float uTime;
+uniform float uAspect;
+float h21(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+const float PERIOD = 1.7;
+const float SWEEP = 1.15; // radians either side of straight up
+// seconds since the wiper last crossed the angle a (it sweeps as a sine)
+float sinceWipe(float a) {
+  float s = asin(clamp(a / SWEEP, -1.0, 1.0)) / 6.2831853 * PERIOD;
+  float t1 = mod(uTime - s, PERIOD), t2 = mod(uTime - (PERIOD * 0.5 - s), PERIOD);
+  return min(t1, t2);
+}
+void main() {
+  vec4 base = texture(tScene, vUv);
+  if (base.a < 1.2 || uAmount < 0.01) { gl_FragColor = base; return; } // the cabin: dry
+  vec2 p = vec2(vUv.x * uAspect, vUv.y);
+  vec2 pivot = vec2(0.5 * uAspect, -0.15);
+  vec2 off = vec2(0.0);
+  float wet = 0.0, rim = 0.0, glint = 0.0;
+  for (int layer = 0; layer < 2; layer++) {
+    float scale = layer == 0 ? 9.0 : 17.0;
+    vec2 q = p * scale + float(layer) * 7.3;
+    vec2 cell = floor(q);
+    float rnd = h21(cell);
+    // a few of the bigger beads run down the glass
+    float run = layer == 0 && rnd > 0.8 ? fract(uTime * (0.15 + rnd * 0.2) + rnd * 9.0) : 0.0;
+    vec2 c = vec2(h21(cell + 1.7), h21(cell + 4.1)) * 0.6 + 0.2;
+    c.y -= run * 0.9;
+    vec2 d = fract(q) - c;
+    d.y *= 1.0 + run * 0.6;
+    float r = (layer == 0 ? 0.2 : 0.14) * (0.5 + rnd);
+    float drop = smoothstep(r, r * 0.6, length(d));
+    // gone where the wiper passed a moment ago, back as fresh rain lands
+    vec2 cw = (cell + c) / scale - pivot;
+    float since = sinceWipe(atan(cw.x, cw.y));
+    float there = step(h21(cell + floor(uTime / PERIOD) * 0.13 + 3.0), smoothstep(0.0, PERIOD, since) * uAmount * 0.9);
+    drop *= there;
+    off += d / max(r, 1e-3) * drop * (layer == 0 ? 0.045 : 0.025);
+    wet = max(wet, drop);
+    // a darker rim and a glint up on the side the sky lights
+    rim = max(rim, drop * (1.0 - smoothstep(r * 0.55, r * 0.85, length(d))) * smoothstep(r * 0.3, r * 0.75, length(d)));
+    glint = max(glint, drop * smoothstep(r * 0.35, 0.0, length(d - vec2(-0.3, 0.35) * r)));
+  }
+  vec4 col = texture(tScene, vUv - off * vec2(1.0 / uAspect, 1.0));
+  col.rgb = mix(base.rgb, col.rgb, wet) * (1.0 - rim * 0.35) + glint * 0.6 * (0.3 + dot(base.rgb, vec3(0.3)));
+  // the wiper blade itself
+  float w = sin(uTime / PERIOD * 6.2831853) * SWEEP;
+  vec2 rel = p - pivot;
+  float along = dot(rel, vec2(sin(w), cos(w)));
+  float across = abs(dot(rel, vec2(cos(w), -sin(w))));
+  float blade = (1.0 - smoothstep(0.004, 0.008, across)) * step(0.0, along) * step(along, 0.72) * step(0.05, uAmount);
+  col.rgb = mix(col.rgb, vec3(0.015), blade);
+  gl_FragColor = vec4(col.rgb, base.a);
+}
+`;

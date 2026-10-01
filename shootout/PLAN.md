@@ -105,7 +105,7 @@ the whole district, so frustum culling never skips any of it, and the shadow pas
 - [x] 61. Blast shockwave: a ring of refraction races out from every explosion.
 - [x] 62. Pigeons: flocks peck about the squares by day and burst into the air at gunfire, blasts
       or anyone running through them, wheel round and settle again.
-- [ ] 63. Rain on the windscreen in the cockpit view: drops bead and run, wipers sweep them.
+- [x] 63. Rain on the windscreen in the cockpit view (cars with an interior): drops bead and run, a wiper sweeps them.
 
 ## Log
 - Tel Aviv load (local, cached): ready in ~8 s; main-thread stages: decode 1.6 s, seam clip 1.0,

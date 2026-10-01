@@ -1167,7 +1167,7 @@ async function init() {
         if (character.root) character.root.visible = true;
         pipeline.renderSplit(weapons.drone.cam, weapons.drone.opCam, dt, { underwater: false, shadowCenter: player.pos });
       } else {
-        pipeline.render(camera, dt, { underwater: player.underwater, shadowCenter: spec?.pos || player.pos });
+        pipeline.render(camera, dt, { underwater: player.underwater, shadowCenter: spec?.pos || player.pos, windscreen: player.inCockpit && !pipeline.indoor ? weather.amount : 0 });
       }
 
       frames++;

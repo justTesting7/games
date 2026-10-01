@@ -240,6 +240,9 @@ export class Pipeline {
       tDiffuse: { value: null }, resolution: { value: new THREE.Vector2(1, 1) },
     });
     this.aoBlurMaterial = fsMaterial(S.aoBlurFrag, { tAO: { value: null }, uStep: { value: new THREE.Vector2() } });
+    this.windMaterial = fsMaterial(S.windscreenFrag, {
+      tScene: { value: null }, uAmount: { value: 0 }, uTime: this.u.uTime, uAspect: { value: 1 },
+    });
     this.motionMaterial = fsMaterial(S.motionBlurFrag, {
       tScene: { value: null }, uInvViewProj: { value: new THREE.Matrix4() }, uPrevViewProj: { value: new THREE.Matrix4() },
       uCamPos: { value: new THREE.Vector3() }, uCamForward: { value: new THREE.Vector3() }, uStrength: { value: 0 },
@@ -352,6 +355,7 @@ export class Pipeline {
     if (!this.copyRT) this.copyRT = hdrTarget(W, H, this.hdrType); else this.copyRT.setSize(W, H);
     if (!this.fogRT) this.fogRT = hdrTarget(W, H, this.hdrType); else this.fogRT.setSize(W, H);
     if (!this.motionRT) this.motionRT = hdrTarget(W, H, this.hdrType); else this.motionRT.setSize(W, H);
+    if (!this.windRT) this.windRT = hdrTarget(W, H, this.hdrType); else this.windRT.setSize(W, H);
 
     this.bloomRTs?.forEach((r) => r.dispose());
     this.bloomRTs = [];
@@ -560,6 +564,15 @@ export class Pipeline {
       mu.uStrength.value = this.motion * 0.9;
       this.quad.render(r, this.motionMaterial, this.motionRT);
       sceneTex = this.motionRT.texture;
+    }
+    // rain on the windscreen from the driver's seat
+    if ((opts.windscreen || 0) > 0.01 && !opts.outViewport) {
+      const wu = this.windMaterial.uniforms;
+      wu.tScene.value = sceneTex;
+      wu.uAmount.value = opts.windscreen;
+      wu.uAspect.value = W / H;
+      this.quad.render(r, this.windMaterial, this.windRT);
+      sceneTex = this.windRT.texture;
     }
     this.prevViewProj.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
 
