@@ -1287,6 +1287,7 @@ export class Cars {
       if (car.wheelRig) car.wheelRig.rotation.z = -(car.steer || 0) * 0.65;
       if (car.cluster) paintCluster(car.cluster, car.speed, !!car.driver);
       this.bodyMotion(car, dt);
+      this.spray(car, dt);
       if (car.hp < hpMax(car) * 0.6 || car.wrecked) this.updateDamage(car, dt);
       car.lights.emissiveIntensity = car.driver ? 1.15 : 0.45;
       car.tails.emissiveIntensity = car.speed < -0.4 || (car.driver?.isPlayer && input?.back) ? 1.2 : 0.4;
@@ -1442,6 +1443,33 @@ export class Cars {
     if ((sliding || braking) && car.driver?.isPlayer) {
       this.squealT = (this.squealT || 0) - dt;
       if (this.squealT <= 0) { this.squealT = 0.16; this.world.audio?.squeal?.(Math.min(1, (car.slip || 3) / 6)); }
+    }
+  }
+
+  // On a wet road the tyres throw up water: a fine mist rolling off behind the rear wheels and
+  // droplets arcing out of the tread, more the faster the car goes.
+  spray(car, dt) {
+    const wet = this.world.weather?.amount || 0, fx = this.world.fx;
+    const v = Math.abs(car.speed);
+    if (wet < 0.3 || v < 3 || !fx?.alpha || car.spec) return;
+    const size = sizeOf(car), o = localOffset(car.x, car.z, car), back = -Math.sign(car.speed);
+    const k = wet * Math.min(1, v / 20);
+    for (const side of [-1, 1]) {
+      if (Math.random() > dt * 40 * k) continue;
+      const along = back * size.halfL * 0.68, across = side * size.halfW * 0.82;
+      const x = car.x + o.fwdX * along + o.rightX * across, z = car.z + o.fwdZ * along + o.rightZ * across;
+      const y = this.world.terrain.heightAt(x, z) + 0.12;
+      const bx = o.fwdX * back, bz = o.fwdZ * back;
+      fx.alpha.spawn({
+        pos: new THREE.Vector3(x, y, z),
+        vel: new THREE.Vector3(car.vel.x * 0.55 + bx * 2 + (Math.random() - 0.5), 0.5 + Math.random() * 0.6, car.vel.z * 0.55 + bz * 2 + (Math.random() - 0.5)),
+        size: 0.3, grow: 2.6, life: 0.7 + Math.random() * 0.4, color: [0.72, 0.75, 0.78], alpha: 0.16 * k + 0.04, drag: 2.5,
+      });
+      fx.alpha.spawn({
+        pos: new THREE.Vector3(x, y, z),
+        vel: new THREE.Vector3(car.vel.x * 0.4 + bx * 3 + o.rightX * side * 1.2, 1.5 + Math.random() * 1.5, car.vel.z * 0.4 + bz * 3 + o.rightZ * side * 1.2),
+        size: 0.014, life: 0.45, color: [0.8, 0.84, 0.88], alpha: 0.7, gravity: 9.8,
+      });
     }
   }
 

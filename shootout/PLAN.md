@@ -119,6 +119,8 @@ the whole district, so frustum culling never skips any of it, and the shadow pas
 
 - [x] 68. Wind in the city trees: leaves and fronds sway on slow gusts and flutter, harder in a storm.
 
+- [x] 69. Tyre spray: on wet roads every moving car throws mist and droplets off its rear wheels.
+
 ## Log
 - Tel Aviv load (local, cached): ready in ~8 s; main-thread stages: decode 1.6 s, seam clip 1.0,
   cars 0.4, shot BVH 1.5, chunking 1.3.
