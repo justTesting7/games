@@ -57,7 +57,7 @@ the whole district, so frustum culling never skips any of it, and the shadow pas
 - [x] 29. Muzzle smoke and heat haze after sustained fire; explosion smoke columns that drift. (Columns + scorch done; muzzle puffs existed; haze not done.)
 - [ ] 30. Footstep dust and splashes by surface; bodies and cars leave scuffs.
 - [x] 31. Explosion fireball: noise-displaced HDR sphere that swells, cools to soot and rises.
-- [ ] 32. Shop and office windows shatter when shot (city glass panes cut out of the mesh + shards).
+- [x] 32. Shop and office windows shatter when shot (city glass panes cut out of the mesh + shards).
 - [ ] 33. Weather: rain with wet, reflective streets and puddle splashes (optional per map).
 
 ## Log

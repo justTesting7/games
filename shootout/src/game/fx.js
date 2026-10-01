@@ -507,6 +507,21 @@ export class Effects {
     });
   }
 
+  /** A window pane bursts: shards fly out along the shot and rain down, glitter in the air. */
+  shatter(center, size, normal, dir) {
+    const n = Math.min(40, 10 + Math.round((size.x + size.y + size.z) * 6));
+    for (let i = 0; i < n; i++) {
+      const p = center.clone().add(new THREE.Vector3((Math.random() - 0.5) * size.x, (Math.random() - 0.5) * size.y, (Math.random() - 0.5) * size.z));
+      const v = dir.clone().multiplyScalar(1 + Math.random() * 2.5).add(new THREE.Vector3().randomDirection().multiplyScalar(1.2)).setY(Math.random() * 1.5);
+      this.debris.spawn(p, v, { kind: 'shard', size: 0.03 + Math.random() * 0.05, color: [0.7, 0.82, 0.88] });
+    }
+    for (let i = 0; i < 18; i++) {
+      const p = center.clone().add(new THREE.Vector3((Math.random() - 0.5) * size.x, (Math.random() - 0.5) * size.y, (Math.random() - 0.5) * size.z));
+      this.alpha.spawn({ pos: p, vel: new THREE.Vector3().randomDirection().multiplyScalar(1.5).setY(-1), size: 0.015, life: 0.8 + Math.random() * 0.6, color: [0.85, 0.92, 0.95], alpha: 0.9, gravity: 9.8 });
+    }
+    this.audio?.impact?.('glass', 0);
+  }
+
   /** A hole where a round struck a wall, the ground or a prop (not a moving car or a body). */
   bulletHole(at, normal, surface) {
     this.holes.add(at, normal, surface);

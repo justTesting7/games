@@ -40,7 +40,9 @@ export function buildShotMesh(roots, { doors = [], doorMesh = null } = {}) {
         out[i * 3] = v.x; out[i * 3 + 1] = v.y; out[i * 3 + 2] = v.z;
       }
       const surf = surfaceOf(o.name) | (doorMesh && o.name === doorMesh ? 8 : 0);
-      chunks.push({ out, surf });
+      // glass remembers where each triangle came from, so a shot pane can be cut out
+      const glass = (surf & 7) === 2 && !(surf & 8) ? { attr: pos, index: idx ? Array.from(idx.array.slice(0, n)) : null, matrix: o.matrixWorld.clone() } : null;
+      chunks.push({ out, surf, glass, start: total / 3 });
       total += n;
     });
   }
@@ -59,6 +61,7 @@ export function buildShotMesh(roots, { doors = [], doorMesh = null } = {}) {
   for (let i = 0; i < total; i++) index[i] = i;
   geometry.setIndex(new THREE.BufferAttribute(index, 1));
   const bvh = new MeshBVH(geometry);
+  const glassChunks = chunks.filter((c) => c.glass);
 
   const inDoor = (p) => doors.some((d) => {
     const dx = p.x - d.x, dz = p.z - d.z;
@@ -68,8 +71,9 @@ export function buildShotMesh(roots, { doors = [], doorMesh = null } = {}) {
   const ray = new THREE.Ray();
   const hitOf = (h) => {
     const tri = (h.face.a / 3) | 0;
-    return { t: h.distance, point: h.point, normal: h.face.normal, flags: surf[tri] };
+    return { t: h.distance, point: h.point, normal: h.face.normal, flags: surf[tri], tri };
   };
+  const skip = (c) => (c.flags & 16) || (c.flags & 8 && inDoor(c.point)); // broken glass, gateways
 
   return {
     triangles: total / 3,
@@ -82,18 +86,68 @@ export function buildShotMesh(roots, { doors = [], doorMesh = null } = {}) {
       let h = bvh.raycastFirst(ray, THREE.DoubleSide, 0, maxDist);
       if (!h) return null;
       let hit = hitOf(h);
-      if (hit.flags & 8 && inDoor(hit.point)) {
+      if (skip(hit)) {
         const all = bvh.raycast(ray, THREE.DoubleSide, 0, maxDist).sort((a, b) => a.distance - b.distance);
         hit = null;
         for (const x of all) {
           const c = hitOf(x);
-          if (!(c.flags & 8 && inDoor(c.point))) { hit = c; break; }
+          if (!skip(c)) { hit = c; break; }
         }
         if (!hit) return null;
       }
       const normal = hit.normal.clone();
       if (normal.dot(d) > 0) normal.negate();
-      return { t: hit.t, normal, surface: SURFACES[hit.flags & 7] };
+      return { t: hit.t, normal, surface: SURFACES[hit.flags & 7], tri: hit.tri };
+    },
+    /**
+     * Shatters the window pane the shot triangle belongs to: the connected glass around it
+     * (a discrete pane, not a whole curtain wall) is cut out of every render mesh sharing
+     * its vertices, and rounds and sight lines pass through from now on. Returns the pane's
+     * centre and size, or null when that glass isn't a breakable pane.
+     */
+    breakPane(tri, renderRoots) {
+      const c = glassChunks.find((g) => tri >= g.start && tri < g.start + g.out.length / 9);
+      if (!c || surf[tri] & 16) return null;
+      const g = c.glass;
+      const local = tri - c.start;
+      const triVerts = (k) => (g.index ? [g.index[k * 3], g.index[k * 3 + 1], g.index[k * 3 + 2]] : [k * 3, k * 3 + 1, k * 3 + 2]);
+      // triangles of this mesh that share vertex positions (pane quads may not share indices)
+      if (!g.byPos) {
+        g.byPos = new Map();
+        const key = (i) => `${Math.round(g.attr.getX(i) * 200)},${Math.round(g.attr.getY(i) * 200)},${Math.round(g.attr.getZ(i) * 200)}`;
+        g.key = key;
+        const count = (g.index ? g.index.length : g.attr.count) / 3;
+        for (let k = 0; k < count; k++) for (const i of triVerts(k)) {
+          const kk = key(i);
+          if (!g.byPos.has(kk)) g.byPos.set(kk, []);
+          g.byPos.get(kk).push(k);
+        }
+      }
+      const seen = new Set([local]), queue = [local];
+      while (queue.length) {
+        const k = queue.pop();
+        for (const i of triVerts(k)) for (const m of g.byPos.get(g.key(i)) || []) {
+          if (seen.has(m)) continue;
+          seen.add(m); queue.push(m);
+          if (seen.size > 16) return null; // a curtain wall, not a pane
+        }
+      }
+      // size of the pane (world space)
+      const box = new THREE.Box3();
+      for (const k of seen) for (let j = 0; j < 9; j += 3) box.expandByPoint(v.fromArray(c.out, k * 9 + j));
+      const size = box.getSize(new THREE.Vector3());
+      if (size.x * size.y + size.z * size.y + size.x * size.z > 16) return null;
+      // rounds and sight lines go through from now on
+      for (const k of seen) surf[c.start + k] |= 16;
+      // cut it out of whatever draws those vertices (the city chunks share the buffer)
+      const gone = new Set([...seen].map((k) => triVerts(k).join(',')));
+      for (const root of renderRoots) root.traverse((o) => {
+        if (!o.isMesh || o.geometry.attributes.position !== g.attr || !o.geometry.index) return;
+        const src = o.geometry.index.array, keep = [];
+        for (let t = 0; t + 2 < src.length; t += 3) if (!gone.has(`${src[t]},${src[t + 1]},${src[t + 2]}`)) keep.push(src[t], src[t + 1], src[t + 2]);
+        if (keep.length !== src.length) o.geometry.setIndex(new THREE.BufferAttribute(src.length && src.BYTES_PER_ELEMENT === 2 ? new Uint16Array(keep) : new Uint32Array(keep), 1));
+      });
+      return { center: box.getCenter(new THREE.Vector3()), size };
     },
   };
 }

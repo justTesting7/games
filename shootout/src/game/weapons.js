@@ -347,7 +347,13 @@ export class Weapons {
       this.sprayBehind(end, dir, hit.fighter, (hit.head ? 1 : 0.6) * (rifle ? 1.25 : 1));
     } else {
       this.fx.impact(end, hit.normal, hit.surface, dir);
-      if (!hit.car && !hit.drone) this.fx.bulletHole?.(end, hit.normal, hit.surface);
+      // a shop or office window shatters (and leaves no hole hanging in the air)
+      let pane = null;
+      if (hit.surface === 'glass' && hit.tri !== undefined && this.world.studio?.root) {
+        pane = this.world.shots?.breakPane(hit.tri, [this.world.studio.root]);
+        if (pane) this.fx.shatter?.(pane.center, pane.size, hit.normal, dir);
+      }
+      if (!hit.car && !hit.drone && !pane) this.fx.bulletHole?.(end, hit.normal, hit.surface);
       if (hit.car) this.world.cars?.damage(hit.car, rifle ? 16 : 4, shooter);
       this.audio.impact(hit.surface, hitDist);
       if (hit.surface !== 'water') this.bounceOff(shooter, end, dir, hit);
