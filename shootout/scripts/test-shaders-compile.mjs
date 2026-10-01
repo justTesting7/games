@@ -10,7 +10,8 @@ import { FXAAShader } from 'three/addons/shaders/FXAAShader.js';
 import { fireballShaders } from '../src/game/fireball.js';
 import { rainShaders } from '../src/world/weather.js';
 import { hazeShaders } from '../src/engine/haze.js';
-const S = { ...S0, fxaaFrag: FXAAShader.fragmentShader, fireballVert: fireballShaders.vert, fireballFrag: fireballShaders.frag, rainVert: rainShaders.vert, rainFrag: rainShaders.frag, hazeVert: hazeShaders.vert, hazeFrag: hazeShaders.frag };
+import { coneShaders } from '../src/world/nightLights.js';
+const S = { ...S0, fxaaFrag: FXAAShader.fragmentShader, fireballVert: fireballShaders.vert, fireballFrag: fireballShaders.frag, rainVert: rainShaders.vert, rainFrag: rainShaders.frag, hazeVert: hazeShaders.vert, hazeFrag: hazeShaders.frag, coneVert: coneShaders.vert, coneFrag: coneShaders.frag };
 
 try { execFileSync('glslangValidator', ['--version'], { stdio: 'ignore' }); } catch {
   console.log('skip: glslangValidator not installed');
@@ -40,6 +41,7 @@ uniform vec3 cameraPosition;
 in vec3 position;
 in vec3 normal;
 in vec2 uv;
+in mat4 instanceMatrix; // three adds it for an InstancedMesh
 `;
 const dir = mkdtempSync(join(tmpdir(), 'shaders-'));
 let n = 0;

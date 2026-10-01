@@ -53,6 +53,33 @@ export function findLamps(root) {
   return [...cells.values()].map((c) => ({ x: c.x / c.n, y: c.y / c.n, z: c.z / c.n }));
 }
 
+// A lamp's visible cone of light: brightest through its middle (the longest path through
+// lit air), fading toward the ground and off at the rim. Much stronger in rain.
+const coneVert = /* glsl */ `
+varying float vH;
+varying vec3 vN;
+varying vec3 vV;
+void main() {
+  vH = -position.y; // 0 at the lamp head, 1 at the ground
+  vec4 w = modelMatrix * instanceMatrix * vec4(position, 1.0);
+  vN = normalize(mat3(modelMatrix * instanceMatrix) * vec3(normal.x, 0.0, normal.z));
+  vV = cameraPosition - w.xyz;
+  gl_Position = projectionMatrix * viewMatrix * w;
+}`;
+const coneFrag = /* glsl */ `
+uniform float uK;
+uniform vec3 uColor;
+varying float vH;
+varying vec3 vN;
+varying vec3 vV;
+void main() {
+  vec3 v = normalize(vV);
+  float facing = abs(dot(normalize(vN), normalize(vec3(v.x, 0.0, v.z))));
+  float a = pow(facing, 2.0) * pow(1.0 - vH, 0.7) * smoothstep(0.0, 0.08, vH);
+  gl_FragColor = vec4(uColor * a * uK, 1.0);
+}`;
+export const coneShaders = { vert: coneVert, frag: coneFrag };
+
 export class NightLights {
   constructor(scene, lamps, heightAt) {
     this.map = poolTexture();
@@ -70,6 +97,29 @@ export class NightLights {
       this.lamps.setMatrixAt(i, m);
     });
     scene.add(this.lamps);
+    // the cones of light under the lamp heads
+    const coneGeo = new THREE.CylinderGeometry(0.1, 1, 1, 18, 1, true).translate(0, -0.5, 0);
+    this.coneMat = new THREE.ShaderMaterial({
+      vertexShader: coneVert, fragmentShader: coneFrag, transparent: true, depthWrite: false, side: THREE.DoubleSide,
+      uniforms: { uK: { value: 0 }, uColor: { value: new THREE.Color(0xffc58a) } },
+    });
+    this.coneMat.blending = THREE.CustomBlending;
+    this.coneMat.blendSrc = THREE.OneFactor;
+    this.coneMat.blendDst = THREE.OneFactor;
+    this.coneMat.blendSrcAlpha = THREE.ZeroFactor;
+    this.coneMat.blendDstAlpha = THREE.OneFactor;
+    this.cones = new THREE.InstancedMesh(coneGeo, this.coneMat, Math.max(1, lamps.length));
+    this.cones.count = lamps.length;
+    this.cones.frustumCulled = false;
+    this.cones.renderOrder = 3;
+    lamps.forEach((l, i) => {
+      const ground = heightAt(l.x, l.z);
+      const h = Math.max(1.5, l.y - ground - 0.1);
+      const r = THREE.MathUtils.clamp(h * 0.45, 1.4, 3.6);
+      m.compose(new THREE.Vector3(l.x, l.y - 0.1, l.z), new THREE.Quaternion(), new THREE.Vector3(r, h, r));
+      this.cones.setMatrixAt(i, m);
+    });
+    scene.add(this.cones);
     // headlights: two long faint beams and a bright patch ahead, for one car
     this.beamMat = glowMaterial(0xfff1d6, this.map);
     this.patchMat = glowMaterial(0xfff4e0, this.map);
@@ -91,11 +141,14 @@ export class NightLights {
     scene.add(this.head);
   }
 
-  /** night 0..1; car = the car whose headlights shine (or null). */
-  update(night, car, heightAt) {
+  /** night 0..1; car = the car whose headlights shine (or null); rain 0..1. */
+  update(night, car, heightAt, rain = 0) {
     const k = THREE.MathUtils.smoothstep(night, 0.15, 0.7);
     this.lampMat.opacity = 0.55 * k;
     this.lamps.visible = k > 0.01;
+    // the light is seen in the air only faintly on a clear night; rain lights it up
+    this.coneMat.uniforms.uK.value = k * (0.035 + 0.11 * rain);
+    this.cones.visible = k > 0.01;
     const on = !!car && k > 0.01 && !car.wrecked;
     this.head.visible = on;
     if (!on) return;

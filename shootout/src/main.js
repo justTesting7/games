@@ -935,7 +935,7 @@ async function init() {
       pipeline.motion += (goal - pipeline.motion) * Math.min(1, dt * 3);
     }
     carLights.update(dt, cars.list, camera, pipeline.night);
-    world.nightLights?.update(pipeline.night, player.vehicle && player.vehicle.kind !== 'scooter' ? player.vehicle : null, (x, z) => terrain.heightAt(x, z));
+    world.nightLights?.update(pipeline.night, player.vehicle && player.vehicle.kind !== 'scooter' ? player.vehicle : null, (x, z) => terrain.heightAt(x, z), weather.amount);
 
     const locked = inPlay;
     if (mode === 'solo' && (input.restart || (input.reload && round.state === 'over')) && (round.state === 'over' || round.state === 'fight')) {

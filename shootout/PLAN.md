@@ -97,7 +97,7 @@ the whole district, so frustum culling never skips any of it, and the shadow pas
 - [x] 57. Flash lighting: muzzle flashes and blasts (existed), now car and blast fires flicker on the street around them
       (a small pool of real point lights kept in the scene at zero, so no shader recompiles).
 - [x] 58. Storms: lightning flashes the sky and the city in heavy rain, thunder rolls in after.
-- [ ] 59. Lamp light cones: at night (and in rain) a soft visible cone under each streetlamp.
+- [x] 59. Lamp light cones: at night (and in rain) a soft visible cone under each streetlamp.
 - [ ] 60. Wet fighters: clothes and skin darken and gloss in the rain.
 
 ## Log
