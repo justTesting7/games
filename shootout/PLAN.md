@@ -61,7 +61,7 @@ the whole district, so frustum culling never skips any of it, and the shadow pas
 - [x] 33. Weather: rain with wet, reflective streets and puddle splashes (optional per map).
 - [x] 34. Engine sound: synthesised, RPM through four gears, throttle-opened filter; nearest other
       car under power gets its own distance-attenuated voice; scooters whine.
-- [ ] 35. Tracers that read: brighter, longer streaks for rifles and every third pistol round.
+- [x] 35. Tracers that read: brighter, longer streaks for rifles and every third pistol round.
 
 ## Log
 - Tel Aviv frame, same view: 10.4 ms / 1684 calls (baseline) -> 6.0 ms / 1078 calls after

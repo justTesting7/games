@@ -327,7 +327,8 @@ export class Weapons {
     this.audio.gunshot(side < 0 ? 0 : side, shooter.isPlayer ? 0 : dist, shooter.isPlayer ? null : pan, rifle, occluded && !shooter.isPlayer);
 
     const end = hit ? from.clone().addScaledVector(dir, hit.t) : from.clone().addScaledVector(dir, 500);
-    this.fx.tracer(flashAt, end);
+    this.tracerN = (this.tracerN || 0) + 1;
+    this.fx.tracer(flashAt, end, rifle ? 'rifle' : this.tracerN % 3 === 0 ? 'bright' : 'faint');
     if (!shooter.isPlayer) this.checkNearMiss(from, end, hit);
     // Open-air misses used to return here, so the room never heard the
     // round. The other player only saw the aim pose until a hit landed.

@@ -388,17 +388,27 @@ export class Effects {
     }
   }
 
-  tracer(from, to) {
+  // kind: 'rifle' (a long, hot streak and a wisp of smoke along its path), 'bright' (a
+  // pistol tracer round) or 'faint' (the rest).
+  tracer(from, to, kind = 'faint') {
     const d = new THREE.Vector3().subVectors(to, from);
     const len = d.length();
     if (len < 0.3) return;
     d.divideScalar(len);
-    const speed = 380;
+    const T = { rifle: [620, 0.022, 2.6, [70, 45, 16]], bright: [420, 0.016, 1.6, [48, 30, 11]], faint: [380, 0.01, 1.0, [22, 15, 7]] }[kind];
+    const [speed, size, stretch, color] = T;
     const skip = Math.min(0.35, len * 0.12);
     this.add.spawn({
-      pos: from.clone().addScaledVector(d, skip), vel: d.clone().multiplyScalar(speed), size: 0.012, stretch: 1.2,
-      life: Math.max(0.02, (len - skip) / speed), color: [30, 20, 9], fade: 0,
+      pos: from.clone().addScaledVector(d, skip), vel: d.clone().multiplyScalar(speed), size, stretch,
+      life: Math.max(0.02, (len - skip) / speed), color, fade: 0,
     });
+    if (kind === 'rifle') {
+      // the shock of a rifle round leaves a faint trail that hangs for a moment
+      const n = Math.min(14, Math.floor(len / 3));
+      for (let i = 1; i <= n; i++) {
+        this.alpha.spawn({ pos: from.clone().addScaledVector(d, (i / (n + 1)) * Math.min(len, 45)), size: 0.03, grow: 0.8, life: 0.5 + Math.random() * 0.3, color: [0.8, 0.8, 0.8], alpha: 0.12, drag: 2 });
+      }
+    }
   }
 
   headshot(pos, dir, normal, scale = 1) {
