@@ -132,8 +132,8 @@ Ordered by how much they lift the whole game; one commit each.
       crawling pixels (replaces FXAA/SMAA where it runs).
 - [x] 73. Far shadow cascade: a second, coarse shadow map over ~600 m refreshed every few frames,
       sampled past the near map, so buildings shade the streets into the distance.
-- [ ] 74. City surfaces with life: per-building tint, grime that darkens toward the ground and
-      under ledges, streaks below windows, fine detail normals; no more flat, clean plaster.
+- [x] 74. City surfaces with life: per-building tint, damp blotches, rain streaks down the walls (no ground band: the
+      ground height is not known per pixel; AO covers it), varied roughness and a fine plaster bump.
 - [ ] 75. Ambient traffic: a few cars drive the streets on planned routes (lights at night,
       spray in the rain), stop for people in the road and floor it away from gunfire.
 - [ ] 76. Street acoustics: the reverb follows the place (narrow street, open square, inside),

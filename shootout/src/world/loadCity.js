@@ -78,6 +78,64 @@ export function addWind(m) {
   m.needsUpdate = true;
 }
 
+// Weathered walls: the exported facades are clean and uniform, so every building gets a
+// slight tint of its own (by where it stands), broad damp blotches, rain streaks running
+// down the walls and plaster that isn't perfectly smooth (roughness and a fine bump). All from world-space noise in the shader.
+const WALLS = /^(facade_.*|side_.*|blank_.*|ground_(?!plain).*|parapet|balcony|roof|hoarding)$/;
+const wallDone = new WeakSet();
+export function addWeathering(m) {
+  if (wallDone.has(m) || m.isShaderMaterial) return;
+  wallDone.add(m);
+  const prev = m.onBeforeCompile;
+  m.onBeforeCompile = (sh, r) => {
+    prev?.call(m, sh, r);
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vWeatherWP;\nvarying vec3 vWeatherN;')
+      .replace('#include <project_vertex>', '#include <project_vertex>\n  vWeatherWP = (modelMatrix * vec4(transformed, 1.0)).xyz;\n  vWeatherN = normalize(mat3(modelMatrix) * objectNormal);');
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', `#include <common>
+varying vec3 vWeatherWP;
+varying vec3 vWeatherN;
+float wHash(vec3 p) { return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453); }
+float wNoise(vec3 p) {
+  vec3 i = floor(p), f = fract(p);
+  vec3 u = f * f * (3.0 - 2.0 * f);
+  return mix(mix(mix(wHash(i), wHash(i + vec3(1, 0, 0)), u.x), mix(wHash(i + vec3(0, 1, 0)), wHash(i + vec3(1, 1, 0)), u.x), u.y),
+             mix(mix(wHash(i + vec3(0, 0, 1)), wHash(i + vec3(1, 0, 1)), u.x), mix(wHash(i + vec3(0, 1, 1)), wHash(i + vec3(1, 1, 1)), u.x), u.y), u.z);
+}`)
+      .replace('#include <map_fragment>', `#include <map_fragment>
+  {
+    vec3 wp = vWeatherWP;
+    // a building's own shade: neighbouring blocks differ a little in tone and warmth
+    vec3 cell = floor(vec3(wp.x, 0.0, wp.z) / 14.0);
+    float h = wHash(cell);
+    vec3 tint = mix(vec3(1.04, 1.0, 0.94), vec3(0.94, 0.97, 1.03), h) * (0.92 + 0.12 * wHash(cell + 7.0));
+    // damp blotches, and streaks that run down the wall (stretched noise)
+    float blot = wNoise(wp * 0.35) * 0.6 + wNoise(wp * 1.1) * 0.4;
+    float streak = wNoise(vec3(wp.x * 2.6 + wp.z * 2.6, wp.y * 0.18, 0.0))
+      * smoothstep(0.25, 0.75, wNoise(vec3(wp.x * 0.7 + wp.z * 0.7, wp.y * 0.45, 3.0))); // runs start and stop
+    float vertical = 1.0 - abs(vWeatherN.y); // streaks only on walls
+    float dirt = smoothstep(0.55, 0.9, blot) * 0.16 + smoothstep(0.45, 0.85, streak) * 0.2 * vertical;
+    diffuseColor.rgb *= tint * (1.0 - dirt);
+  }`)
+      .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
+  roughnessFactor = clamp(roughnessFactor * (0.85 + 0.3 * wNoise(vWeatherWP * 3.1)), 0.04, 1.0);`)
+      .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+  {
+    // plaster: a faint bump so light rakes across the wall, not a perfect plane
+    vec3 q = vWeatherWP * 9.0;
+    float e = 0.07;
+    float n0 = wNoise(q);
+    vec3 g = vec3(wNoise(q + vec3(e, 0, 0)) - n0, wNoise(q + vec3(0, e, 0)) - n0, wNoise(q + vec3(0, 0, e)) - n0) / e;
+    vec3 gv = (viewMatrix * vec4(g, 0.0)).xyz;
+    normal = normalize(normal - (gv - dot(gv, normal) * normal) * 0.035);
+  }`);
+  };
+  const key = m.customProgramCacheKey?.bind(m);
+  m.customProgramCacheKey = () => `${key ? key() : m.uuid}-weather`;
+  m.needsUpdate = true;
+}
+
 export function upgradeCityMaterials(root) {
   const done = new Map();
   root.traverse((o) => {
@@ -126,6 +184,7 @@ export async function loadCity(scene, renderer, folder = 'dizengoff-center') {
     }
     const m = o.material, u = m.userData;                // glTF extras
     if (FOLIAGE.test(m.name || '')) addWind(m);
+    if (WALLS.test(m.name || '')) addWeathering(m);
     for (const k of ['map','normalMap','emissiveMap']) if (m[k]) m[k].anisotropy = Math.min(8, max);
     if (u.night_emissive) nightMats.push(m);
     if (u.hours) shutters.push({mesh: o, hours: u.hours, show: u.show}); // hours = [startMin, endMin] wraps midnight
