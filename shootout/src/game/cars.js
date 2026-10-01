@@ -56,6 +56,7 @@ export const SCOOTER = {
 };
 
 const specOf = (car) => car?.spec || CAR;
+const hpMax = (car) => (car?.spec ? 35 : 100);
 // a city car's own footprint (from the bake), else its spec's
 const sizeOf = (car) => (car?.hl ? { halfL: car.hl, halfW: car.hw } : specOf(car));
 export { sizeOf };
@@ -204,7 +205,7 @@ export function exitOf(car, side = 1) {
 }
 
 export function canEnter(px, pz, car) {
-  if (!car || car.driver) return false;
+  if (!car || car.driver || car.wrecked) return false;
   return Math.hypot(px - car.x, pz - car.z) < specOf(car).enterR;
 }
 
@@ -212,7 +213,7 @@ export function nearestEnter(px, pz, cars) {
   let best = null;
   let bestD = Infinity;
   for (const car of cars) {
-    if (car.driver) continue;
+    if (car.driver || car.wrecked) continue;
     const d = Math.hypot(px - car.x, pz - car.z);
     if (d < specOf(car).enterR && d < bestD) {
       best = car;
@@ -1011,6 +1012,11 @@ export class Cars {
     const car = this.byId(id);
     if (!car) return;
     if (car.body) car.body.rest = false;
+    if (Number.isFinite(snap.hp) && !car.wrecked) {
+      car.hp = Math.min(car.hp ?? hpMax(car), snap.hp);
+      if (car.hp <= 0 && !(car.burnT > 0)) car.burnT = 1 + Math.random();
+    }
+    if (snap.a === 'hp') return;
     if (Array.isArray(snap.p) && snap.p.length === 3) {
       car.x = snap.p[0];
       car.y = snap.p[1];
@@ -1189,7 +1195,7 @@ export class Cars {
           this.placeMesh(car);
         } else if (!car.driver && car.slide && (Math.abs(car.slide.x) + Math.abs(car.slide.z) > 0.03 || Math.abs(car.slide.spin) > 0.02)) {
           this.slideFree(car, dt);
-        } else if (!car.driver && car.body?.rest) {
+        } else if (!car.driver && car.body?.rest && !(car.hp < hpMax(car) * 0.6)) {
           continue; // parked and settled on its springs: nothing to do until something moves it
         } else {
           this.refreshSeat(car);
@@ -1206,6 +1212,7 @@ export class Cars {
       if (car.wheelRig) car.wheelRig.rotation.z = -(car.steer || 0) * 0.65;
       if (car.cluster) paintCluster(car.cluster, car.speed, !!car.driver);
       this.bodyMotion(car, dt);
+      if (car.hp < hpMax(car) * 0.6 || car.wrecked) this.updateDamage(car, dt);
       car.lights.emissiveIntensity = car.driver ? 1.15 : 0.45;
       car.tails.emissiveIntensity = car.speed < -0.4 || (car.driver?.isPlayer && input?.back) ? 1.2 : 0.4;
     }
@@ -1269,6 +1276,7 @@ export class Cars {
         this.world.audio?.impact?.('metal', 0);
         this.world.player?.kick?.(0, Math.min(3, hard * 0.2));
       }
+      if (hard > 7) this.damage(car, (hard - 7) * 3, car.driver);
     }
     car.vel.set(fx * car.speed, 0, fz * car.speed);
   }
@@ -1307,8 +1315,82 @@ export class Cars {
           this.world.audio?.impact?.('metal', 0);
           this.world.player?.kick?.(0, Math.min(3, -into * 0.25));
         }
+        if (-into > 6) { // a hard crash hurts both
+          const dmg = (-into - 6) * 3;
+          this.damage(car, dmg, car.driver);
+          this.damage(other, dmg, car.driver);
+        }
       }
     }
+  }
+
+  // ---- damage: smoke, fire, explosion, wreck ---------------------------------------
+
+  /** Wears a car down; at zero it catches fire and blows a few seconds later. */
+  damage(car, amount, attacker = null, { silent = false } = {}) {
+    if (!car || car.wrecked || !(amount > 0)) return;
+    if (car.hp === undefined) car.hp = hpMax(car);
+    car.hp = Math.max(0, car.hp - amount);
+    if (attacker) car.lastHitBy = attacker;
+    if (car.body) car.body.rest = false;
+    if (car.hp <= 0 && !(car.burnT > 0)) car.burnT = car.spec ? 1.2 : 3.5 + Math.random() * 1.5;
+    if (!silent && attacker?.isPlayer) this.world.session?.reportCar?.('hp', { i: car.id, hp: Math.round(car.hp) });
+  }
+
+  // Smoke from the engine bay as a car weakens, then flames, then the blast.
+  updateDamage(car, dt) {
+    const fx = this.world.fx;
+    const max = hpMax(car), frac = (car.hp ?? max) / max;
+    const fwd = localOffset(car.x, car.z, car);
+    const front = car.spec ? 0 : sizeOf(car).halfL * 0.72;
+    const at = new THREE.Vector3(car.x + fwd.fwdX * front, car.y + (car.spec ? 0.4 : 0.85), car.z + fwd.fwdZ * front);
+    car.fxT = (car.fxT || 0) - dt;
+    if (fx?.alpha && car.fxT <= 0) {
+      const burning = car.burnT > 0 || car.wrecked;
+      car.fxT = car.wrecked ? 0.18 : burning ? 0.035 : frac < 0.3 ? 0.06 : 0.12;
+      const dark = frac < 0.3 || burning;
+      fx.alpha.spawn({
+        pos: at.clone().add(new THREE.Vector3((Math.random() - 0.5) * 0.4, 0, (Math.random() - 0.5) * 0.4)),
+        vel: new THREE.Vector3((Math.random() - 0.5) * 0.4, 1.2 + Math.random() * 0.8, (Math.random() - 0.5) * 0.4).add(car.vel.clone().multiplyScalar(0.3)),
+        size: dark ? 0.5 : 0.35, grow: dark ? 2.6 : 1.8, life: dark ? 2.6 : 1.6,
+        color: dark ? [0.06, 0.06, 0.06] : [0.7, 0.7, 0.7], alpha: dark ? 0.55 : 0.32, drag: 0.6, gravity: -0.25,
+      });
+      if (burning && fx.add && !car.wrecked) {
+        for (let i = 0; i < 2; i++) {
+          fx.add.spawn({
+            pos: at.clone().add(new THREE.Vector3((Math.random() - 0.5) * 0.7, Math.random() * 0.2, (Math.random() - 0.5) * 0.7)),
+            vel: new THREE.Vector3((Math.random() - 0.5) * 0.5, 1.6 + Math.random() * 1.5, (Math.random() - 0.5) * 0.5),
+            size: 0.28 + Math.random() * 0.3, grow: 0.6, life: 0.35 + Math.random() * 0.3, color: [70, 26, 5], drag: 1.5, gravity: -1,
+          });
+        }
+      }
+    }
+    if (car.burnT > 0) {
+      car.burnT -= dt;
+      if (car.burnT <= 0) this.wreck(car);
+    }
+  }
+
+  wreck(car) {
+    if (car.wrecked) return;
+    car.wrecked = true;
+    car.hp = 0;
+    car.burnT = 0;
+    car.speed = 0;
+    car.vel.set(0, 0, 0);
+    const pos = new THREE.Vector3(car.x, car.y + 0.7, car.z);
+    const { world } = this;
+    if (car.driver?.isPlayer) this.ejectLocal(car.driver);
+    world.fx?.explosion(pos, 'ground');
+    const cam = world.player?.camera?.position;
+    world.audio?.explosion?.(cam ? cam.distanceTo(pos) : 10, 0, false);
+    if (car.body) { car.body.rest = false; car.body.pv -= car.spec ? 0 : 2.5; car.body.rv += (Math.random() - 0.5) * 2; }
+    this.applyGlass(car, 63);
+    // charred: every part of it in the batch turns near black
+    const char = new THREE.Color(0.1, 0.09, 0.085);
+    for (const p of car.batched || []) p.batch.setColorAt(p.id, char);
+    if (!car.batched) car.mesh.traverse((o) => { if (o.isMesh && o.material?.color) { o.material = o.material.clone(); o.material.color.multiplyScalar(0.12); } });
+    world.combat?.explode(world, pos, car.spec ? 4 : 7.5, car.spec ? 60 : 110, car.lastHitBy || null, { weapon: 'car' });
   }
 
   // An explosion: empty cars and scooters nearby are thrown away from it and spun, and
@@ -1320,6 +1402,7 @@ export class Cars {
       const d = Math.hypot(dx, dz);
       if (d > radius || Math.abs(car.y - pos.y) > 4) continue;
       const k = Math.pow(1 - d / radius, 1.3);
+      if (d > 0.5) this.damage(car, 95 * k, null, { silent: true }); // chain reactions too
       if (!car.driver) {
         const push = (car.spec ? 11 : 4.5) * k;
         const nx = d > 1e-3 ? dx / d : 1, nz = d > 1e-3 ? dz / d : 0;

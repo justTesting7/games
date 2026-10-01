@@ -39,6 +39,23 @@ the whole district, so frustum culling never skips any of it, and the shadow pas
 - [x] 19. Explosions shove nearby cars and scooters and shatter their windows.
 - [ ] 18. Rival drivers: rivals take cars to close distance / flee.
 
+## Phase 2 (2026-10-01): 3x more impressive, visually and physically
+- [x] 20. Cars take damage: shots and crashes wear them down; smoke from the bonnet, then fire,
+      then the car explodes (blast physics, glass, nearby cars thrown), burnt-out shell; synced.
+- [ ] 21. Driving physics: grip and slip per axle (bicycle model), handbrake drift (Space),
+      weight transfer, speed-sensitive steering, tyre smoke and skid marks on the road.
+- [ ] 22. Impact debris: chips that bounce off the ground for concrete/wood, sparks for metal,
+      glass shards; dust puffs on ground hits.
+- [ ] 23. Rifle rounds travel (~800 m/s) with drop and a visible tracer; long shots lead.
+- [ ] 24. Rivals drive: a rival far from the fight takes a nearby car to close distance.
+- [ ] 25. Temporal anti-aliasing (or SMAA) instead of FXAA for stable edges on foliage and rails.
+- [ ] 26. Night: streetlights and car headlights as real light (a few nearest lights live).
+- [ ] 27. Camera feel: speed FOV and shake on impacts, landing dip, damage vignette and
+      directional hit indicator.
+- [ ] 28. Dropped weapons: the dead fighter's guns fall and bounce instead of staying on the body.
+- [ ] 29. Muzzle smoke and heat haze after sustained fire; explosion smoke columns that drift.
+- [ ] 30. Footstep dust and splashes by surface; bodies and cars leave scuffs.
+
 ## Log
 - Tel Aviv frame, same view: 10.4 ms / 1684 calls (baseline) -> 6.0 ms / 1078 calls after
   chunking (256 m cells), car batching and no shadows from flat ground.

@@ -319,6 +319,7 @@ export class Weapons {
     } else {
       this.fx.impact(end, hit.normal, hit.surface, dir);
       if (!hit.car && !hit.drone) this.fx.bulletHole?.(end, hit.normal, hit.surface);
+      if (hit.car) this.world.cars?.damage(hit.car, rifle ? 16 : 4, shooter);
       this.audio.impact(hit.surface, hitDist);
       if (hit.surface !== 'water') this.bounceOff(shooter, end, dir, hit);
     }

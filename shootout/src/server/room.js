@@ -338,6 +338,12 @@ export class GameRoom extends DurableObject {
     const p = Array.isArray(msg.p) ? msg.p.slice(0, 3).map(num) : mine.p;
     const yaw = num(msg.yaw);
     const spd = num(msg.spd);
+    if (act === 'hp') { // damage to any car, smoke to wreck
+      const hp = Math.max(0, Math.min(100, Math.round(num(msg.hp))));
+      this.fleet[i] = { ...(this.fleet[i] || { p, yaw, spd: 0 }), hp: Math.min(hp, this.fleet[i]?.hp ?? 100) };
+      this.broadcast(ws, { t: 'car', a: 'hp', id: mine.id, i, hp: this.fleet[i].hp });
+      return;
+    }
     if (act === 'glass') {
       const g = Math.max(0, Math.min(63, Math.round(num(msg.g))));
       this.fleet[i] = { ...(this.fleet[i] || { p, yaw, spd: 0 }), g };
@@ -359,7 +365,7 @@ export class GameRoom extends DurableObject {
     } else {
       return;
     }
-    this.fleet[i] = { p, yaw, spd: act === 'out' ? 0 : spd, g: this.fleet[i]?.g || 0 };
+    this.fleet[i] = { p, yaw, spd: act === 'out' ? 0 : spd, g: this.fleet[i]?.g || 0, hp: this.fleet[i]?.hp };
     this.broadcast(ws, { t: 'car', a: act, id: mine.id, i, p, yaw, spd: this.fleet[i].spd, g: this.fleet[i].g });
   }
 
