@@ -416,6 +416,7 @@ async function init() {
     const before = weather.amount;
     weather.amount += Math.sign(weatherGoal - weather.amount) * Math.min(Math.abs(weatherGoal - weather.amount), dt / 4);
     pipeline.weather = weather.amount;
+    pipeline.wet = weather.amount;
     pipeline.fogMaterial.uniforms.uFogDensity.value = baseFog * (1 + 2.2 * weather.amount);
     if (Math.abs(before - weather.amount) > 1e-4 || weather.wetMats === null) weather.wet(studio?.root || arena?.group || city?.group, weather.amount);
     weather.update(dt, camera, pipeline.lightColor, { fx, heightAt: (x, z) => terrain.heightAt(x, z), at: player.pos });

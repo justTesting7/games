@@ -711,3 +711,58 @@ void main() {
   gl_FragColor = vec4(sum / 8.0, viewZ);
 }
 `;
+
+// Wet streets mirror the city: for upward-facing pixels, march the reflected ray through
+// the depth the scene keeps in alpha and add what it finds, weighted by Fresnel and
+// wetness. Additive into the scene target (the alpha, i.e. depth, is left alone).
+export const wetReflectFrag = /* glsl */ `
+varying vec2 vUv;
+uniform sampler2D tColor;   // the opaque scene (rgb) with view distance in alpha
+uniform mat4 uInvViewProj;
+uniform mat4 uViewProj;
+uniform vec3 uCamPos;
+uniform vec3 uCamForward;
+uniform vec2 uTexel;
+uniform float uWet;
+
+vec3 worldAt(vec2 uv, float viewZ) {
+  vec4 far = uInvViewProj * vec4(uv * 2.0 - 1.0, 1.0, 1.0);
+  vec3 dir = normalize(far.xyz / far.w - uCamPos);
+  return uCamPos + dir * (viewZ / max(dot(dir, uCamForward), 1e-3));
+}
+
+void main() {
+  float d = texture(tColor, vUv).a;
+  if (d <= 0.05 || d > 120.0) { gl_FragColor = vec4(0.0); return; }
+  vec3 P = worldAt(vUv, d);
+  vec3 Px = worldAt(vUv + vec2(uTexel.x, 0.0), texture(tColor, vUv + vec2(uTexel.x, 0.0)).a);
+  vec3 Py = worldAt(vUv + vec2(0.0, uTexel.y), texture(tColor, vUv + vec2(0.0, uTexel.y)).a);
+  vec3 N = normalize(cross(Py - P, Px - P));
+  if (N.y < 0.0) N = -N;
+  if (N.y < 0.9) { gl_FragColor = vec4(0.0); return; }
+  N = vec3(0.0, 1.0, 0.0); // streets are flat enough: keep the mirror clean
+  vec3 V = normalize(P - uCamPos);
+  vec3 R = reflect(V, N);
+  vec3 hitCol = vec3(0.0);
+  float found = 0.0;
+  float t = 0.25;
+  for (int i = 0; i < 28; i++) {
+    t *= 1.18;
+    vec3 q = P + R * t;
+    vec4 clip = uViewProj * vec4(q, 1.0);
+    if (clip.w <= 0.0) break;
+    vec2 uv = clip.xy / clip.w * 0.5 + 0.5;
+    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) break;
+    float sceneZ = texture(tColor, uv).a;
+    float qz = dot(q - uCamPos, uCamForward);
+    if (qz > sceneZ + 0.05 && qz < sceneZ + 1.5 + t * 0.15) {
+      hitCol = texture(tColor, uv).rgb;
+      vec2 e = min(uv, 1.0 - uv);
+      found = clamp(min(e.x, e.y) * 8.0, 0.0, 1.0) * (1.0 - float(i) / 28.0);
+      break;
+    }
+  }
+  float fres = 0.04 + 0.96 * pow(1.0 - clamp(dot(-V, N), 0.0, 1.0), 5.0);
+  gl_FragColor = vec4(hitCol * found * uWet * (0.3 + 0.7 * fres), 0.0);
+}
+`;

@@ -236,6 +236,12 @@ export class Pipeline {
       uCamPos: { value: new THREE.Vector3() }, uCamForward: { value: new THREE.Vector3() }, uStrength: { value: 0 },
     });
     this.prevViewProj = new THREE.Matrix4();
+    this.wetMaterial = fsMaterial(S.wetReflectFrag, {
+      tColor: { value: null }, uInvViewProj: { value: new THREE.Matrix4() }, uViewProj: { value: new THREE.Matrix4() },
+      uCamPos: { value: new THREE.Vector3() }, uCamForward: { value: new THREE.Vector3() },
+      uTexel: { value: new THREE.Vector2() }, uWet: { value: 0 },
+    }, { transparent: true, blending: THREE.CustomBlending, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor, blendSrcAlpha: THREE.ZeroFactor, blendDstAlpha: THREE.OneFactor });
+    this.wet = 0; // 0..1, set by the game (rain)
     this.motion = 0; // 0..1, set by the game (fast driving)
     this.bloomDown = fsMaterial(S.bloomDownFrag, {
       tSrc: { value: null }, uTexel: { value: new THREE.Vector2() }, uFirst: { value: false },
@@ -491,6 +497,18 @@ export class Pipeline {
     this.copyMaterial.uniforms.tDiffuse.value = this.sceneRT.texture;
     this.quad.render(r, this.copyMaterial, this.copyRT);
     const aoTex = this.quality.ao ? this.renderAO(camera) : null;
+    // rain: the streets mirror the city (screen-space, added onto the scene)
+    if (this.wet > 0.05 && this.quality.ssr > 0 && !this.mobile) {
+      const wu = this.wetMaterial.uniforms;
+      wu.tColor.value = this.copyRT.texture;
+      wu.uInvViewProj.value.copy(invVP);
+      wu.uViewProj.value.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+      wu.uCamPos.value.copy(camera.position);
+      camera.getWorldDirection(wu.uCamForward.value);
+      wu.uTexel.value.set(1 / W, 1 / H);
+      wu.uWet.value = this.wet;
+      this.quad.render(r, this.wetMaterial, this.sceneRT);
+    }
     this.waterMaterial.uniforms.uSceneTex.value = this.copyRT.texture;
     this.waterMaterial.uniforms.uProj.value.copy(camera.projectionMatrix);
     r.setRenderTarget(this.sceneRT);

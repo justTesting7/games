@@ -75,6 +75,8 @@ the whole district, so frustum culling never skips any of it, and the shadow pas
 - [x] 42. Speed blur at the wheel: reprojection motion blur from the depth in alpha, ramping in
       from ~8 m/s, off on foot so aiming stays crisp.
 - [x] 43. Blasts blow in the shop and office windows around them (BVH shapecast for glass).
+- [x] 44. Rain: wet streets mirror the city (screen-space reflection marched through the depth
+      in alpha, Fresnel-weighted, edge-faded; Medium and up).
 
 ## Log
 - Tel Aviv load (local, cached): ready in ~8 s; main-thread stages: decode 1.6 s, seam clip 1.0,
