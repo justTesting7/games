@@ -1497,7 +1497,7 @@ export class Cars {
     // heat haze over the fire, and over a burnt-out shell while it cools
     const haze = this.world.haze;
     if (haze) {
-      if (car.burnT > 0) haze.add(at, car.spec ? 0.9 : 1.7, 3.2, 1);
+      if (car.burnT > 0) { haze.add(at, car.spec ? 0.9 : 1.7, 3.2, 1); this.world.fx?.fire?.(at, car.spec ? 0.6 : 1); }
       else if (car.wrecked) {
         car.coolT = (car.coolT || 0) + dt;
         if (car.coolT < 40) haze.add(new THREE.Vector3(car.x, car.y + 0.9, car.z), 2.2, 3.5, 0.9 * (1 - car.coolT / 40));

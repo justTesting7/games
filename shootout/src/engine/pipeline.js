@@ -159,6 +159,10 @@ export class Pipeline {
     // it never changes the light count and never triggers shader recompiles.
     this.flashLight = new THREE.PointLight(0xffb060, 0, 14, 2);
     this.scene.add(this.flashLight);
+    // the strongest fire nearby (a burning car, a blast site) flickers on its surroundings;
+    // always in the scene so lighting a fire never recompiles the materials
+    this.fireLight = new THREE.PointLight(0xff7a2a, 0, 18, 2);
+    this.scene.add(this.fireLight);
 
     this.u = {
       uSkyTex: { value: this.skyRT.texture },

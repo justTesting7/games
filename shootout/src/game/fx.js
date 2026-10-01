@@ -558,7 +558,7 @@ export class Effects {
       const k = 1 - e.t / e.dur;
       const every = 0.06 / Math.max(0.2, k);
       // the ground still burns hot for a while: the air over it shimmers
-      if (e.t < 6) this.haze?.add(e.pos, 2.4, 4.5, (1 - e.t / 6) * 1.2);
+      if (e.t < 6) { this.haze?.add(e.pos, 2.4, 4.5, (1 - e.t / 6) * 1.2); this.fire(e.pos, (1 - e.t / 6) * 0.8); }
       while (e.acc > every) {
         e.acc -= every;
         this.alpha.spawn({
@@ -572,7 +572,27 @@ export class Effects {
     });
   }
 
+  /** A fire burning this frame at pos, strength k 0..1 (the strongest lights the street). */
+  fire(pos, k) {
+    if (!this.fireBest || k > this.fireBest.k) this.fireBest = { pos: pos.clone(), k };
+  }
+
+  updateFireLight(dt) {
+    const L = this.pipeline.fireLight;
+    if (!L) return;
+    const f = this.fireBest;
+    this.fireBest = null;
+    this.fireT = (this.fireT || 0) + dt;
+    if (!f) { L.intensity = 0; return; }
+    // flames flicker: two beating rates and a little jitter, the light dancing with them
+    const t = this.fireT;
+    const flick = 0.72 + 0.18 * Math.sin(t * 17.3) * Math.sin(t * 5.1 + 1.3) + 0.1 * Math.random();
+    L.position.set(f.pos.x + Math.sin(t * 7.7) * 0.12, f.pos.y + 0.5 + Math.sin(t * 9.1) * 0.08, f.pos.z + Math.cos(t * 6.3) * 0.12);
+    L.intensity = 260 * f.k * flick;
+  }
+
   update(dt) {
+    this.updateFireLight(dt);
     this.fireballs.update(dt);
     this.updateEmitters(dt);
     this.skids.update(dt);
