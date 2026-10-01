@@ -102,6 +102,11 @@ the whole district, so frustum culling never skips any of it, and the shadow pas
 - [x] 59. Lamp light cones: at night (and in rain) a soft visible cone under each streetlamp.
 - [x] 60. Wet fighters: clothes and skin darken and gloss in the rain.
 
+- [x] 61. Blast shockwave: a ring of refraction races out from every explosion.
+- [ ] 62. Pigeons: flocks peck about the squares by day and burst into the air at gunfire, blasts
+      or anyone running through them, wheel round and settle again.
+- [ ] 63. Rain on the windscreen in the cockpit view: drops bead and run, wipers sweep them.
+
 ## Log
 - Tel Aviv load (local, cached): ready in ~8 s; main-thread stages: decode 1.6 s, seam clip 1.0,
   cars 0.4, shot BVH 1.5, chunking 1.3.

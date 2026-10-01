@@ -9,9 +9,9 @@ import * as S0 from '../src/engine/shaders.js';
 import { FXAAShader } from 'three/addons/shaders/FXAAShader.js';
 import { fireballShaders } from '../src/game/fireball.js';
 import { rainShaders } from '../src/world/weather.js';
-import { hazeShaders } from '../src/engine/haze.js';
+import { hazeShaders, waveShaders } from '../src/engine/haze.js';
 import { coneShaders } from '../src/world/nightLights.js';
-const S = { ...S0, fxaaFrag: FXAAShader.fragmentShader, fireballVert: fireballShaders.vert, fireballFrag: fireballShaders.frag, rainVert: rainShaders.vert, rainFrag: rainShaders.frag, hazeVert: hazeShaders.vert, hazeFrag: hazeShaders.frag, coneVert: coneShaders.vert, coneFrag: coneShaders.frag };
+const S = { ...S0, fxaaFrag: FXAAShader.fragmentShader, fireballVert: fireballShaders.vert, fireballFrag: fireballShaders.frag, rainVert: rainShaders.vert, rainFrag: rainShaders.frag, hazeVert: hazeShaders.vert, hazeFrag: hazeShaders.frag, coneVert: coneShaders.vert, coneFrag: coneShaders.frag, waveVert: waveShaders.vert, waveFrag: waveShaders.frag };
 
 try { execFileSync('glslangValidator', ['--version'], { stdio: 'ignore' }); } catch {
   console.log('skip: glslangValidator not installed');

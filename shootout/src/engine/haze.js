@@ -93,3 +93,84 @@ export class Haze {
     this.n = 0;
   }
 }
+
+// A blast's shockwave: a ring of compressed air racing out from the centre, bending the
+// scene behind it outward as it passes. A camera-facing quad per blast, drawn like the haze.
+const waveVert = /* glsl */ `
+uniform float uSize;
+varying vec2 vUv;
+varying float vDepth;
+void main() {
+  vec4 c = viewMatrix * modelMatrix * vec4(0.0, 0.0, 0.0, 1.0);
+  vec4 mv = c + vec4(position.xy * uSize, 0.0, 0.0);
+  vUv = position.xy * 2.0; // -1..1 across the quad
+  vDepth = -mv.z;
+  gl_Position = projectionMatrix * mv;
+}`;
+
+const waveFrag = /* glsl */ `
+uniform sampler2D uScene;
+uniform vec2 uRes;
+uniform float uR;   // ring radius, 0..1 of the quad
+uniform float uK;   // strength
+varying vec2 vUv;
+varying float vDepth;
+void main() {
+  float r = length(vUv);
+  if (r > 1.0) discard;
+  float band = (r - uR) / 0.07;
+  float ring = exp(-band * band) * sign(band + 0.0001) * -1.0; // pushes out ahead of the front, in behind it
+  vec2 dir = r > 1e-4 ? vUv / r : vec2(0.0);
+  vec2 suv = gl_FragCoord.xy / uRes + dir * ring * uK * 0.6 / max(vDepth, 3.0);
+  gl_FragColor = vec4(texture(uScene, suv).rgb, 1.0);
+}`;
+
+export const waveShaders = { vert: waveVert, frag: waveFrag };
+
+export class Shockwaves {
+  constructor(scene, count = 4) {
+    const geo = new THREE.PlaneGeometry(1, 1);
+    this.items = Array.from({ length: count }, () => {
+      const mat = new THREE.ShaderMaterial({
+        vertexShader: waveVert, fragmentShader: waveFrag, depthWrite: false, transparent: true,
+        uniforms: { uScene: { value: null }, uRes: { value: new THREE.Vector2() }, uR: { value: 0 }, uK: { value: 0 }, uSize: { value: 1 } },
+      });
+      mat.blending = THREE.CustomBlending;
+      mat.blendSrc = THREE.OneFactor;
+      mat.blendDst = THREE.ZeroFactor;
+      mat.blendSrcAlpha = THREE.ZeroFactor;
+      mat.blendDstAlpha = THREE.OneFactor;
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.frustumCulled = false;
+      mesh.visible = false;
+      mesh.renderOrder = 6;
+      scene.add(mesh);
+      return { mesh, mat, t: 1, max: 14 };
+    });
+    this.next = 0;
+  }
+
+  spawn(pos, max = 14) {
+    const w = this.items[this.next];
+    this.next = (this.next + 1) % this.items.length;
+    w.mesh.position.copy(pos);
+    w.t = 0;
+    w.max = max;
+  }
+
+  /** Before the pass that draws them. */
+  flush(dt, sceneTex, w, h) {
+    for (const it of this.items) {
+      it.t += dt;
+      const life = 0.45, a = it.t / life;
+      it.mesh.visible = a < 1;
+      if (!it.mesh.visible) continue;
+      const u = it.mat.uniforms;
+      u.uSize.value = it.max * 2;
+      u.uR.value = 1 - Math.pow(1 - a, 2.2); // fast out, slowing
+      u.uK.value = (1 - a) * 1.6;
+      u.uScene.value = sceneTex;
+      u.uRes.value.set(w, h);
+    }
+  }
+}
