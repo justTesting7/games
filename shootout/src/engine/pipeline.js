@@ -984,7 +984,7 @@ export class Pipeline {
       this.quad.render(r, this.fxaaMaterial, null);
     } else this.quad.render(r, this.compositeMaterial, null);
     if (splitVp) {
-      r.setViewport(0, 0, r.domElement.clientWidth, r.domElement.clientHeight);
+      r.setViewport(0, 0, ...(this.cssSize || [r.domElement.clientWidth, r.domElement.clientHeight]));
       r.setScissorTest(false);
     }
     this.profFrame();
@@ -995,8 +995,7 @@ export class Pipeline {
   }
 
   renderSplit(leftCam, rightCam, dt, opts = {}) {
-    const w = this.renderer.domElement.clientWidth;
-    const h = this.renderer.domElement.clientHeight;
+    const [w, h] = this.cssSize || [this.renderer.domElement.clientWidth, this.renderer.domElement.clientHeight];
     const hw = Math.max(1, Math.floor(w / 2));
     this.render(leftCam, dt, { ...opts, outViewport: [0, 0, hw, h] });
     this.render(rightCam, 0, { ...opts, outViewport: [hw, 0, w - hw, h] });

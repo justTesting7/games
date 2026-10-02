@@ -30,9 +30,15 @@ export function radarBlips(self, yaw, others, range = RADAR_RANGE) {
   return out;
 }
 
+let resizes = 0;
+if (typeof window !== 'undefined') window.addEventListener('resize', () => { resizes++; });
+
 function fitCanvas(canvas) {
   const dpr = Math.min(2, typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1);
-  const css = canvas.clientWidth || 148;
+  // the CSS size is read only after a resize: reading it every frame forces a layout of
+  // the page right after the HUD's writes
+  if (!canvas._css || canvas._cssFor !== resizes) { canvas._css = canvas.clientWidth || 148; canvas._cssFor = resizes; }
+  const css = canvas._css;
   const size = Math.max(64, Math.round(css * dpr));
   if (canvas.width !== size || canvas.height !== size) {
     canvas.width = size;

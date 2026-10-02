@@ -231,6 +231,9 @@ export function carOverlap(px, pz, py, car, pad = 0) {
 }
 
 export function resolveCarBox(pos, radius, car) {
+  const S = sizeOf(car), reach = Math.max(S.halfL, S.halfW) * 1.42 + radius;
+  const dx = pos.x - car.x, dz = pos.z - car.z;
+  if (dx * dx + dz * dz > reach * reach) return false;
   const { along, side, fwdX, fwdZ, rightX, rightZ } = localOffset(pos.x, pos.z, car);
   const hl = sizeOf(car).halfL + radius;
   const hw = sizeOf(car).halfW + radius;
@@ -442,6 +445,14 @@ export function rayTriangles(o, d, pos, maxDist) {
 
 export function hitCar(origin, dir, car, maxDist, opts = {}) {
   if (!car || maxDist <= 0) return null;
+  { // broad phase: the ray against a sphere round the whole car
+    const S = sizeOf(car);
+    const r = Math.sqrt(S.halfL * S.halfL + S.halfW * S.halfW) + 1.2;
+    const cx = car.x - origin.x, cy = car.y + 0.8 - origin.y, cz = car.z - origin.z;
+    const t = THREE.MathUtils.clamp(cx * dir.x + cy * dir.y + cz * dir.z, 0, maxDist);
+    const ex = cx - dir.x * t, ey = cy - dir.y * t, ez = cz - dir.z * t;
+    if (ex * ex + ey * ey + ez * ez > r * r) return null;
+  }
   const basis = localOffset(origin.x, origin.z, car);
   const o = { x: basis.side, y: origin.y - car.y, z: basis.along };
   const d = {

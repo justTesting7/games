@@ -42,7 +42,13 @@ import { CITY_WIND } from './world/loadCity.js';
 import { createGameRenderer } from './engine/webgl.js';
 import { RADAR_RANGE, radarBlips, radarSubjects, drawRadar } from './game/radar.js';
 
-const $ = (id) => document.getElementById(id);
+const $cache = {};
+const $ = (id) => $cache[id] || ($cache[id] = document.getElementById(id));
+// HUD writes made every frame touch the page only when the value changes (each write
+// invalidates style and layout over the canvas, even when it sets the same thing)
+const setText = (el, v) => { v = String(v); if (el.textContent !== v) el.textContent = v; };
+const setVar = (el, k, v) => { if (el.style.getPropertyValue(k) !== v) el.style.setProperty(k, v); };
+const setStyle = (el, k, v) => { v = String(v); if (el.style[k] !== v) el.style[k] = v; };
 const menu = $('menu');
 menu.classList.add('loading');
 
@@ -888,14 +894,14 @@ async function init() {
       t.seen = t.visible ? 1 : Math.max(0, t.seen - dt * 2);
       tagPos.copy(f.alive ? f.head : f.pos).y += f.alive ? 0.42 : 0.6;
       tagPos.project(camera);
-      if (t.seen <= 0 || tagPos.z > 1) { t.el.style.opacity = 0; continue; }
-      t.el.style.opacity = (f.alive ? 1 : 0.55) * t.seen;
-      t.el.style.transform = `translate(${((tagPos.x + 1) / 2) * innerWidth}px, ${((1 - tagPos.y) / 2) * innerHeight}px) translate(-50%, -100%)`;
-      t.bar.style.width = `${(f.health / MAX_HEALTH) * 100}%`;
-      if (!f.alive) t.info.textContent = 'eliminated';
-      else if (mode === 'multi') t.info.textContent = `${WEAPONS[f.loadout.current]?.short || ''} · ${t.r.away ? 'away' : 'human'}`;
+      if (t.seen <= 0 || tagPos.z > 1) { setStyle(t.el, 'opacity', 0); continue; }
+      setStyle(t.el, 'opacity', +((f.alive ? 1 : 0.55) * t.seen).toFixed(2));
+      setStyle(t.el, 'transform', `translate(${Math.round(((tagPos.x + 1) / 2) * innerWidth)}px, ${Math.round(((1 - tagPos.y) / 2) * innerHeight)}px) translate(-50%, -100%)`);
+      setStyle(t.bar, 'width', `${Math.round((f.health / MAX_HEALTH) * 100)}%`);
+      if (!f.alive) setText(t.info, 'eliminated');
+      else if (mode === 'multi') setText(t.info, `${WEAPONS[f.loadout.current]?.short || ''} · ${t.r.away ? 'away' : 'human'}`);
       else {
-        t.info.textContent = `${WEAPONS[f.loadout.current].short} · ${t.r.label}${t.r.target ? ` → ${t.r.target.isPlayer ? 'you' : t.r.target.name}` : ''} · ${t.r.source === 'jev' ? `Jev ${Math.round(t.r.confidence * 100)}%` : 'local AI'}`;
+        setText(t.info, `${WEAPONS[f.loadout.current].short} · ${t.r.label}${t.r.target ? ` → ${t.r.target.isPlayer ? 'you' : t.r.target.name}` : ''} · ${t.r.source === 'jev' ? `Jev ${Math.round(t.r.confidence * 100)}%` : 'local AI'}`);
       }
     }
   };
@@ -1146,7 +1152,7 @@ async function init() {
       const base = def ? (L.current === 'rifle' ? def.hipSpread : def.spread) || 0 : 0;
       const rad = base * weapons.spreadScale();
       const px = rad / Math.tan((camera.fov * Math.PI) / 360) * (innerHeight / 2);
-      $('crosshair').style.setProperty('--gap', `${Math.min(60, 5 + px).toFixed(1)}px`);
+      setVar($('crosshair'), '--gap', `${Math.round(Math.min(60, 5 + px))}px`);
     }
     $('crosshair').classList.toggle('enemy', !!player.aimHit?.fighter);
     $('crosshair').classList.toggle('hidden', !alive || player.scopeT > 0.35 || dying || driving);
@@ -1155,21 +1161,21 @@ async function init() {
     $('scope').classList.toggle('show', scoped);
     $('scope').classList.toggle('steady', scoped && player.holdingBreath);
     if (scoped) {
-      $('scopedist').textContent = `${Math.round(player.aimPoint.distanceTo(player.pos))} m`;
-      $('scopehint').textContent = player.holdingBreath ? 'steady' : player.breath < 0.08 ? 'out of breath' : 'release to fire · shift steadies';
-      $('breathbar').style.setProperty('--pct', `${(player.breath * 100).toFixed(0)}%`);
+      setText($('scopedist'), `${Math.round(player.aimPoint.distanceTo(player.pos))} m`);
+      setText($('scopehint'), player.holdingBreath ? 'steady' : player.breath < 0.08 ? 'out of breath' : 'release to fire · shift steadies');
+      setVar($('breathbar'), '--pct', `${(player.breath * 100).toFixed(0)}%`);
     }
     const L = player.fighter.loadout;
     const wdef = WEAPONS[L.current];
-    $('ammo').textContent = L.current === 'grenade' ? `${L.grenades}`
-      : L.current === 'drone' ? `${L.drones}` : `${L.mag[L.current]} / ${L.reserve[L.current]}`;
-    $('weaponname').textContent = spec
+    setText($('ammo'), L.current === 'grenade' ? `${L.grenades}`
+      : L.current === 'drone' ? `${L.drones}` : `${L.mag[L.current]} / ${L.reserve[L.current]}`);
+    setText($('weaponname'), spec
       ? `Spectating ${spec.persona?.name || spec.fighter.name}`
       : driving ? 'driving · E to leave'
       : dying ? 'drone shot down — returning'
       : flying ? 'space to explode · you are exposed'
       : weapons.chargingGrenade ? 'pull back… release to throw'
-      : L.reloading ? 'reloading…' : wdef.name;
+      : L.reloading ? 'reloading…' : wdef.name);
     $('weapon').classList.toggle('reloading', L.reloading);
     $('weapon').classList.toggle('empty', L.current !== 'grenade' && L.current !== 'drone' && L.mag[L.current] === 0);
     const gch = $('grenadecharge');
@@ -1177,7 +1183,7 @@ async function init() {
     gch.classList.toggle('show', charging);
     gch.classList.toggle('full', charging && weapons.grenadeCharge > 0.98);
     const gbar = gch.querySelector('i');
-    if (gbar) gbar.style.setProperty('--pct', charging ? `${(weapons.grenadeCharge * 100).toFixed(0)}%` : '0%');
+    if (gbar) setVar(gbar, '--pct', charging ? `${(weapons.grenadeCharge * 100).toFixed(0)}%` : '0%');
     $('crosshair').classList.toggle('grenade', charging);
     document.querySelectorAll('#slots b').forEach((el, i) => {
       const key = ['pistols', 'rifle', 'grenade', 'drone'][i];
@@ -1192,37 +1198,37 @@ async function init() {
     const range = weapons.drone.range();
     const far = Number.isFinite(DRONE.maxRange) && range > DRONE.maxRange * 0.78;
     if (leftHint) {
-      leftHint.textContent = dying ? 'shot down'
+      setText(leftHint, dying ? 'shot down'
         : far ? `range ${range.toFixed(0)} / ${DRONE.maxRange} m · turn back`
         : Number.isFinite(DRONE.maxRange) ? `range ${range.toFixed(0)} / ${DRONE.maxRange} m · space explode`
-        : `${range.toFixed(0)} m out · space explode`;
+        : `${range.toFixed(0)} m out · space explode`);
     }
-    if (leftTag) leftTag.textContent = dying ? 'signal lost' : far ? 'link fading' : 'drone';
+    if (leftTag) setText(leftTag, dying ? 'signal lost' : far ? 'link fading' : 'drone');
     $('dronesplit').classList.toggle('far', flying && !dying && far);
     const near = weapons.live.some((g) => g.pos.distanceTo(player.pos) < WEAPONS.grenade.radius && g.owner !== player.fighter);
     $('grenadewarn').classList.toggle('show', alive && near);
     const swimEl = $('swimhint');
     if (swimEl) {
       swimEl.classList.toggle('show', alive && player.swimming && !driving);
-      swimEl.textContent = player.diving ? 'F swim up · surface to breathe' : 'F swim up / exit · Ctrl dive';
+      setText(swimEl, player.diving ? 'F swim up · surface to breathe' : 'F swim up / exit · Ctrl dive');
     }
     const carEl = $('carhint');
     if (carEl) {
       const prompt = cars.prompt;
       carEl.classList.toggle('show', alive && !!prompt && !player.swimming);
-      carEl.textContent = prompt?.mode === 'drive'
+      setText(carEl, prompt?.mode === 'drive'
         ? `E ${prompt.kind === 'scooter' ? 'hop off' : 'leave'} · WASD ${prompt.kind === 'scooter' ? 'ride' : 'drive'} · ${Math.abs(prompt.speed).toFixed(0)} m/s`
-        : `E ${prompt?.car?.kind === 'scooter' ? 'ride scooter' : 'enter car'}`;
+        : `E ${prompt?.car?.kind === 'scooter' ? 'ride scooter' : 'enter car'}`);
     }
     const hp = spec ? spec.fighter.health : player.fighter.health;
-    $('hpbar').style.width = `${(hp / MAX_HEALTH) * 100}%`;
+    setStyle($('hpbar'), 'width', `${Math.round((hp / MAX_HEALTH) * 100)}%`);
     $('hpbar').classList.toggle('low', hp <= 35);
-    $('hpnum').textContent = Math.ceil(hp);
-    $('rivalsleft').textContent = mode === 'multi'
+    setText($('hpnum'), Math.ceil(hp));
+    setText($('rivalsleft'), mode === 'multi'
       ? Math.max(0, session.humansAlive() - (player.fighter.alive ? 1 : 0))
-      : rivals.filter((r) => r.fighter.alive).length;
+      : rivals.filter((r) => r.fighter.alive).length);
     const leftLabel = document.querySelector('#round small');
-    if (leftLabel) leftLabel.textContent = mode === 'multi' ? 'players left' : 'rivals left';
+    if (leftLabel) setText(leftLabel, mode === 'multi' ? 'players left' : 'rivals left');
     const radarSelf = spec || player;
     const radarYaw = player.camYaw;
     const radarOthers = radarSubjects(mode === 'multi' ? [...session.remotes.values()] : rivals)
@@ -1233,23 +1239,23 @@ async function init() {
       time: elapsed,
     });
     $('radar').classList.toggle('scoped', scoped);
-    $('damage').style.opacity = spec ? 0 : Math.max(hurt, alive ? Math.max(0, (45 - hp) / 45) * 0.45 : 0.7);
+    setStyle($('damage'), 'opacity', spec ? 0 : +Math.max(hurt, alive ? Math.max(0, (45 - hp) / 45) * 0.45 : 0.7).toFixed(2));
     if (spec && (round.state === 'fight' || (mode === 'solo' && round.state === 'over'))) {
       const who = spec.persona?.name || spec.fighter.name;
       banner('Spectating', mode === 'solo' ? `${who} · Press R to fight again` : who, 'show lost');
     }
     const js = jev.stats;
     if (mode === 'solo') {
-      $('jevstat').textContent = js.online === null ? 'Jev · waiting' : js.online ? `Jev online · ${Math.round(js.latency)} ms` : `Jev offline (${js.error}) · local AI`;
+      setText($('jevstat'), js.online === null ? 'Jev · waiting' : js.online ? `Jev online · ${Math.round(js.latency)} ms` : `Jev offline (${js.error}) · local AI`);
       $('jevstat').className = js.online === false ? 'off' : '';
     }
     const ns = $('netstat');
     if (ns && mode === 'multi') {
-      ns.textContent = !net.hosted ? 'net · needs host'
+      setText(ns, !net.hosted ? 'net · needs host'
         : net.status === 'online' ? `net · ${session.peerCount} other`
         : net.status === 'connecting' ? 'net · connecting'
         : net.status === 'error' ? `net · ${net.error || 'error'}`
-        : 'net · offline';
+        : 'net · offline');
       ns.className = net.status === 'online' ? 'on' : net.status === 'error' ? 'off' : '';
     }
     updateTags(dt);
@@ -1288,15 +1294,15 @@ async function init() {
         frames = 0;
         fpsT = 0;
         if (pipeline.prof) {
-          $('perf').textContent = `cpu: frame ${stepCpu.toFixed(1)} · draw ${renderCpu.toFixed(1)} ms\n${pipeline.prof.report}`;
+          setText($('perf'), `cpu: frame ${stepCpu.toFixed(1)} · draw ${renderCpu.toFixed(1)} ms\n${pipeline.prof.report}`);
         }
         const fpsEl = $('fps');
         const sc = pipeline.renderScale || 1;
-        fpsEl.textContent = sc < 0.99 ? `${fps.toFixed(0)} fps · ${Math.round(sc * 100)}%` : `${fps.toFixed(0)} fps`;
+        setText(fpsEl, sc < 0.99 ? `${fps.toFixed(0)} fps · ${Math.round(sc * 100)}%` : `${fps.toFixed(0)} fps`);
         fpsEl.className = fps < 30 ? 'low' : fps < 45 ? 'dip' : '';
         if (!$('debug').classList.contains('hidden')) {
           const info = renderer.info.render;
-          $('debug').textContent = [
+          setText($('debug'), [
             `${fps.toFixed(0)} fps · ${pipeline.qualityName}`,
             `pos ${player.pos.x.toFixed(1)} ${player.pos.y.toFixed(1)} ${player.pos.z.toFixed(1)}`,
             `speed ${state.speed.toFixed(2)} m/s · ${player.onGround ? 'ground' : 'air'}`,
@@ -1304,7 +1310,7 @@ async function init() {
             mapDef.vegetation ? `trees ${veg.stats.trees} · rocks ${veg.stats.rocks} · ferns ${veg.stats.ferns}` : `map ${mapDef.label}`,
             `jev ${jev.stats.requests} requests · ${jev.stats.errors} errors`,
             ...rivals.map((r) => `${r.persona.name} ${Math.ceil(r.fighter.health)} hp · ${r.tactic} (${r.source} ${r.confidence.toFixed(2)}) → ${r.target?.name ?? '-'}`),
-          ].join('\n');
+          ].join('\n'));
         }
       }
     }
