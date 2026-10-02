@@ -998,11 +998,20 @@ async function init() {
 
   let elapsed = 0;
   let fpsT = 0, frames = 0, fps = 0, fpsLast = 0;
+  let stepCpu = 0, renderCpu = 0; // ms, smoothed: a whole frame's work, and the render call alone
+  // F3 or ?perf: where the frame goes (GPU per pass, CPU)
+  const setPerf = (on) => { pipeline.setProfiling(on); $('perf').classList.toggle('hidden', !on); };
+  if (bootQuery.has('perf')) setPerf(true);
+  addEventListener('keydown', (e) => { if (e.code === 'F3') { e.preventDefault(); setPerf(!pipeline.prof); } });
   // Off by default: the frame is mostly CPU-bound (draw calls), where a smaller frame only
   // blurs it without speeding it up. &dynres turns it on.
   const dynRes = bootQuery.has('dynres');
   let frameEma = 16.7, dynT = 0;
   const clock = startClock((dt, draw) => {
+    const step0 = performance.now();
+    try { stepFrame(dt, draw); } finally { if (draw) stepCpu += (performance.now() - step0 - stepCpu) * 0.1; }
+  });
+  function stepFrame(dt, draw) {
     // the round's last kill plays out in slow motion, easing back to speed
     if (slowmo > 0) {
       slowmo -= dt;
@@ -1240,8 +1249,10 @@ async function init() {
         if (character.root) character.root.visible = true;
         pipeline.renderSplit(weapons.drone.cam, weapons.drone.opCam, dt, { underwater: false, shadowCenter: player.pos });
       } else {
+        const rt0 = performance.now();
         pipeline.render(camera, dt, { underwater: player.underwater, shadowCenter: spec?.pos || player.pos, windscreen: player.inCockpit && !pipeline.indoor ? weather.amount : 0,
           dof: player.scopeT > 0.3 && player.aimPoint ? { focus: Math.max(1, player.aimPoint.clone().sub(camera.position).dot(camera.getWorldDirection(new THREE.Vector3()))), amount: (player.scopeT - 0.3) / 0.7 } : null });
+        renderCpu += (performance.now() - rt0 - renderCpu) * 0.1;
       }
 
       frames++;
@@ -1264,6 +1275,9 @@ async function init() {
         fps = frames / fpsT;
         frames = 0;
         fpsT = 0;
+        if (pipeline.prof) {
+          $('perf').textContent = `cpu: frame ${stepCpu.toFixed(1)} · draw ${renderCpu.toFixed(1)} ms\n${pipeline.prof.report}`;
+        }
         const fpsEl = $('fps');
         const sc = pipeline.renderScale || 1;
         fpsEl.textContent = sc < 0.99 ? `${fps.toFixed(0)} fps · ${Math.round(sc * 100)}%` : `${fps.toFixed(0)} fps`;
@@ -1282,7 +1296,7 @@ async function init() {
         }
       }
     }
-  });
+  }
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState !== 'hidden') return;
     for (const k in input) input[k] = false;

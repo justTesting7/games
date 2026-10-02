@@ -350,6 +350,13 @@ body.touch #carhint { bottom: 248px; }
 #fps.low { color: rgba(255, 90, 70, 0.85); }
 #debug:not(.hidden) ~ #fps { display: none; }
 
+/* F3 / ?perf: where the frame goes */
+#perf {
+  position: absolute; left: 10px; top: 24px; pointer-events: none;
+  font: 11px/1.4 ui-monospace, Menlo, Consolas, monospace; white-space: pre;
+  color: rgba(255, 255, 255, 0.8); background: rgba(0, 0, 0, 0.35); padding: 5px 8px; border-radius: 4px;
+}
+
 #debug {
   position: absolute; left: 10px; top: 10px;
   font: 12px/1.45 ui-monospace, Menlo, Consolas, monospace;

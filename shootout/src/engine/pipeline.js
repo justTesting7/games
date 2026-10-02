@@ -561,6 +561,65 @@ export class Pipeline {
     this.farDirty = true; // drawn in render(), on its own (see drawFarShadow)
   }
 
+  // A camera that sees nothing and a 1x1 target: rendering the scene through them draws
+  // only the shadow maps that are due (the colour pass culls everything).
+  nullCamera() {
+    if (!this._farCam) {
+      this._farCam = new THREE.PerspectiveCamera(1, 1, 0.1, 0.2);
+      this._farCam.position.set(0, -1e5, 0);
+      this._farCam.lookAt(0, -2e5, 0);
+      this._farCam.updateMatrixWorld();
+      this._farRT = new THREE.WebGLRenderTarget(1, 1);
+    }
+  }
+
+  // ---- profiler (F3 / ?perf): GPU time per pass from timer queries, averaged ------------
+  setProfiling(on) {
+    const gl = this.renderer.getContext();
+    const ext = on ? gl.getExtension('EXT_disjoint_timer_query_webgl2') : null;
+    if (on && !ext) { this.prof = { report: 'GPU timer queries are not available in this browser' }; return; }
+    if (!on) { if (this.prof?.quadRender) this.quad.render = this.prof.quadRender; this.prof = null; return; }
+    if (this.prof?.ext) return;
+    const prof = { ext, gl, pending: [], acc: {}, frames: 0, report: 'measuring…', quadRender: this.quad.render };
+    const name = (m) => Object.keys(this).find((k) => this[k] === m) || m?.type || 'pass';
+    const orig = this.quad.render.bind(this.quad);
+    this.quad.render = (r, mat, target) => this.timed(name(mat).replace(/Material$/, ''), () => orig(r, mat, target));
+    this.prof = prof;
+  }
+
+  timed(label, fn) {
+    const P = this.prof;
+    if (!P?.ext || P.open) return fn();
+    const q = P.gl.createQuery();
+    P.open = true;
+    P.gl.beginQuery(P.ext.TIME_ELAPSED_EXT, q);
+    const res = fn();
+    P.gl.endQuery(P.ext.TIME_ELAPSED_EXT);
+    P.open = false;
+    P.pending.push([label, q]);
+    return res;
+  }
+
+  profFrame() {
+    const P = this.prof;
+    if (!P?.ext) return;
+    const gl = P.gl;
+    if (gl.getParameter(P.ext.GPU_DISJOINT_EXT)) { P.pending.forEach(([, q]) => gl.deleteQuery(q)); P.pending = []; return; }
+    while (P.pending.length && gl.getQueryParameter(P.pending[0][1], gl.QUERY_RESULT_AVAILABLE)) {
+      const [label, q] = P.pending.shift();
+      P.acc[label] = (P.acc[label] || 0) + gl.getQueryParameter(q, gl.QUERY_RESULT) / 1e6;
+      gl.deleteQuery(q);
+      if (label === 'composite') P.frames++; // the last pass of a frame
+    }
+    if (P.frames >= 30) {
+      const rows = Object.entries(P.acc).map(([k, v]) => [k, v / P.frames]).sort((a, b) => b[1] - a[1]);
+      const total = rows.reduce((a, r) => a + r[1], 0);
+      P.report = [`gpu ${total.toFixed(1)} ms`, ...rows.filter((r) => r[1] >= 0.15).map(([k, v]) => `  ${k} ${v.toFixed(1)}`)].join('\n');
+      P.acc = {};
+      P.frames = 0;
+    }
+  }
+
   // The far map on its own pass, so the game can leave the small details out of it
   // (beforeFarShadow(true/false) around the draw); the main render then skips it.
   drawFarShadow(camera) {
@@ -570,13 +629,7 @@ export class Pipeline {
     const r = this.renderer;
     // a render of the scene through a camera that sees nothing (so the colour pass culls
     // everything) into a 1x1 target, with only this shadow due: three draws the far map
-    if (!this._farCam) {
-      this._farCam = new THREE.PerspectiveCamera(1, 1, 0.1, 0.2);
-      this._farCam.position.set(0, -1e5, 0);
-      this._farCam.lookAt(0, -2e5, 0);
-      this._farCam.updateMatrixWorld();
-      this._farRT = new THREE.WebGLRenderTarget(1, 1);
-    }
+    this.nullCamera();
     const nearAuto = this.sun.shadow.autoUpdate;
     this.sun.shadow.autoUpdate = false;
     this.sun.shadow.needsUpdate = false;
@@ -622,7 +675,7 @@ export class Pipeline {
     }
 
     this.updateShadowCamera(opts.shadowCenter || camera.position);
-    this.drawFarShadow(camera);
+    this.timed('far shadow', () => this.drawFarShadow(camera));
 
     camera.updateMatrixWorld();
     // TAA: this frame is drawn a sub-pixel off along a Halton sequence (undone at the end)
@@ -645,8 +698,19 @@ export class Pipeline {
     r.setRenderTarget(this.sceneRT);
     r.setClearColor(this.indoor ? 0x0c0d10 : 0x000000, 0);
     r.clear(true, true, false);
-    if (!this.indoor) r.render(this.skyMesh, camera);
-    r.render(this.scene, camera);
+    if (!this.indoor) this.timed('sky', () => r.render(this.skyMesh, camera));
+    if (this.prof?.ext && this.sun.castShadow) {
+      // profiling: draw the near shadow map on its own, so it gets its own line
+      this.nullCamera();
+      const auto = this.sun.shadow.autoUpdate;
+      this.sun.shadow.autoUpdate = false;
+      this.sun.shadow.needsUpdate = true;
+      this.timed('shadows', () => { r.setRenderTarget(this._farRT); r.render(this.scene, this._farCam); });
+      this.sun.shadow.needsUpdate = false;
+      r.setRenderTarget(this.sceneRT);
+      this.timed('scene', () => r.render(this.scene, camera));
+      this.sun.shadow.autoUpdate = auto;
+    } else this.timed('scene', () => r.render(this.scene, camera));
 
     this.copyMaterial.uniforms.tDiffuse.value = this.sceneRT.texture;
     this.quad.render(r, this.copyMaterial, this.copyRT);
@@ -671,13 +735,13 @@ export class Pipeline {
     r.setRenderTarget(this.sceneRT);
     this.haze.flush(this.copyRT.texture, W, H, this.u.uTime.value);
     this.waves.flush(dt, this.copyRT.texture, W, H);
-    r.render(this.waterScene, camera);
+    this.timed('water', () => r.render(this.waterScene, camera));
     const xu = this.fxUniforms;
     xu.tDepth.value = this.copyRT.texture;
     xu.uRes.value.set(W, H);
     xu.uTime.value = this.u.uTime.value;
     xu.uSunView.value.copy(this.lightDir).transformDirection(camera.matrixWorldInverse);
-    r.render(this.fxScene, camera);
+    this.timed('effects', () => r.render(this.fxScene, camera));
 
     const fu = this.fogMaterial.uniforms;
     fu.tScene.value = this.sceneRT.texture;
@@ -831,6 +895,7 @@ export class Pipeline {
       r.setViewport(0, 0, r.domElement.clientWidth, r.domElement.clientHeight);
       r.setScissorTest(false);
     }
+    this.profFrame();
     if (taa) { // the game aims and projects with the true camera
       camera.projectionMatrix.copy(this._unjP);
       camera.projectionMatrixInverse.copy(this._unjP).invert();

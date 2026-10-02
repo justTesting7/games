@@ -158,8 +158,12 @@ Measured in Tel Aviv at 2000x1300: CPU ~17-21 ms a frame just issuing draws (~11
 - [x] 85. Small city details only near the camera: clutter to 150 m, trees and balconies to
       320 m (x quality), in 128 m pieces; the far shadow cascade is drawn without them on its own
       pass. Colour 2.5M -> 1.3M tris, far cascade 2.8M -> 0.6M; render CPU 20.8 -> 16.8 ms.
-- [ ] 86. One draw per material: city chunks as BatchedMesh (multi-draw, per-chunk culling).
+- [~] 86. One draw per material: city chunks as BatchedMesh. Built (chunkMeshes batch: true) but off:
+      three culls each of ~4500 cells in JS per camera (6.6 ms), worse than the draw calls it saves.
 - [x] 87. Cheap smoke: noise from a small tiling texture instead of per-pixel 3D noise.
+- [x] 89. Profiler (F3 / ?perf): GPU time per pass (timer queries), the near shadow map timed on
+      its own, CPU for the frame and for the render call. The hidden dev pane renders far slower
+      than a real GPU, so real numbers come from the player's browser.
 - [ ] 88. Near shadow casters trimmed (clutter out of the shadow map, a tighter frustum).
 
 ## Log
