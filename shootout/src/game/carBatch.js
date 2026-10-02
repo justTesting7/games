@@ -39,6 +39,9 @@ export class CarBatch {
       batch.castShadow = list.some((p) => p.mesh.castShadow);
       batch.receiveShadow = true;
       batch.sortObjects = !!material.transparent;
+      // culled per car (three's per-instance test), never as a whole: the batch's bounds are
+      // where its cars were parked, and one driven off would take the batch with it
+      batch.frustumCulled = false;
       const geoId = new Map();
       for (const { car, mesh } of list) {
         let gid = geoId.get(mesh.geometry);

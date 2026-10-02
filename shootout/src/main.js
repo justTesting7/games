@@ -1009,6 +1009,7 @@ async function init() {
       if (document.fullscreenElement) document.exitFullscreen?.();
     }
   };
+  const touchCars = isTouchDevice();
   const touchPad = setupTouch(input, {
     onLook: (dx, dy) => { if (inPlay) applyLook(dx, dy, true); },
     onMenu: () => setPlay(false),
@@ -1111,7 +1112,10 @@ async function init() {
     const dying = weapons.drone.dying;
     const spec = refreshSpectate();
     touchPad.setDrone(flying);
-    if (alive && !flying && (input.interact || input.jump) && cars.canToggle(player)) {
+    // E gets in and out; Space only gets out (on foot it jumps, and over a car, see vault.js),
+    // except on a touch screen, which has no E
+    const enterKey = input.interact || (input.jump && (player.vehicle || touchCars));
+    if (alive && !flying && enterKey && cars.canToggle(player)) {
       cars.toggle(player);
       input.jump = false;
     }
@@ -1249,7 +1253,7 @@ async function init() {
       carEl.classList.toggle('show', alive && !!prompt && !player.swimming);
       setText(carEl, prompt?.mode === 'drive'
         ? `E ${prompt.kind === 'scooter' ? 'hop off' : 'leave'} · WASD ${prompt.kind === 'scooter' ? 'ride' : 'drive'} · ${Math.abs(prompt.speed).toFixed(0)} m/s`
-        : `E ${prompt?.car?.kind === 'scooter' ? 'ride scooter' : 'enter car'}`);
+        : `E ${prompt?.car?.kind === 'scooter' ? `ride ${{ bike: 'bike', moped: 'moped' }[prompt.car.ride] || 'scooter'}` : 'enter car'}`);
     }
     const hp = spec ? spec.fighter.health : player.fighter.health;
     setStyle($('hpbar'), 'width', `${Math.round((hp / MAX_HEALTH) * 100)}%`);

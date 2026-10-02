@@ -170,9 +170,12 @@ export async function loadDizengoff(renderer, folder = 'dizengoff-center', { sta
     },
     /** Replaces the parked scooters with rideable ones: removes the originals and returns their spots. */
     takeScooters: () => {
-      if (!nav.scooters?.length) return [];
-      removeInBoxes(city.set, nav.scooterRemove || []);
-      return nav.scooters;
+      // kick scooters, and the parked bicycles and mopeds (nav.rides): the originals go,
+      // rideable ones take their places
+      const spots = [...(nav.scooters || []), ...(nav.rides || [])];
+      if (!spots.length) return [];
+      removeInBoxes(city.set, [...(nav.scooterRemove || []), ...(nav.rideRemove || [])]);
+      return spots;
     },
     /** Splits the district-wide meshes into culling cells; call after the cars and scooters are cut out. */
     chunk: () => {

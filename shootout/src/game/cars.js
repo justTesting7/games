@@ -7,7 +7,7 @@ import { dentCar } from './carDents.js';
 
 export const CAR = {
   count: 8,
-  fleetMax: 256,
+  fleetMax: 512,
   halfL: 2.25,
   halfW: 1.02,
   height: 1.18,
@@ -38,11 +38,12 @@ export const SCOOTER = {
   seatX: 0,
   seatY: 0.16,
   seatZ: -0.08,
-  maxSpeed: 11,
-  boostSpeed: 15,
+  // as quick as a car (it's a game)
+  maxSpeed: 24,
+  boostSpeed: 30,
   reverse: 2.5,
-  accel: 9,
-  brake: 16,
+  accel: 12,
+  brake: 18,
   coast: 4.5,
   steer: 2.7,
   killSpeed: 6,
@@ -53,6 +54,46 @@ export const SCOOTER = {
   metalBoxes: [
     { x0: -0.14, x1: 0.14, y0: 0.06, y1: 0.24, z0: -0.62, z1: 0.62 },
     { x0: -0.05, x1: 0.05, y0: 0.24, y1: 1.2, z0: 0.46, z1: 0.6 },
+  ],
+};
+
+/** A bicycle: ridden seated, pedalling; as quick as a car too. */
+export const BIKE = {
+  ...SCOOTER,
+  ride: 'bike',
+  halfL: 0.86,
+  halfW: 0.3,
+  height: 1.05,
+  enterR: 2.4,
+  seatY: 0.0,
+  seatZ: 0.02, // (the body's hips sit a little behind its root: this puts them on the saddle)
+  wheelR: 0.33,
+  steer: 2.5,
+  // the seated pose: hips on the saddle, feet down to the pedals, hands on the bars
+  // (barZ: from the seat to the bars)
+  astride: { hip: 0.96, thigh: 0.85, knee: -0.75, barZ: 0.54, barY: 1.06 },
+  metalBoxes: [
+    { x0: -0.05, x1: 0.05, y0: 0.05, y1: 0.95, z0: -0.85, z1: 0.85 },
+  ],
+};
+
+/** A moped (a city motor scooter): seated, feet on the floorboard, quicker off the line. */
+export const MOPED = {
+  ...SCOOTER,
+  ride: 'moped',
+  halfL: 1.0,
+  halfW: 0.36,
+  height: 1.15,
+  enterR: 2.6,
+  seatY: 0.0,
+  seatZ: -0.12,
+  wheelR: 0.24,
+  accel: 14,
+  steer: 2.3,
+  astride: { hip: 0.74, thigh: 1.25, knee: -1.15, barZ: 0.7, barY: 1.02 },
+  metalBoxes: [
+    { x0: -0.3, x1: 0.3, y0: 0.08, y1: 0.75, z0: -1.0, z1: 1.0 },
+    { x0: -0.25, x1: 0.25, y0: 0.75, y1: 1.1, z0: 0.55, z1: 0.8 },
   ],
 };
 
@@ -356,7 +397,15 @@ export function stepGrip(state, { throttle, steer, handbrake = false, dt, sprint
  */
 export function driverPose(car) {
   const S = specOf(car);
-  if (S.kind === 'scooter') return null;
+  if (S.kind === 'scooter' && S.astride) {
+    // on a bike or a moped: seated astride, hands on the bars
+    const o = localOffset(car.x, car.z, car), seat = seatOf(car), a = S.astride;
+    return {
+      hipY: car.y + a.hip, thigh: a.thigh, knee: a.knee,
+      wheel: new THREE.Vector3(seat.x + o.fwdX * a.barZ, car.y + a.barY, seat.z + o.fwdZ * a.barZ),
+    };
+  }
+  if (S.kind === 'scooter') return null; // a kick scooter rider stands
   const o = localOffset(car.x, car.z, car);
   const seat = seatOf(car);
   if (car.cockpit) {
@@ -743,9 +792,9 @@ const SCOOTER_COLORS = [0x2a9d5c, 0x2b6fd6, 0xd6a02b, 0xd6452b, 0x8a4fd6, 0x1fb5
 function makeScooterMesh(color) {
   const g = new THREE.Group();
   g.name = 'scooter';
-  const paint = new THREE.MeshStandardMaterial({ color, metalness: 0.5, roughness: 0.4 });
-  const dark = new THREE.MeshStandardMaterial({ color: 0x17181a, metalness: 0.3, roughness: 0.6 });
-  const grip = new THREE.MeshStandardMaterial({ color: 0x0c0c0d, metalness: 0.1, roughness: 0.9 });
+  const paint = ridePaint(color, 0.5, 0.4);
+  const dark = rideMat('kick-dark', () => new THREE.MeshStandardMaterial({ color: 0x17181a, metalness: 0.3, roughness: 0.6 }));
+  const grip = rideMat('kick-grip', () => new THREE.MeshStandardMaterial({ color: 0x0c0c0d, metalness: 0.1, roughness: 0.9 }));
   const add = (mesh, parent = g) => { mesh.castShadow = mesh.receiveShadow = true; parent.add(mesh); return mesh; };
   add(new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.05, 0.78), dark)).position.set(0, 0.12, -0.02);
   add(new THREE.Mesh(new THREE.BoxGeometry(0.21, 0.012, 0.6), grip)).position.set(0, 0.15, -0.06);
@@ -767,6 +816,93 @@ function makeScooterMesh(color) {
   bar.position.set(0, 1.04, -0.13);
   for (const sx of [-1, 1]) add(new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.12, 10).rotateZ(Math.PI / 2), grip), fork).position.set(sx * 0.27, 1.04, -0.13);
   add(new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.012, 0.22), paint)).position.set(0, 0.2, 0.5);
+  return { group: g, wheels, handle: fork };
+}
+
+// Materials shared by every two-wheeler of a look (the car batch draws one batch per material:
+// a material each would be a draw call each). Paint is rounded to a small palette.
+const rideMats = new Map();
+function rideMat(key, make) {
+  if (!rideMats.has(key)) rideMats.set(key, make());
+  return rideMats.get(key);
+}
+function ridePaint(color, metalness, roughness) {
+  const c = new THREE.Color(color);
+  const q = (v) => Math.round(v * 7) / 7;
+  c.setRGB(q(c.r), q(c.g), q(c.b));
+  return rideMat(`paint-${c.getHexString()}-${metalness}-${roughness}`, () => new THREE.MeshStandardMaterial({ color: c, metalness, roughness }));
+}
+
+// A bicycle: a diamond frame in its paint, black tyres and saddle, bars on a fork that turns.
+function makeBikeMesh(color) {
+  const g = new THREE.Group();
+  g.name = 'bike';
+  const paint = ridePaint(color, 0.4, 0.45);
+  const dark = rideMat('bike-dark', () => new THREE.MeshStandardMaterial({ color: 0x111112, metalness: 0.1, roughness: 0.85 }));
+  const steel = rideMat('ride-steel', () => new THREE.MeshStandardMaterial({ color: 0xb8bcc2, metalness: 0.9, roughness: 0.3 }));
+  const add = (mesh, parent = g) => { mesh.castShadow = mesh.receiveShadow = true; parent.add(mesh); return mesh; };
+  const tube = (a, b, r, mat, parent = g) => {
+    const A = new THREE.Vector3(...a), B = new THREE.Vector3(...b);
+    const m = add(new THREE.Mesh(new THREE.CylinderGeometry(r, r, A.distanceTo(B), 8), mat), parent);
+    m.position.copy(A).add(B).multiplyScalar(0.5);
+    m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), B.clone().sub(A).normalize());
+    return m;
+  };
+  const R = 0.33, zr = -0.52, zf = 0.55;
+  const wheels = [];
+  for (const z of [zr, zf]) {
+    const w = add(new THREE.Mesh(new THREE.TorusGeometry(R, 0.025, 8, 28).rotateY(Math.PI / 2), dark));
+    w.position.set(0, R, z);
+    tube([0, -R * 0.95, 0], [0, R * 0.95, 0], 0.006, steel, w); // spokes, two crossed
+    tube([0, 0, -R * 0.95], [0, 0, R * 0.95], 0.006, steel, w);
+    wheels.push(w);
+  }
+  // frame: seat tube, top tube, down tube, stays
+  const bb = [0, 0.3, -0.05], seatTop = [0, 0.86, -0.2], head = [0, 0.86, 0.42], headLo = [0, 0.7, 0.45];
+  tube(bb, seatTop, 0.02, paint); tube(seatTop, head, 0.018, paint); tube(bb, headLo, 0.022, paint);
+  tube(bb, [0, R, zr], 0.014, paint); tube(seatTop, [0, R, zr], 0.012, paint);
+  add(new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.05, 0.26), dark)).position.set(0, 0.92, -0.24); // saddle
+  tube([0, 0.86, -0.2], [0, 0.9, -0.22], 0.014, steel);
+  add(new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.03, 14).rotateZ(Math.PI / 2), steel)).position.set(0.05, 0.3, -0.05); // chainring
+  const fork = new THREE.Group();
+  fork.position.set(0, 0, 0.47);
+  g.add(fork);
+  tube([0, 0.86, -0.03], [0, R, zf - 0.47], 0.016, paint, fork);
+  tube([0, 0.86, -0.03], [0, 1.02, 0.05], 0.016, steel, fork);
+  tube([-0.27, 1.04, 0.07], [0.27, 1.04, 0.07], 0.013, steel, fork);
+  for (const sx of [-1, 1]) tube([sx * 0.2, 1.04, 0.07], [sx * 0.28, 1.04, 0.07], 0.02, dark, fork);
+  add(new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.2, 0.26), paint), fork).position.set(0, 0.86, 0.22); // the city bike's basket
+  return { group: g, wheels, handle: fork };
+}
+
+// A moped: a deck and floorboard, a front shield, a long seat over the engine, small wheels.
+function makeMopedMesh(color) {
+  const g = new THREE.Group();
+  g.name = 'moped';
+  const paint = ridePaint(color, 0.45, 0.35);
+  const dark = rideMat('moped-dark', () => new THREE.MeshStandardMaterial({ color: 0x121214, metalness: 0.2, roughness: 0.8 }));
+  const steel = rideMat('ride-steel', () => new THREE.MeshStandardMaterial({ color: 0xb8bcc2, metalness: 0.9, roughness: 0.3 }));
+  const add = (mesh, parent = g) => { mesh.castShadow = mesh.receiveShadow = true; parent.add(mesh); return mesh; };
+  const R = 0.24;
+  const wheels = [];
+  for (const z of [-0.66, 0.68]) {
+    const w = add(new THREE.Mesh(new THREE.CylinderGeometry(R, R, 0.13, 20).rotateZ(Math.PI / 2), dark));
+    w.position.set(0, R, z);
+    add(new THREE.Mesh(new THREE.CylinderGeometry(R * 0.55, R * 0.55, 0.14, 14).rotateZ(Math.PI / 2), steel), w);
+    wheels.push(w);
+  }
+  add(new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.12, 0.62), paint)).position.set(0, 0.3, 0.12); // floorboard
+  add(new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.38, 0.72), paint)).position.set(0, 0.48, -0.5); // engine cover
+  add(new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.1, 0.7), dark)).position.set(0, 0.72, -0.42); // seat
+  add(new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.62, 0.12), paint)).position.set(0, 0.62, 0.48); // front shield
+  const fork = new THREE.Group();
+  fork.position.set(0, 0, 0.56);
+  g.add(fork);
+  add(new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.5, 0.12), paint), fork).position.set(0, 0.55, 0.12);
+  add(new THREE.Mesh(new THREE.BoxGeometry(0.56, 0.08, 0.1), paint), fork).position.set(0, 1.02, 0.02);
+  for (const sx of [-1, 1]) add(new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.1, 10).rotateZ(Math.PI / 2), dark), fork).position.set(sx * 0.32, 1.02, 0.02);
+  const lamp = add(new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.1, 0.06), rideMat('moped-lamp', () => new THREE.MeshStandardMaterial({ color: 0xeeeeea, emissive: 0xfff2d0, emissiveIntensity: 0.3 }))), fork);
+  lamp.position.set(0, 0.92, 0.1);
   return { group: g, wheels, handle: fork };
 }
 
@@ -874,16 +1010,21 @@ export class Cars {
     return this.list;
   }
 
-  /** Rideable kick scooters at {x, y, z, yaw}; they take ids after the cars. */
+  /**
+   * Rideable two-wheelers at {x, y, z, yaw}: kick scooters, or with kind 'bike' / 'moped'
+   * (and their paint, color [r, g, b]) bicycles and mopeds. They take ids after the cars.
+   */
   addScooters(spots) {
     const { terrain } = this.world;
     spots.forEach((s, n) => {
       const y = terrain.heightAt(s.x, s.z);
-      const built = makeScooterMesh(SCOOTER_COLORS[n % SCOOTER_COLORS.length]);
+      const paint = s.color ? new THREE.Color(s.color[0] / 255, s.color[1] / 255, s.color[2] / 255) : SCOOTER_COLORS[n % SCOOTER_COLORS.length];
+      const built = s.kind === 'bike' ? makeBikeMesh(paint) : s.kind === 'moped' ? makeMopedMesh(paint) : makeScooterMesh(paint);
       const car = {
         id: this.list.length,
-        kind: 'scooter',
-        spec: SCOOTER,
+        kind: 'scooter', // two wheels: ridden in the open (see spec.ride for which)
+        ride: s.kind || 'kick',
+        spec: s.kind === 'bike' ? BIKE : s.kind === 'moped' ? MOPED : SCOOTER,
         x: s.x,
         y,
         z: s.z,
@@ -1562,7 +1703,7 @@ export class Cars {
   engineSounds(local, input) {
     const audio = this.world.audio;
     if (!audio?.engine) return;
-    if (local && !local.wrecked) {
+    if (local && !local.wrecked && local.ride !== 'bike') { // (a bicycle makes no engine noise)
       const S = specOf(local);
       const f = (input?.forward ? 1 : 0) - (input?.back ? 1 : 0) + (input?.moveY || 0);
       audio.engine(0, { on: true, speed: local.speed, max: S.maxSpeed, throttle: f * Math.sign(local.speed || 1), scooter: !!local.spec, dist: 0 });
@@ -1570,7 +1711,7 @@ export class Cars {
     const cam = this.world.player?.camera;
     let near = null, nd = 60;
     for (const car of this.list) {
-      if (car === local || !car.driver || car.wrecked || Math.abs(car.speed) < 0.5 || !cam) continue;
+      if (car === local || !car.driver || car.wrecked || Math.abs(car.speed) < 0.5 || !cam || car.ride === 'bike') continue;
       const d = Math.hypot(car.x - cam.position.x, car.z - cam.position.z);
       if (d < nd) { nd = d; near = car; }
     }

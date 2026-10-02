@@ -1278,7 +1278,7 @@ export class Rival {
       this.vaultCheckT = (this.vaultCheckT || 0) - dt;
       if (this.vaultCheckT <= 0) {
         this.vaultCheckT = 0.25;
-        this.vault = findVault(this.world, this.pos, wish.dir);
+        this.vault = findVault(this.world, this.pos, wish.dir, { overCars: this.drive?.phase !== 'walk' }); // (not over the car it's walking to)
         if (this.vault) { this.onGround = false; jumpStarted = true; }
       }
     }

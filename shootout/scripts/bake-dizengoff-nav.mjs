@@ -65,12 +65,16 @@ for (const { doc, off, own } of sources) for (const n of doc.getRoot().listNodes
     const idx = p.getIndices();
     const count = idx ? idx.getCount() : pos.getCount();
     const v = [0, 0, 0];
+    const col = scooterPart ? p.getAttribute('COLOR_0') : null, cv = [0, 0, 0, 0]; // the paint of bikes and mopeds
     const get = (i) => { pos.getElement(idx ? idx.getScalar(i) : i, v); return [v[0] * s[0] + t[0] + off[0], v[1] * s[1] + t[1] + off[1], v[2] * s[2] + t[2] + off[2]]; };
     for (let i = 0; i + 2 < count; i += 3) {
       const tri = [get(i), get(i + 1), get(i + 2)];
       if (partsDef && !GROUND_MESH.test(name) && ownerOf(partsDef, (tri[0][0] + tri[1][0] + tri[2][0]) / 3, (tri[0][2] + tri[1][2] + tri[2][2]) / 3) !== own) continue;
       if (partsDef && GROUND_MESH.test(name)) for (const q of tri) q[1] -= groundDrop(own);
-      if (scooterPart) scooterPart.push(tri);
+      if (scooterPart) {
+        if (col) { col.getElement(idx ? idx.getScalar(i) : i, cv); tri.rgb = [cv[0], cv[1], cv[2]]; }
+        scooterPart.push(tri);
+      }
       if (isSeats) { seatTris.push(tri); continue; }
       if (carPart) { carPart.push(tri); continue; }
       if (!kind) continue;
@@ -402,7 +406,91 @@ const scooters = [];
   console.log('rideable scooters', scooters.length, 'parts to replace', scooterRemove.length);
 }
 
-const inScooter = (x, y, z) => scooterRemove.some((b) => x > b[0] - 0.1 && x < b[3] + 0.1 && y > b[1] - 0.1 && y < b[4] + 0.1 && z > b[2] - 0.1 && z < b[5] + 0.1);
+function inScooterBox(t) {
+  const x = (t[0][0] + t[1][0] + t[2][0]) / 3, y = (t[0][1] + t[1][1] + t[2][1]) / 3, z = (t[0][2] + t[1][2] + t[2][2]) / 3;
+  return scooterRemove.some((b) => x > b[0] - 0.05 && x < b[3] + 0.05 && y > b[1] - 0.05 && y < b[4] + 0.05 && z > b[2] - 0.05 && z < b[5] + 0.05);
+}
+
+// Bicycles and mopeds parked in the street: the paint and metal pieces that touch, put
+// together, measured. A moped is about 2 m long and 1.1 m high, a bicycle 1.7 m and 0.95 m,
+// both standing on the ground and mostly black (the tyres). Each becomes a rideable one
+// ({x, z, y, yaw, kind, color}); the originals are cut out (rideRemove, like the scooters).
+const rides = [];
+var rideRemove = [];
+{
+  const all = [...scooterParts.paint, ...scooterParts.metal].filter((t) => !inScooterBox(t));
+  const key = (q) => `${Math.round(q[0] * 100)},${Math.round(q[1] * 100)},${Math.round(q[2] * 100)}`;
+  const par = new Map();
+  const find = (a) => { while (par.get(a) !== a) { par.set(a, par.get(par.get(a))); a = par.get(a); } return a; };
+  for (const t of all) for (const q of t) { const k = key(q); if (!par.has(k)) par.set(k, k); }
+  for (const t of all) { const a = find(key(t[0])); for (let i = 1; i < 3; i++) { const b = find(key(t[i])); if (a !== b) par.set(b, a); } }
+  const byRoot = new Map();
+  for (const t of all) { const r = find(key(t[0])); (byRoot.get(r) || byRoot.set(r, []).get(r)).push(t); }
+  const pieces = [...byRoot.values()].map((ts) => {
+    const mn = [1e9, 1e9, 1e9], mx = [-1e9, -1e9, -1e9];
+    for (const t of ts) for (const q of t) for (let k = 0; k < 3; k++) { mn[k] = Math.min(mn[k], q[k]); mx[k] = Math.max(mx[k], q[k]); }
+    return { ts, mn, mx };
+  }).filter((pc) => pc.mx[1] - pc.mn[1] < 1.6 && Math.max(pc.mx[0] - pc.mn[0], pc.mx[2] - pc.mn[2]) < 2.4);
+  // pieces whose boxes touch (8 cm) make one object
+  const pad = 0.08, G = new Map();
+  pieces.forEach((pc, i) => {
+    for (let x = Math.floor(pc.mn[0] - pad); x <= Math.floor(pc.mx[0] + pad); x++) for (let z = Math.floor(pc.mn[2] - pad); z <= Math.floor(pc.mx[2] + pad); z++) {
+      const k = `${x},${z}`; (G.get(k) || G.set(k, []).get(k)).push(i);
+    }
+  });
+  const up = pieces.map((_, i) => i);
+  const f = (a) => { while (up[a] !== a) { up[a] = up[up[a]]; a = up[a]; } return a; };
+  for (const list of G.values()) for (let a = 0; a < list.length; a++) for (let b = a + 1; b < list.length; b++) {
+    const A = pieces[list[a]], B = pieces[list[b]];
+    if (A.mn[0] > B.mx[0] + pad || B.mn[0] > A.mx[0] + pad || A.mn[1] > B.mx[1] + pad || B.mn[1] > A.mx[1] + pad || A.mn[2] > B.mx[2] + pad || B.mn[2] > A.mx[2] + pad) continue;
+    up[f(list[b])] = f(list[a]);
+  }
+  const objs = new Map();
+  pieces.forEach((pc, i) => { const r = f(i); (objs.get(r) || objs.set(r, []).get(r)).push(pc); });
+  for (const ps of objs.values()) {
+    const mn = [1e9, 1e9, 1e9], mx = [-1e9, -1e9, -1e9], ts = [];
+    for (const pc of ps) { ts.push(...pc.ts); for (let k = 0; k < 3; k++) { mn[k] = Math.min(mn[k], pc.mn[k]); mx[k] = Math.max(mx[k], pc.mx[k]); } }
+    const H = mx[1] - mn[1];
+    // the colours: mostly black (tyres, seat, frame joints), the rest is its paint
+    let black = 0, paintN = 0; const paintC = [0, 0, 0];
+    for (const t of ts) {
+      const c = t.rgb; if (!c) continue;
+      if (c[0] + c[1] + c[2] < 0.12) black++; else { paintN++; paintC[0] += c[0]; paintC[1] += c[1]; paintC[2] += c[2]; }
+    }
+    if (black < ts.length * 0.3) continue;
+    // plan axis by the spread of the vertices
+    let cx = 0, cz = 0, cn = 0;
+    for (const t of ts) for (const q of t) { cx += q[0]; cz += q[2]; cn++; }
+    cx /= cn; cz /= cn;
+    let sxx = 0, szz = 0, sxz = 0;
+    for (const t of ts) for (const q of t) { const dx = q[0] - cx, dz = q[2] - cz; sxx += dx * dx; szz += dz * dz; sxz += dx * dz; }
+    const ang = 0.5 * Math.atan2(2 * sxz, sxx - szz);
+    let ax = Math.cos(ang), az = Math.sin(ang);
+    let lo = 1e9, hi = -1e9, wlo = 1e9, whi = -1e9;
+    for (const t of ts) for (const q of t) { const a = (q[0] - cx) * ax + (q[2] - cz) * az, w = (q[0] - cx) * az - (q[2] - cz) * ax; lo = Math.min(lo, a); hi = Math.max(hi, a); wlo = Math.min(wlo, w); whi = Math.max(whi, w); }
+    const L = hi - lo, W = whi - wlo;
+    const kind = L > 1.82 && L < 2.15 && W < 0.95 && H > 1.02 && H < 1.28 ? 'moped'
+      : L > 1.5 && L <= 1.82 && W < 0.75 && H > 0.82 && H < 1.06 ? 'bike' : null;
+    if (!kind) continue;
+    const k0 = cellOf(cx, cz);
+    if (k0 < 0 || ground[k0] < -1e8 || Math.abs(mn[1] - ground[k0]) > 0.2) continue; // standing on the street
+    // the nose: the end with the highest part (handlebars, a moped's front shield)
+    let topF = -1e9, topB = -1e9;
+    const mid = (lo + hi) / 2;
+    for (const t of ts) for (const q of t) { const a = (q[0] - cx) * ax + (q[2] - cz) * az; if (a > mid) topF = Math.max(topF, q[1]); else topB = Math.max(topB, q[1]); }
+    if (topB > topF + 0.02) { ax = -ax; az = -az; }
+    const c = (lo + hi) / 2, wc = (wlo + whi) / 2;
+    const color = paintN ? paintC.map((v) => Math.round((v / paintN) * 255)) : [40, 40, 44];
+    rides.push({
+      x: +(cx + ax * c + az * wc).toFixed(2), z: +(cz + az * c - ax * wc).toFixed(2), y: +ground[k0].toFixed(2),
+      yaw: +Math.atan2(ax, az).toFixed(3), kind, color,
+    });
+    rideRemove.push([mn[0] - 0.05, mn[1] - 0.05, mn[2] - 0.05, mx[0] + 0.05, mx[1] + 0.05, mx[2] + 0.05].map((v) => +v.toFixed(2)));
+  }
+  console.log('rideable bikes', rides.filter((r) => r.kind === 'bike').length, 'mopeds', rides.filter((r) => r.kind === 'moped').length);
+}
+
+const inScooter = (x, y, z) => [...scooterRemove, ...rideRemove].some((b) => x > b[0] - 0.1 && x < b[3] + 0.1 && y > b[1] - 0.1 && y < b[4] + 0.1 && z > b[2] - 0.1 && z < b[5] + 0.1);
 
 // Whatever car paint isn't inside a car found (fragments too small to measure, rows that
 // split into short bits, vans, cars on decks): grouped by neighbouring 2 m cells, each
@@ -624,6 +712,8 @@ const out = {
   carJunk: junk,
   scooters,
   scooterRemove,
+  rides,
+  rideRemove,
   spots,
   stadium,
   bounds: { minX, maxX, minZ, maxZ },
