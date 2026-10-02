@@ -95,31 +95,35 @@ export class Pigeons {
     this.flocks = [];
     for (const h of homes) {
       if (this.birds.length + perFlock > MAX) break;
-      const flock = { home: { x: h.x, z: h.z }, state: 'ground', calm: 0, t: Math.random() * 10, dir: Math.random() < 0.5 ? 1 : -1 };
+      const flock = { home: { x: h.x, z: h.z }, state: 'ground', calm: 0, t: Math.random() * 10, dir: Math.random() < 0.5 ? 1 : -1, birds: [], first: this.birds.length };
       this.flocks.push(flock);
       for (let i = 0; i < perFlock; i++) {
         const a = Math.random() * Math.PI * 2, r = Math.random() * 3.5;
         const x = h.x + Math.cos(a) * r, z = h.z + Math.sin(a) * r;
-        this.birds.push({
+        const bird = {
           flock, pos: new THREE.Vector3(x, heightAt(x, z), z), vel: new THREE.Vector3(), yaw: Math.random() * 6.3,
           air: false, peck: Math.random() * 5, phase: Math.random() * 6.3, walk: 0, land: null, bank: 0,
-        });
+        };
+        this.birds.push(bird);
+        flock.birds.push(bird);
       }
     }
     this.mesh.count = this.birds.length;
+    this.placed = false;
   }
 
   /** Something frightening at pos: every flock within `radius` takes off. */
   scare(pos, radius) {
     for (const f of this.flocks) {
-      if (Math.hypot(f.home.x - pos.x, f.home.z - pos.z) > radius && !this.birds.some((b) => b.flock === f && b.pos.distanceTo(pos) < radius)) continue;
+      const dh = Math.hypot(f.home.x - pos.x, f.home.z - pos.z);
+      if (dh > radius + 60) continue; // no bird strays that far from home
+      if (dh > radius && !f.birds.some((b) => b.pos.distanceTo(pos) < radius)) continue;
       f.calm = 0;
       if (f.state === 'air') continue;
       f.state = 'air';
       f.t = 0;
       let near = Infinity;
-      for (const b of this.birds) {
-        if (b.flock !== f) continue;
+      for (const b of f.birds) {
         b.air = true;
         b.land = null;
         // up and away from the fright, each a little differently
@@ -156,13 +160,20 @@ export class Pigeons {
       }
     }
     const H = this.heightAt;
-    for (let i = 0; i < this.birds.length; i++) {
-      const b = this.birds[i], f = b.flock;
-      if (b.air) this.fly(b, f, dt, H);
-      else this.walk(b, f, dt, H);
-      this.place(i, b);
+    const L = this.listener;
+    for (const f of this.flocks) {
+      // a flock settled on the ground far off: pecking too small to see, left as it is
+      // (all are placed once, first)
+      if (this.placed && f.state === 'ground' && L && Math.hypot(f.home.x - L.x, f.home.z - L.z) > 90) continue;
+      for (let k = 0; k < f.birds.length; k++) {
+        const b = f.birds[k];
+        if (b.air) this.fly(b, f, dt, H);
+        else this.walk(b, f, dt, H);
+        this.place(f.first + k, b);
+      }
+      if (f.state === 'landing' && !f.birds.some((b) => b.air)) f.state = 'ground';
     }
-    for (const f of this.flocks) if (f.state === 'landing' && !this.birds.some((b) => b.flock === f && b.air)) f.state = 'ground';
+    this.placed = true;
     this.mesh.instanceMatrix.needsUpdate = true;
     this.wing.needsUpdate = true;
   }
@@ -191,8 +202,8 @@ export class Pigeons {
     // keep apart from close neighbours, keep with the flock's heading
     const avg = this._avg.set(0, 0, 0);
     let n = 0;
-    for (const o of this.birds) {
-      if (o === b || o.flock !== f || !o.air) continue;
+    for (const o of f.birds) {
+      if (o === b || !o.air) continue;
       const dx = b.pos.x - o.pos.x, dy = b.pos.y - o.pos.y, dz = b.pos.z - o.pos.z, q = dx * dx + dy * dy + dz * dz;
       if (q < 0.5 && q > 1e-6) { const k = 2.5 / q; steer.x += dx * k; steer.y += dy * k; steer.z += dz * k; }
       if (q < 25) { avg.add(o.vel); n++; }
