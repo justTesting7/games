@@ -352,7 +352,7 @@ body.touch #carhint { bottom: 248px; }
 
 /* F3 / ?perf: where the frame goes */
 #perf {
-  position: absolute; left: 10px; top: 24px; pointer-events: none;
+  position: absolute; left: 10px; top: 262px; z-index: 50; pointer-events: none; /* under the radar */
   font: 11px/1.4 ui-monospace, Menlo, Consolas, monospace; white-space: pre;
   color: rgba(255, 255, 255, 0.8); background: rgba(0, 0, 0, 0.35); padding: 5px 8px; border-radius: 4px;
 }
