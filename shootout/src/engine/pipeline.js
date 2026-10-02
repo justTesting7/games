@@ -122,6 +122,9 @@ export class Pipeline {
 
     this.quad = new FullscreenQuad();
     this.scene = new THREE.Scene();
+    // the scene itself never moves: recomposing its matrix every frame forces every object
+    // in it to recompute its world matrix, moved or not
+    this.scene.matrixAutoUpdate = false;
     this.waterScene = new THREE.Scene();
     this.haze = new Haze(this.waterScene); // drawn with the water: both read the opaque copy
     // shared with the effect particles (game/fx.js): scene depth for soft edges, the sun for lighting

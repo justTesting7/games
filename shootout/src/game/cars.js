@@ -777,6 +777,9 @@ export class Cars {
     this.list = [];
     this.group = new THREE.Group();
     this.group.name = 'cars';
+    // it never moves: its own matrix isn't recomposed every frame (which would also make
+    // every car under it recompute its world matrix, parked or not; see freeze)
+    this.group.matrixAutoUpdate = false;
     scene.add(this.group);
     this.prompt = null;
     this.poseAcc = 0;
@@ -958,7 +961,17 @@ export class Cars {
     car.seat.set(s.x, s.y, s.z);
   }
 
+  // A parked car that has settled doesn't change: its parts stop recomposing their matrices
+  // every frame until something moves it again (placeMesh thaws it).
+  freeze(car, on) {
+    if (!!car.frozen === on || !car.mesh) return;
+    if (on) car.mesh.updateMatrixWorld(true);
+    car.frozen = on;
+    car.mesh.traverse((o) => { o.matrixAutoUpdate = !on; });
+  }
+
   placeMesh(car) {
+    if (car.frozen) this.freeze(car, false);
     car.dirty = true; // the batch copies this car's transform on the next sync
     car.mesh.position.set(car.x, car.y, car.z);
     car.mesh.rotation.order = 'YXZ';
@@ -1305,6 +1318,7 @@ export class Cars {
         } else if (!car.driver && car.slide && (Math.abs(car.slide.x) + Math.abs(car.slide.z) > 0.03 || Math.abs(car.slide.spin) > 0.02)) {
           this.slideFree(car, dt);
         } else if (!car.driver && car.body?.rest && !(car.hp < hpMax(car) * 0.6)) {
+          this.freeze(car, true);
           continue; // parked and settled on its springs: nothing to do until something moves it
         } else {
           this.refreshSeat(car);

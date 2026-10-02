@@ -397,6 +397,9 @@ async function init() {
       studioHeight = studio.heightAt;
       studio.addColliders(veg.colliders);
       pipeline.scene.add(studio.group);
+      // the city stands still: no matrix of it is recomposed per frame
+      studio.group.updateMatrixWorld(true);
+      studio.group.traverse((o) => { o.matrixAutoUpdate = false; });
       terrain.group.visible = false;
       pipeline.indoor = !studio.outdoor;
     }) : Promise.resolve(),
