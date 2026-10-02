@@ -158,7 +158,7 @@ Measured in Tel Aviv at 2000x1300: CPU ~17-21 ms a frame just issuing draws (~11
       320 m (x quality), in 128 m pieces; the far shadow cascade is drawn without them on its own
       pass. Colour 2.5M -> 1.3M tris, far cascade 2.8M -> 0.6M; render CPU 20.8 -> 16.8 ms.
 - [ ] 86. One draw per material: city chunks as BatchedMesh (multi-draw, per-chunk culling).
-- [ ] 87. Cheap smoke: noise from a small tiling texture instead of per-pixel 3D noise.
+- [x] 87. Cheap smoke: noise from a small tiling texture instead of per-pixel 3D noise.
 - [ ] 88. Near shadow casters trimmed (clutter out of the shadow map, a tighter frustum).
 
 ## Log

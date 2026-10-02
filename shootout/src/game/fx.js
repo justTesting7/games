@@ -64,14 +64,7 @@ uniform sampler2D tDepth; // the opaque scene, view distance in alpha
 uniform vec2 uRes;
 uniform vec3 uSunView;    // toward the sun (or moon), in view space
 uniform float uTime;
-float sHash(vec3 p) { return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453); }
-float sNoise(vec3 p) {
-  vec3 i = floor(p), f = fract(p);
-  vec3 u = f * f * (3.0 - 2.0 * f);
-  return mix(mix(mix(sHash(i), sHash(i + vec3(1, 0, 0)), u.x), mix(sHash(i + vec3(0, 1, 0)), sHash(i + vec3(1, 1, 0)), u.x), u.y),
-             mix(mix(sHash(i + vec3(0, 0, 1)), sHash(i + vec3(1, 0, 1)), u.x), mix(sHash(i + vec3(0, 1, 1)), sHash(i + vec3(1, 1, 1)), u.x), u.y), u.z);
-}
-float sFbm(vec3 p) { return sNoise(p) * 0.5 + sNoise(p * 2.03 + 3.1) * 0.3 + sNoise(p * 4.1 + 7.7) * 0.2; }
+uniform sampler2D tNoise; // tiling noise: r, g two fields; b, a the slope of r
 #ifdef BLOOD
 float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 float vnoise(vec2 p) {
@@ -102,19 +95,22 @@ void main() {
     float a = pow(1.0 - r, 2.0);
     gl_FragColor = vec4(vColor.rgb * a * vColor.a, 0.0);
   #else
-    // Smoke and dust: a lumpy, slowly churning puff (3D noise turned by the particle's
-    // own seed), lit as a soft ball by the sun and the sky above and dark where it's
-    // thick, and faded where it meets the ground or a wall so no edge shows.
+    // Smoke and dust: a lumpy, slowly churning puff (two turns of a tiling noise texture,
+    // one per channel, set by the particle's own seed), lit as a soft ball by the sun and
+    // the sky above and dark where it's thick, and faded where it meets the ground or a
+    // wall so no edge shows. Four texture reads a pixel: smoke stacks up many layers deep.
     float ang = vSeed * 6.2831 + uTime * (fract(vSeed * 7.3) - 0.5) * 0.6;
     vec2 q = mat2(cos(ang), -sin(ang), sin(ang), cos(ang)) * vUv;
-    vec3 np = vec3(q * 2.4, vSeed * 17.0 + uTime * 0.15);
-    float n = sFbm(np);
+    vec2 base = vec2(vSeed * 3.7, vSeed * 5.3) + vec2(0.0, uTime * 0.02);
+    vec4 t1 = texture(tNoise, q * 0.45 + base);
+    vec4 t2 = texture(tNoise, q * 0.9 - base.yx * 1.3);
+    float n = t1.r * 0.65 + t2.g * 0.35;
     // cauliflower lumps: the noise carves the edge, crisp enough to read as billows
     float body = smoothstep(0.32, 0.62, (1.0 - r * r) * (0.35 + n * 1.1));
     float a = body * vColor.a;
     if (vSize < 0.05) a = smoothstep(1.0, 0.2, r) * vColor.a; // droplets and specks stay round
-    // a ball normal bent by the lumps, facing the camera
-    vec3 nrm = normalize(vec3(q + (vec2(sNoise(np + vec3(0.13, 0, 0)), sNoise(np + vec3(0, 0.13, 0))) - n) * 2.5, sqrt(max(0.0, 1.0 - r * r)) + 0.35));
+    // a ball normal bent by the lumps (the texture's blue and alpha carry its slope)
+    vec3 nrm = normalize(vec3(q + (t1.ba - 0.5) * 1.6, sqrt(max(0.0, 1.0 - r * r)) + 0.35));
     float sun = clamp(dot(nrm, uSunView) * 0.5 + 0.5, 0.0, 1.0);
     float sky = clamp(nrm.y * 0.5 + 0.6, 0.0, 1.0);
     float thick = 1.0 - 0.45 * body * vColor.a; // light gets through thin edges, not the middle
@@ -130,6 +126,44 @@ void main() {
 `;
 
 export const particleShaders = { vert: particleVert, frag: particleFrag };
+
+// A 128 px tiling noise for the smoke: two independent fractal fields (r, g) and the slope
+// of the first (b, a), made once. Periodic value noise so it wraps without a seam.
+function smokeNoise() {
+  const N = 128, data = new Uint8Array(N * N * 4);
+  const lattice = (period, seed) => {
+    const v = new Float32Array(period * period);
+    let x = seed;
+    for (let i = 0; i < v.length; i++) { x = (x * 16807) % 2147483647; v[i] = x / 2147483647; }
+    return (u, w) => {
+      const fu = u * period, fw = w * period;
+      const i0 = Math.floor(fu), j0 = Math.floor(fw), tu = fu - i0, tw = fw - j0;
+      const su = tu * tu * (3 - 2 * tu), sw = tw * tw * (3 - 2 * tw);
+      const at = (i, j) => v[((j % period) + period) % period * period + ((i % period) + period) % period];
+      return (at(i0, j0) * (1 - su) + at(i0 + 1, j0) * su) * (1 - sw) + (at(i0, j0 + 1) * (1 - su) + at(i0 + 1, j0 + 1) * su) * sw;
+    };
+  };
+  const fbm = (seed) => { const o = [lattice(4, seed), lattice(8, seed + 7), lattice(16, seed + 13), lattice(32, seed + 29)]; return (u, w) => o[0](u, w) * 0.5 + o[1](u, w) * 0.27 + o[2](u, w) * 0.15 + o[3](u, w) * 0.08; };
+  const A = fbm(1234), B = fbm(98765);
+  const a = new Float32Array(N * N);
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) a[y * N + x] = A(x / N, y / N);
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    const i = y * N + x;
+    const dx = a[y * N + ((x + 1) % N)] - a[y * N + ((x + N - 1) % N)];
+    const dy = a[((y + 1) % N) * N + x] - a[((y + N - 1) % N) * N + x];
+    data[i * 4] = a[i] * 255;
+    data[i * 4 + 1] = B(x / N, y / N) * 255;
+    data[i * 4 + 2] = THREE.MathUtils.clamp(0.5 + dx * 6, 0, 1) * 255;
+    data[i * 4 + 3] = THREE.MathUtils.clamp(0.5 + dy * 6, 0, 1) * 255;
+  }
+  const t = new THREE.DataTexture(data, N, N, THREE.RGBAFormat);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.magFilter = THREE.LinearFilter;
+  t.minFilter = THREE.LinearMipmapLinearFilter;
+  t.generateMipmaps = true;
+  t.needsUpdate = true;
+  return t;
+}
 
 class ParticlePool {
   constructor(max, additive, uniforms, defines = {}) {
@@ -253,7 +287,7 @@ export class Effects {
     this.pipeline = pipeline;
     this.terrain = terrain;
     this.audio = audio;
-    const uniforms = { uLight: { value: pipeline.lightColor }, uAmbient: { value: new THREE.Vector3(0.3, 0.33, 0.38) }, ...pipeline.fxUniforms };
+    const uniforms = { uLight: { value: pipeline.lightColor }, uAmbient: { value: new THREE.Vector3(0.3, 0.33, 0.38) }, tNoise: { value: smokeNoise() }, ...pipeline.fxUniforms };
     this.uniforms = uniforms;
     this.add = new ParticlePool(800, true, uniforms);
     this.alpha = new ParticlePool(1200, false, uniforms);
