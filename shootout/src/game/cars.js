@@ -929,7 +929,7 @@ export class Cars {
       car.steer = 0;
       this.applyGlass(car, 0);
       car.windHits = 0;
-      for (const q of car.holes || []) q.removeFromParent();
+      this.world.fx?.holes?.clearCar(car);
       car.holes = [];
       this.placeMesh(car);
       this.refreshSeat(car);

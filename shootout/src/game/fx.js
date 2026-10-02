@@ -206,7 +206,7 @@ class ParticlePool {
   }
 
   spawn(o) {
-    if (this.p.length >= this.max) this.p.shift();
+    if (this.p.length >= this.max) this.p.splice(0, this.p.length - this.max + 1);
     this.p.push({
       x: o.pos.x, y: o.pos.y, z: o.pos.z,
       vx: o.vel?.x || 0, vy: o.vel?.y || 0, vz: o.vel?.z || 0,
@@ -220,13 +220,14 @@ class ParticlePool {
   update(dt) {
     const P = this.pos.array, C = this.col.array, V = this.vel.array, S = this.seed.array;
     let n = 0;
-    const alive = [];
-    for (const p of this.p) {
+    const list = this.p;
+    let w = 0; // the living are packed to the front in place
+    for (let i = 0; i < list.length; i++) {
+      const p = list[i];
       // Newly spawned particles are drawn where they were emitted first.
       const first = p.age === 0;
       p.age += first ? 1e-4 : dt;
       if (p.age >= p.life) continue;
-      alive.push(p);
       if (!first) {
         const k = Math.exp(-p.drag * dt);
         p.vx *= k; p.vy = p.vy * k - p.gravity * dt; p.vz *= k;
@@ -235,7 +236,6 @@ class ParticlePool {
         if (p.land && this.ground && p.vy < 0) {
           const h = this.ground(p.x, p.z);
           if (p.y < h) {
-            alive.pop();
             this.onLand?.(p, h);
             continue;
           }
@@ -243,16 +243,19 @@ class ParticlePool {
       }
       const t = p.age / p.life;
       const a = p.a * (p.fade ? 1 - t : 1) * (p.grow > 0 ? Math.min(1, 0.3 + p.age * 20) : 1);
-      P.set([p.x, p.y, p.z, p.size], n * 4);
-      C.set([p.r, p.g, p.b, a], n * 4);
-      const st = p.vstretch ? Math.min(0.3, Math.max(p.size, Math.hypot(p.vx, p.vy, p.vz) * p.vstretch)) : p.stretch;
-      V.set([p.vx, p.vy, p.vz, st], n * 4);
+      const o = n * 4;
+      P[o] = p.x; P[o + 1] = p.y; P[o + 2] = p.z; P[o + 3] = p.size;
+      C[o] = p.r; C[o + 1] = p.g; C[o + 2] = p.b; C[o + 3] = a;
+      const st = p.vstretch ? Math.min(0.3, Math.max(p.size, Math.sqrt(p.vx * p.vx + p.vy * p.vy + p.vz * p.vz) * p.vstretch)) : p.stretch;
+      V[o] = p.vx; V[o + 1] = p.vy; V[o + 2] = p.vz; V[o + 3] = st;
       S[n] = p.seed;
       n++;
+      list[w++] = p;
     }
-    this.p = alive;
+    list.length = w;
+    if (!n && !this.geo.instanceCount) return;
     this.geo.instanceCount = n;
-    for (const at of [this.pos, this.col, this.vel, this.seed]) {
+    for (const at of this.attrs || (this.attrs = [this.pos, this.col, this.vel, this.seed])) {
       at.clearUpdateRanges();
       at.addUpdateRange(0, n * at.itemSize);
       at.needsUpdate = true;
@@ -682,6 +685,7 @@ export class Effects {
     this.alpha.update(dt);
     this.blood.update(dt);
     this.decals.update(dt);
+    this.holes.updateCars();
     if (this.flash > 0) {
       this.flash -= dt;
       if (this.flash <= 0) this.pipeline.flashLight.intensity = 0;

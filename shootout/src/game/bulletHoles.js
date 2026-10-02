@@ -7,6 +7,7 @@ import * as THREE from 'three';
 const KINDS = { concrete: 0, rock: 0, cover: 0, sand: 0, grass: 0, metal: 1, glass: 2, wood: 3, target: 3, scorch: 4 };
 const SIZE = [0.09, 0.07, 0.16, 0.08, 3.2];
 const PER_KIND = 64;
+const CAR_MAX = 160; // holes on cars, all cars together, per kind
 
 function texture(kind) {
   const c = document.createElement('canvas');
@@ -62,6 +63,8 @@ function texture(kind) {
 
 export class BulletHoles {
   constructor(scene) {
+    this.scene = scene;
+    this.carPools = [];
     const geo = new THREE.PlaneGeometry(1, 1);
     this.pools = [0, 1, 2, 3, 4].map((kind) => {
       const mat = new THREE.MeshStandardMaterial({
@@ -85,6 +88,8 @@ export class BulletHoles {
     this._p = new THREE.Vector3();
     this._s = new THREE.Vector3();
     this._z = new THREE.Vector3(0, 0, 1);
+    this._sc = new THREE.Vector3();
+    this._inv = new THREE.Matrix4();
   }
 
   add(point, normal, surface) {
@@ -97,49 +102,95 @@ export class BulletHoles {
     this._q.setFromUnitVectors(this._z, n).multiply(this._r.setFromAxisAngle(this._z, Math.random() * Math.PI * 2));
     const size = SIZE[kind] * (0.8 + Math.random() * 0.4);
     const at = this._s.copy(point).addScaledVector(n, 0.004);
-    this._m.compose(at, this._q, new THREE.Vector3(size, size, size));
+    this._m.compose(at, this._q, this._sc.set(size, size, size));
     const i = pool.next;
     pool.mesh.setMatrixAt(i, this._m);
+    pool.mesh.instanceMatrix.clearUpdateRanges();
+    pool.mesh.instanceMatrix.addUpdateRange(i * 16, 16);
     pool.mesh.instanceMatrix.needsUpdate = true;
     pool.next = (i + 1) % pool.mesh.instanceMatrix.count;
     pool.mesh.count = Math.max(pool.mesh.count, i + 1);
   }
 
   /**
-   * A hole that rides on a car: its own small quad parented to the car's body (in the car's
-   * frame), so it moves, tilts and rolls with it. The oldest goes past 20 a car.
+   * A hole that rides on a car: kept in the car's frame and placed each frame from its body
+   * (updateCars), so it moves, tilts and rolls with it. All cars' holes of a kind are one
+   * instanced draw. The oldest goes past 20 a car.
    */
   addToCar(car, point, normal, surface, size, lift = 0.006) {
     const kind = KINDS[surface];
     if (kind === undefined || !car?.mesh) return null;
-    const mat = this.pools[kind].mesh.material;
-    const q = new THREE.Mesh(this.quad || (this.quad = new THREE.PlaneGeometry(1, 1)), mat);
-    q.renderOrder = 1;
+    const pool = this.carPool(kind);
     car.mesh.updateMatrixWorld(true);
-    const inv = new THREE.Matrix4().copy(car.mesh.matrixWorld).invert();
-    const n = new THREE.Vector3(normal.x, normal.y, normal.z).normalize().transformDirection(inv);
-    q.position.copy(point).applyMatrix4(inv).addScaledVector(n, lift);
-    q.quaternion.setFromUnitVectors(this._z, n).multiply(new THREE.Quaternion().setFromAxisAngle(this._z, Math.random() * Math.PI * 2));
-    q.scale.setScalar((size ?? SIZE[kind]) * (0.8 + Math.random() * 0.4));
-    q.userData.holeKind = surface;
-    car.mesh.add(q);
+    const inv = this._inv.copy(car.mesh.matrixWorld).invert();
+    const n = this._p.set(normal.x, normal.y, normal.z).normalize().transformDirection(inv);
+    const at = this._s.copy(point).applyMatrix4(inv).addScaledVector(n, lift);
+    this._q.setFromUnitVectors(this._z, n).multiply(this._r.setFromAxisAngle(this._z, Math.random() * Math.PI * 2));
+    const k = (size ?? SIZE[kind]) * (0.8 + Math.random() * 0.4);
+    const hole = { car, kind: surface, local: new THREE.Matrix4().compose(at, this._q, this._sc.set(k, k, k)) };
     const list = car.holes || (car.holes = []);
-    list.push(q);
-    if (list.length > 20) list.shift().removeFromParent();
-    return q;
+    list.push(hole);
+    if (list.length > 20) this.drop(list.shift());
+    pool.items.push(hole);
+    if (pool.items.length > CAR_MAX) {
+      const old = pool.items.shift();
+      if (old.car.holes) old.car.holes = old.car.holes.filter((h) => h !== old);
+    }
+    return hole;
   }
 
-  /** Takes a car's holes of one kind off it (its windscreen cracks, once the pane is gone). */
+  carPool(kind) {
+    if (!this.carPools[kind]) {
+      const mesh = new THREE.InstancedMesh(this.pools[kind].mesh.geometry, this.pools[kind].mesh.material, CAR_MAX);
+      mesh.count = 0;
+      mesh.frustumCulled = false;
+      mesh.renderOrder = 1;
+      mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      this.scene.add(mesh);
+      this.carPools[kind] = { mesh, items: [] };
+    }
+    return this.carPools[kind];
+  }
+
+  drop(hole) {
+    const pool = this.carPools[KINDS[hole.kind]];
+    if (pool) pool.items = pool.items.filter((h) => h !== hole);
+  }
+
+  /** Places the car holes on their cars as they are now (once a frame). */
+  updateCars() {
+    const f = (this.frame = (this.frame || 0) + 1);
+    for (const pool of this.carPools) {
+      if (!pool) continue;
+      const { mesh, items } = pool;
+      if (!items.length && !mesh.count) continue;
+      let n = 0;
+      for (const h of items) {
+        const m = h.car.mesh;
+        if (!m?.parent || !m.visible) continue;
+        if (h.car.holeFrame !== f) { h.car.holeFrame = f; m.updateWorldMatrix(true, false); }
+        this._m.multiplyMatrices(m.matrixWorld, h.local);
+        mesh.setMatrixAt(n++, this._m);
+      }
+      mesh.count = n;
+      mesh.instanceMatrix.clearUpdateRanges();
+      mesh.instanceMatrix.addUpdateRange(0, n * 16);
+      mesh.instanceMatrix.needsUpdate = true;
+    }
+  }
+
+  /** Takes a car's holes off it: those of one kind (its windscreen cracks, once the pane is gone), or all. */
   clearCar(car, surface) {
     if (!car?.holes) return;
-    car.holes = car.holes.filter((q) => {
-      if (q.userData.holeKind !== surface) return true;
-      q.removeFromParent();
+    car.holes = car.holes.filter((h) => {
+      if (surface && h.kind !== surface) return true;
+      this.drop(h);
       return false;
     });
   }
 
   clear() {
     for (const p of this.pools) { p.mesh.count = 0; p.next = 0; }
+    for (const p of this.carPools) if (p) { for (const h of p.items) h.car.holes = []; p.items = []; p.mesh.count = 0; }
   }
 }
