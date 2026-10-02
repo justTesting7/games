@@ -418,6 +418,8 @@ export class Pipeline {
     if (!this.smaa) { this.smaa = new SMAAPass(); this.smaa.clear = true; this.smaa.renderToScreen = true; }
     this.smaa.setSize(W, H);
     const aw = Math.max(1, W >> 1), ah = Math.max(1, H >> 1);
+    if (!this.aoDepthRT) this.aoDepthRT = hdrTarget(aw, ah, this.hdrType, { minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter });
+    else this.aoDepthRT.setSize(aw, ah);
     for (const k of ['aoRT', 'aoBlurRT']) {
       if (!this[k]) this[k] = hdrTarget(aw, ah, this.hdrType, { minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter });
       else this[k].setSize(aw, ah);
@@ -428,7 +430,10 @@ export class Pipeline {
   renderAO(camera) {
     const r = this.renderer;
     const au = this.aoMaterial.uniforms;
-    au.tDepth.value = this.copyRT.texture;
+    // AO taps are scattered: read a small half-resolution copy of the depth, not the
+    // full-size HDR scene, so they stay in the texture cache
+    this.quad.render(r, this.copyMaterial, this.aoDepthRT);
+    au.tDepth.value = this.aoDepthRT.texture;
     au.uRes.value.set(this.aoRT.width, this.aoRT.height);
     au.uProj.value.set(camera.projectionMatrix.elements[0], camera.projectionMatrix.elements[5]);
     this.quad.render(r, this.aoMaterial, this.aoRT);

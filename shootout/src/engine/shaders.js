@@ -678,7 +678,7 @@ void main() {
   vec3 N = normalize(cross(dx, dy));
   if (dot(N, -P) < 0.0) N = -N;
 
-  float rPx = min(uRadius * uProj.y * 0.5 * uRes.y / d, 96.0);
+  float rPx = min(uRadius * uProj.y * 0.5 * uRes.y / d, 48.0); // capped: wide taps miss the cache
   if (rPx < 1.5) { gl_FragColor = vec4(1.0, d, 0.0, 1.0); return; }
   float r2 = uRadius * uRadius;
   float bias = 0.012 + d * 0.0016;
