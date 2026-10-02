@@ -64,16 +64,16 @@ export function addWind(m) {
     sh.uniforms.uWindT = CITY_WIND.time;
     sh.uniforms.uWindK = CITY_WIND.strength;
     sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', '#include <common>\nuniform float uWindT;\nuniform float uWindK;')
+      .replace('#include <common>', '#include <common>\nuniform float uWindT;\nuniform float uWindK;\n#ifdef USE_BATCHING\n#define WIND_M (modelMatrix * batchingMatrix)\n#else\n#define WIND_M modelMatrix\n#endif')
       .replace('#include <begin_vertex>', `#include <begin_vertex>
   {
-    vec3 wp = (modelMatrix * vec4(transformed, 1.0)).xyz;
+    vec3 wp = (WIND_M * vec4(transformed, 1.0)).xyz;
     float gust = sin(uWindT * 0.9 + wp.x * 0.11 + wp.z * 0.07) * 0.5 + 0.5;
     vec2 sway = vec2(sin(uWindT * 1.6 + wp.x * 0.35 + wp.z * 0.21), cos(uWindT * 1.3 + wp.z * 0.33 + wp.x * 0.17)) * (0.025 + 0.05 * gust);
     vec3 flutter = vec3(sin(uWindT * 7.3 + wp.y * 3.1 + wp.x * 2.3), sin(uWindT * 8.1 + wp.z * 2.9), cos(uWindT * 6.7 + wp.x * 3.3)) * 0.012;
     // the offset is in metres; city meshes are stored quantised and scaled up, so take it
     // back into the mesh's own units before moving the vertex
-    transformed += inverse(mat3(modelMatrix)) * ((vec3(sway.x, 0.0, sway.y) + flutter) * uWindK);
+    transformed += inverse(mat3(WIND_M)) * ((vec3(sway.x, 0.0, sway.y) + flutter) * uWindK);
   }`);
   };
   m.customProgramCacheKey = () => `${m.uuid}-wind`;
@@ -92,8 +92,8 @@ export function addWeathering(m) {
   m.onBeforeCompile = (sh, r) => {
     prev?.call(m, sh, r);
     sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', '#include <common>\nvarying vec3 vWeatherWP;\nvarying vec3 vWeatherN;')
-      .replace('#include <project_vertex>', '#include <project_vertex>\n  vWeatherWP = (modelMatrix * vec4(transformed, 1.0)).xyz;\n  vWeatherN = normalize(mat3(modelMatrix) * objectNormal);');
+      .replace('#include <common>', '#include <common>\nvarying vec3 vWeatherWP;\nvarying vec3 vWeatherN;\n#ifdef USE_BATCHING\n#define WEATHER_M (modelMatrix * batchingMatrix)\n#else\n#define WEATHER_M modelMatrix\n#endif')
+      .replace('#include <project_vertex>', '#include <project_vertex>\n  vWeatherWP = (WEATHER_M * vec4(transformed, 1.0)).xyz;\n  vWeatherN = normalize(mat3(WEATHER_M) * objectNormal);');
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>', `#include <common>
 varying vec3 vWeatherWP;

@@ -26,10 +26,18 @@ export function chunkMeshes(root, { cell = 256, minTris = 3000, detailCell = 128
   });
   let before = 0, after = 0;
   const details = [], cells = [];
+  const groups = new Map(); // batch: what goes into each BatchedMesh (see batchGroups)
   for (const o of list) {
     const g = o.geometry, idx = g.index, pos = g.attributes.position;
     if (!pos || g.morphAttributes?.position) continue;
     const n = idx ? idx.count : pos.count;
+    const key = batch && batchKey(o);
+    if (key && n / 3 < minTris) {
+      // small: one instance, whole
+      const all = idx ? Array.from(idx.array.subarray(0, n)) : [...Array(n).keys()];
+      addToGroup(groups, key, o, [all]);
+      continue;
+    }
     if (n / 3 < minTris) continue;
     const tier = FINE.test(o.name) ? 'fine' : MID.test(o.name) ? 'mid' : null;
     const size = tier ? detailCell : cell;
@@ -46,20 +54,15 @@ export function chunkMeshes(root, { cell = 256, minTris = 3000, detailCell = 128
       if (!b) buckets.set(key, (b = []));
       b.push(at(t), at(t + 1), at(t + 2));
     }
-    if (buckets.size < 2) continue;
-    before++;
     // one draw call for the whole material: the cells go into a BatchedMesh, culled one by
     // one but drawn together (glass stays as separate meshes: breaking a pane edits them)
-    if (batch && !/glass/i.test(o.name) && !/glass/i.test(o.material?.name || '')) {
-      const b = batchCells(o, [...buckets.values()]);
-      if (b) {
-        o.parent.add(b.mesh);
-        after += b.ids.length;
-        b.ids.forEach((id, i) => cells.push({ batch: b.mesh, id, sphere: b.spheres[i], tier }));
-        o.parent.remove(o);
-        continue;
-      }
+    if (key) {
+      before++;
+      addToGroup(groups, key, o, [...buckets.values()]);
+      continue;
     }
+    if (buckets.size < 2) continue;
+    before++;
     for (const tris of buckets.values()) {
       const geo = new THREE.BufferGeometry();
       for (const [name, attr] of Object.entries(g.attributes)) geo.setAttribute(name, attr);
@@ -92,6 +95,7 @@ export function chunkMeshes(root, { cell = 256, minTris = 3000, detailCell = 128
     }
     o.parent.remove(o);
   }
+  if (batch) after += batchGroups(root, groups, cells);
   // meshes left whole: small detail ones are culled whole, the rest cast far shadows
   root.traverse((o) => {
     if (!o.isMesh || o.isInstancedMesh || o.isSkinnedMesh || o.isBatchedMesh || details.some((d) => d.mesh === o)) return;
@@ -134,40 +138,124 @@ function compactCell(g, tris, remap) {
   return geo;
 }
 
-function batchCells(o, cells) {
-  const remap = new Int32Array(o.geometry.attributes.position.count).fill(-1);
-  const geos = cells.map((tris) => compactCell(o.geometry, tris, remap));
-  const verts = geos.reduce((a, g) => a + g.attributes.position.count, 0);
-  const index = geos.reduce((a, g) => a + g.index.count, 0);
-  let mesh;
+// What may share a BatchedMesh: the same material (or an identical copy: the city's tiles
+// each load their own) and the same vertex layout. Glass, see-through, shop shutters and
+// multi-material meshes are left alone (null).
+const MAPS = ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'emissiveMap', 'aoMap', 'alphaMap', 'bumpMap'];
+// a texture's look in a few pixels (so two tiles' copies of one image match, and two
+// different images under one material name don't)
+const prints = new WeakMap();
+let printCtx;
+function hashBytes(a, x = 2166136261) {
+  for (let i = 0; i < a.length; i++) { x ^= a[i]; x = Math.imul(x, 16777619); }
+  return x >>> 0;
+}
+function fingerprint(t) {
+  // compressed (KTX2): the small mip levels' bytes
+  if (t.isCompressedTexture) {
+    if (prints.has(t)) return prints.get(t);
+    const mm = t.mipmaps || [];
+    let x = 2166136261 ^ (t.format | 0);
+    for (let k = Math.min(4, mm.length - 1); k >= 0 && k < mm.length; k++) if (mm[k]?.data) x = hashBytes(mm[k].data, x);
+    const p = `c${x.toString(36)}`;
+    prints.set(t, p);
+    return p;
+  }
+  const img = t.image;
+  if (!img || typeof OffscreenCanvas === 'undefined') return '';
+  if (prints.has(img)) return prints.get(img);
+  let p = '';
   try {
-    mesh = new THREE.BatchedMesh(geos.length, verts, index, o.material);
-  } catch {
-    return null;
+    printCtx ||= new OffscreenCanvas(6, 6).getContext('2d', { willReadFrequently: true });
+    printCtx.clearRect(0, 0, 6, 6);
+    printCtx.drawImage(img, 0, 0, 6, 6);
+    p = Array.from(printCtx.getImageData(0, 0, 6, 6).data, (v) => v >> 3).join('.');
+  } catch { p = String(Math.random()); }
+  prints.set(img, p);
+  return p;
+}
+function materialKey(m) {
+  if (!m.name) return m.uuid;
+  const tex = (t) => (t ? `${fingerprint(t)}${t.image?.width}x${t.image?.height}@${t.repeat.x},${t.repeat.y},${t.offset.x},${t.offset.y},${t.wrapS},${t.wrapT}` : '-');
+  return [m.type, m.name, m.color?.getHex(), m.emissive?.getHex(), m.emissiveIntensity, m.roughness, m.metalness, m.vertexColors,
+    m.side, m.alphaTest, m.opacity, m.normalScale?.x, m.envMapIntensity, ...MAPS.map((k) => tex(m[k]))].join('|');
+}
+function batchKey(o) {
+  const g = o.geometry, m = o.material;
+  if (!o.visible || o.userData?.hours || Array.isArray(m) || !m || m.transparent || m.isShaderMaterial) return null;
+  if (/glass/i.test(o.name) || /glass/i.test(m.name || '') || (g.groups?.length || 0) > 1 || g.morphAttributes?.position) return null;
+  const sig = Object.entries(g.attributes).map(([n, a]) => `${n}:${a.itemSize}:${a.normalized}:${(a.isInterleavedBufferAttribute ? a.data.array : a.array).constructor.name}`).sort().join(',');
+  return `${materialKey(m)}#${sig}#${o.castShadow}${o.receiveShadow}${o.renderOrder}`;
+}
+function addToGroup(groups, key, o, triLists) {
+  let gr = groups.get(key);
+  if (!gr) groups.set(key, (gr = []));
+  gr.push({ o, triLists });
+}
+
+// Every group becomes one BatchedMesh under root: an instance a cell (or a small mesh
+// whole), each with its own matrix, culled by CityCuller. The copies of a material that
+// aren't kept give their textures back.
+function batchGroups(root, groups, cells) {
+  root.updateMatrixWorld(true);
+  const inv = new THREE.Matrix4().copy(root.matrixWorld).invert(), m = new THREE.Matrix4();
+  const kept = new Set(), dropped = new Set();
+  let pieces = 0;
+  for (const list of groups.values()) {
+    const parts = [];
+    for (const { o, triLists } of list) {
+      const remap = new Int32Array(o.geometry.attributes.position.count).fill(-1);
+      for (const tris of triLists) parts.push({ o, geo: compactCell(o.geometry, tris, remap) });
+    }
+    const verts = parts.reduce((a, p) => a + p.geo.attributes.position.count, 0);
+    const index = parts.reduce((a, p) => a + p.geo.index.count, 0);
+    const first = list[0].o;
+    let mesh;
+    const start = cells.length;
+    try {
+      mesh = new THREE.BatchedMesh(parts.length, verts, index, first.material);
+      for (const { o, geo } of parts) {
+        const id = mesh.addInstance(mesh.addGeometry(geo));
+        mesh.setMatrixAt(id, m.multiplyMatrices(inv, o.matrixWorld));
+        const tier = FINE.test(o.name) ? 'fine' : MID.test(o.name) ? 'mid' : null;
+        cells.push({ batch: mesh, id, sphere: geo.boundingSphere.clone().applyMatrix4(o.matrixWorld), tier });
+        geo.dispose();
+      }
+    } catch (e) {
+      console.warn('city: could not batch', first.name, e.message);
+      cells.length = start;
+      continue;
+    }
+    mesh.name = first.name;
+    mesh.castShadow = first.castShadow;
+    mesh.receiveShadow = first.receiveShadow;
+    mesh.renderOrder = first.renderOrder;
+    mesh.userData = first.userData;
+    // culled by CityCuller (cheap, and only touched when a cell's visibility changes),
+    // so three does no per-cell work per frame and draws the batch in one multi-draw
+    mesh.perObjectFrustumCulled = false;
+    mesh.sortObjects = false;
+    mesh.matrixAutoUpdate = false;
+    mesh.computeBoundingBox();
+    mesh.computeBoundingSphere();
+    root.add(mesh);
+    kept.add(first.material);
+    for (const { o } of list) {
+      if (o.material !== first.material) dropped.add(o.material);
+      o.parent?.remove(o);
+    }
+    pieces += parts.length;
   }
-  const ids = [], spheres = [];
-  o.updateMatrixWorld(true);
-  for (const g of geos) {
-    const id = mesh.addInstance(mesh.addGeometry(g));
-    ids.push(id);
-    spheres.push(g.boundingSphere.clone().applyMatrix4(o.matrixWorld));
-    g.dispose();
+  // textures only the dropped copies used
+  const live = new Set();
+  root.traverse((o) => { if (o.material && !Array.isArray(o.material)) kept.add(o.material); });
+  for (const mat of kept) for (const k of MAPS) if (mat[k]) live.add(mat[k]);
+  for (const mat of dropped) {
+    if (kept.has(mat)) continue;
+    for (const k of MAPS) if (mat[k] && !live.has(mat[k])) mat[k].dispose();
+    mat.dispose();
   }
-  mesh.name = o.name;
-  mesh.castShadow = o.castShadow;
-  mesh.receiveShadow = o.receiveShadow;
-  mesh.renderOrder = o.renderOrder;
-  mesh.userData = o.userData;
-  // culled by CityCuller (cheap, and only touched when a cell's visibility changes),
-  // so three does no per-cell work per frame and draws the batch in one multi-draw
-  mesh.perObjectFrustumCulled = false;
-  mesh.sortObjects = false;
-  mesh.matrixAutoUpdate = false;
-  mesh.matrix.copy(o.matrix);
-  mesh.position.copy(o.position); mesh.quaternion.copy(o.quaternion); mesh.scale.copy(o.scale);
-  mesh.computeBoundingBox();
-  mesh.computeBoundingSphere();
-  return { mesh, ids, spheres };
+  return pieces;
 }
 
 // Which batched city cells to draw: in view (a sphere against the frustum of a view-projection

@@ -153,14 +153,29 @@ export function buildShotMesh(roots, { doors = [], doorMesh = null } = {}) {
       if (size.x * size.y + size.z * size.y + size.x * size.z > 16) return null;
       // rounds and sight lines go through from now on
       for (const k of seen) surf[c.start + k] |= 16;
-      // cut it out of whatever draws those vertices (the city chunks share the buffer)
-      const gone = new Set([...seen].map((k) => triVerts(k).join(',')));
-      for (const root of renderRoots) root.traverse((o) => {
-        if (!o.isMesh || o.geometry.attributes.position !== g.attr || !o.geometry.index) return;
-        const src = o.geometry.index.array, keep = [];
-        for (let t = 0; t + 2 < src.length; t += 3) if (!gone.has(`${src[t]},${src[t + 1]},${src[t + 2]}`)) keep.push(src[t], src[t + 1], src[t + 2]);
-        if (keep.length !== src.length) o.geometry.setIndex(new THREE.BufferAttribute(src.length && src.BYTES_PER_ELEMENT === 2 ? new Uint16Array(keep) : new Uint32Array(keep), 1));
-      });
+      // cut it out of whatever draws those vertices (the city chunks share the buffer): the
+      // meshes and where each triangle sits in their index are found once per glass mesh,
+      // then a pane is gone by collapsing its triangles in place (a few bytes uploaded)
+      if (!g.draws) {
+        g.draws = [];
+        for (const root of renderRoots) root.traverse((o) => {
+          if (!o.isMesh || o.geometry.attributes.position !== g.attr || !o.geometry.index) return;
+          const src = o.geometry.index.array, at = new Map();
+          for (let t = 0; t + 2 < src.length; t += 3) at.set(`${src[t]},${src[t + 1]},${src[t + 2]}`, t);
+          g.draws.push({ index: o.geometry.index, at });
+        });
+      }
+      for (const k of seen) {
+        const key = triVerts(k).join(',');
+        for (const d of g.draws) {
+          const t = d.at.get(key);
+          if (t === undefined) continue;
+          const a = d.index.array;
+          a[t + 1] = a[t + 2] = a[t];
+          d.index.addUpdateRange(t, 3);
+          d.index.needsUpdate = true;
+        }
+      }
       return { center: box.getCenter(new THREE.Vector3()), size };
     },
   };

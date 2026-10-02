@@ -72,4 +72,26 @@ if (!root.children.includes(small)) throw new Error('small meshes stay as they a
   c.updateFor(null, cam.position, 0, 0);
   if (!cells.every((cl) => b.getVisibleAt(cl.id))) throw new Error('no frustum: everything shown');
 }
+// small meshes on copies of one material (the city's tiles each load their own) share a batch
+{
+  const root4 = new THREE.Group();
+  const mk = (x, color = 0xffffff) => {
+    const m = new THREE.Mesh(Object.assign(new THREE.BoxGeometry(2, 2, 2), { groups: [] }), Object.assign(new THREE.MeshStandardMaterial({ color }), { name: 'facade_x' }));
+    m.name = 'facade_x';
+    m.position.set(x, 0, 0);
+    root4.add(m);
+    return m;
+  };
+  mk(0); mk(50); mk(100); mk(150, 0xff0000);
+  const { cells } = chunkMeshes(root4, { batch: true });
+  const batches = root4.children.filter((c) => c.isBatchedMesh);
+  if (batches.length !== 2 || root4.children.length !== 2) throw new Error(`3 identical copies in one batch, the red one in its own: ${batches.length}`);
+  if (cells.length !== 4) throw new Error('an instance a mesh');
+  const big = batches.find((b) => b.instanceCount === 3);
+  const c50 = cells.find((c) => c.batch === big && Math.abs(c.sphere.center.x - 50) < 0.01);
+  if (!c50) throw new Error('each instance keeps its place');
+  const mtx = new THREE.Matrix4();
+  big.getMatrixAt(c50.id, mtx);
+  if (Math.abs(mtx.elements[12] - 50) > 1e-6) throw new Error('instance matrix carries the mesh transform');
+}
 console.log('ok chunk meshes', pieces, 'pieces');
