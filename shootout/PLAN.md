@@ -153,7 +153,8 @@ Ordered by how much they lift the whole game; one commit each.
 Measured in Tel Aviv at 2000x1300: CPU ~17-21 ms a frame just issuing draws (~1100 calls:
 674 colour + 401 near shadow; far cascade +689 every 8th frame), 2.5M + 1.7M + 2.8M triangles.
 - [x] 84. Dynamic resolution: the 3D frame steps between 100% and 55% of the canvas to hold
-      ~60 fps (TAA hides it); the FPS readout shows the scale when below 100%. &fixedres turns it off.
+      ~60 fps; the FPS readout shows the scale when below 100%. Off by default (&dynres): the frame
+      is CPU-bound on draw calls, so a smaller frame only blurred it.
 - [x] 85. Small city details only near the camera: clutter to 150 m, trees and balconies to
       320 m (x quality), in 128 m pieces; the far shadow cascade is drawn without them on its own
       pass. Colour 2.5M -> 1.3M tris, far cascade 2.8M -> 0.6M; render CPU 20.8 -> 16.8 ms.

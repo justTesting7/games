@@ -998,7 +998,9 @@ async function init() {
 
   let elapsed = 0;
   let fpsT = 0, frames = 0, fps = 0, fpsLast = 0;
-  const dynRes = !bootQuery.has('fixedres'); // &fixedres: always the full resolution
+  // Off by default: the frame is mostly CPU-bound (draw calls), where a smaller frame only
+  // blurs it without speeding it up. &dynres turns it on.
+  const dynRes = bootQuery.has('dynres');
   let frameEma = 16.7, dynT = 0;
   const clock = startClock((dt, draw) => {
     // the round's last kill plays out in slow motion, easing back to speed
