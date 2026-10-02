@@ -988,7 +988,7 @@ async function init() {
   });
 
   let elapsed = 0;
-  let fpsT = 0, frames = 0, fps = 0;
+  let fpsT = 0, frames = 0, fps = 0, fpsLast = 0;
   const clock = startClock((dt, draw) => {
     // the round's last kill plays out in slow motion, easing back to speed
     if (slowmo > 0) {
@@ -1232,11 +1232,17 @@ async function init() {
       }
 
       frames++;
-      fpsT += dt;
+      // measured on the wall clock (game time slows in slow motion)
+      const nowMs = performance.now();
+      fpsT += (nowMs - (fpsLast || nowMs)) / 1000;
+      fpsLast = nowMs;
       if (fpsT > 0.5) {
         fps = frames / fpsT;
         frames = 0;
         fpsT = 0;
+        const fpsEl = $('fps');
+        fpsEl.textContent = `${fps.toFixed(0)} fps`;
+        fpsEl.className = fps < 30 ? 'low' : fps < 45 ? 'dip' : '';
         if (!$('debug').classList.contains('hidden')) {
           const info = renderer.info.render;
           $('debug').textContent = [

@@ -340,6 +340,16 @@ body.touch #carhint { bottom: 248px; }
 #banner.won #bannertitle { color: #f3dcb0; }
 #banner.lost #bannertitle { color: #ff6a55; }
 
+/* a quiet frame-rate readout, top left; amber when it dips, red when it drops */
+#fps {
+  position: absolute; left: 10px; top: 8px; pointer-events: none;
+  font: 11px/1 ui-monospace, Menlo, Consolas, monospace; letter-spacing: 0.04em;
+  color: rgba(255, 255, 255, 0.42); text-shadow: 0 1px 1px rgba(0, 0, 0, 0.5);
+}
+#fps.dip { color: rgba(255, 200, 90, 0.75); }
+#fps.low { color: rgba(255, 90, 70, 0.85); }
+#debug:not(.hidden) ~ #fps { display: none; }
+
 #debug {
   position: absolute; left: 10px; top: 10px;
   font: 12px/1.45 ui-monospace, Menlo, Consolas, monospace;
