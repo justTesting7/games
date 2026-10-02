@@ -199,6 +199,7 @@ export class Combat {
     const session = world.weapons?.session;
     const skipNet = opts.skipNet ?? !!session?.multi;
     const netHits = [];
+    world.traffic?.blast?.(pos, radius); // and the civilians driving by
     for (const f of this.fighters) {
       if (!f.alive) {
         // bodies get thrown by the blast too

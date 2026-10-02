@@ -123,6 +123,9 @@ world.raycast = (o, d, maxDist, ignore) => {
     if (hit && (!best || hit.t < best.t)) best = hit;
   };
   checkDrone(world.drone);
+  // the civilians at the wheel of the traffic (through the windows: the car's metal is below)
+  const th = world.traffic?.raycast(o, d, best ? best.t : maxDist);
+  if (th && (!best || th.t < best.t)) best = th;
   if (world.netDrones) for (const drone of world.netDrones.values()) checkDrone(drone);
   const carHit = world.cars?.raycast(o, d, best ? best.t : maxDist, ignore);
   if (carHit && (!best || carHit.t < best.t)) best = carHit;

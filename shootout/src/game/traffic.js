@@ -78,10 +78,62 @@ export class Traffic {
     ch.dead = null;
     if (ch.revive) ch.revive();
     const fighter = { id: `traffic-${i}`, name: 'Driver', isPlayer: false, alive: true, ambient: true, character: ch, pos: new THREE.Vector3() };
+    ch.dead = null;
     car.driver = fighter;
     car.ai = { throttle: 0, steer: 0, handbrake: false };
     if (car.body) car.body.rest = false;
-    this.agents.push({ car, ch, fighter, route: null, goal: this.goalFor(car), replan: 0, flee: 0, stuck: 0, reverse: 0, t: 0 });
+    this.agents.push({ car, ch, fighter, hp: 45, route: null, goal: this.goalFor(car), replan: 0, flee: 0, stuck: 0, reverse: 0, t: 0 });
+  }
+
+  /**
+   * A round through a driver's window: the head and the chest are spheres on their bones.
+   * Returns { t, normal, surface: 'flesh', traffic: agent, head } for the nearest, or null.
+   */
+  raycast(o, d, maxDist) {
+    let best = null;
+    const c = this._c || (this._c = new THREE.Vector3());
+    for (const a of this.agents) {
+      if (!a.fighter.alive || !a.ch.root.visible) continue;
+      if (Math.abs(a.car.x - o.x) > maxDist + 3 || Math.abs(a.car.z - o.z) > maxDist + 3) continue;
+      const B = a.ch.bones;
+      for (const [bone, r, head] of [[B?.Head, 0.13, true], [B?.Spine2, 0.22, false]]) {
+        if (!bone) continue;
+        bone.getWorldPosition(c);
+        const ox = o.x - c.x, oy = o.y - c.y, oz = o.z - c.z;
+        const b = ox * d.x + oy * d.y + oz * d.z, q = ox * ox + oy * oy + oz * oz - r * r;
+        const disc = b * b - q;
+        if (disc < 0) continue;
+        const t = -b - Math.sqrt(disc);
+        if (t <= 0 || t > (best ? best.t : maxDist)) continue;
+        const p = o.clone().addScaledVector(d, t);
+        best = { t, normal: p.sub(c).normalize(), surface: 'flesh', traffic: a, head };
+      }
+    }
+    return best;
+  }
+
+  /** A driver hit: a head shot or a second round kills; the car rolls to a stop. */
+  hitDriver(a, dir, { head = false, amount = 30 } = {}) {
+    if (!a?.fighter.alive) return false;
+    a.hp = (a.hp ?? 45) - (head ? 999 : amount);
+    a.flee = 12;
+    if (a.hp > 0) { a.ch.hitReact?.(dir, head ? 'Head' : 'Spine2'); return false; }
+    a.fighter.alive = false;
+    a.ch.die(dir || new THREE.Vector3(0, 0, 1)); // slumps in the seat
+    const car = a.car;
+    if (car.ai) { car.ai.throttle = 0; car.ai.steer = 0; car.ai.handbrake = false; }
+    car.driver = null; // the car is free to take (the body stays in the seat until someone does)
+    return true;
+  }
+
+  /** A blast at pos: drivers close by are killed. */
+  blast(pos, radius) {
+    for (const a of this.agents) {
+      if (!a.fighter.alive) continue;
+      const dx = a.car.x - pos.x, dz = a.car.z - pos.z, dd = Math.hypot(dx, dz);
+      if (dd > radius * 0.6) continue;
+      this.hitDriver(a, new THREE.Vector3(dx, 0.3, dz).normalize(), { amount: 999 });
+    }
   }
 
   /** Gunfire or a blast at pos: drivers within reach floor it away from it. */
@@ -111,6 +163,14 @@ export class Traffic {
     for (const a of this.agents) {
       const car = a.car, ai = car.ai;
       a.t += dt;
+      if (!a.fighter.alive) {
+        // shot dead at the wheel: the car coasts to a stop with the body in the seat, and
+        // whoever takes the car takes it from there (the body goes)
+        if (car.driver && car.driver !== a.fighter) { a.ch.root.visible = false; continue; }
+        if (car.ai) { car.ai.throttle = 0; car.ai.steer = 0; }
+        if (a.ch.root.visible) this.seat(a, dt);
+        continue;
+      }
       if (!ai || car.driver !== a.fighter) continue;
       // a wrecked car's driver is dead in the seat; a burning one just stops
       if (car.wrecked) {

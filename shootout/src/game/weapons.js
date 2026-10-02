@@ -440,7 +440,7 @@ export class Weapons {
     }
     if (!hit) return null;
     const hitDist = end.distanceTo(this.player.camera.position);
-    if (hit.fighter) {
+    if (hit.fighter || hit.traffic) {
       if (hit.head) {
         this.fx.headshot(end, dir, hit.normal, rifle ? 1.35 : 1);
         this.audio.headshot(hitDist);
@@ -448,7 +448,7 @@ export class Weapons {
         this.fx.bloodHit(end, dir, hit.normal, rifle ? 1.3 : 1);
         this.audio.impact('flesh', hitDist);
       }
-      this.sprayBehind(end, dir, hit.fighter, (hit.head ? 1 : 0.6) * (rifle ? 1.25 : 1));
+      if (hit.fighter) this.sprayBehind(end, dir, hit.fighter, (hit.head ? 1 : 0.6) * (rifle ? 1.25 : 1));
     } else {
       this.fx.impact(end, hit.normal, hit.surface, dir);
       // a shop or office window shatters (and leaves no hole hanging in the air)
@@ -461,6 +461,11 @@ export class Weapons {
       if (hit.car) { this.fx.holes?.addToCar(hit.car, end, hit.normal, 'metal', 0.11); this.world.cars?.damage(hit.car, rifle ? 16 : 4, shooter); }
       this.audio.impact(hit.surface, hitDist);
       if (hit.surface !== 'water') this.bounceOff(shooter, end, dir, hit);
+    }
+    if (hit.traffic) { // a civilian driver
+      const killed = this.world.traffic?.hitDriver(hit.traffic, dir, { head: hit.head, amount: rifle ? 999 : 30 });
+      if (shooter.isPlayer) this.onHit?.(killed ? (hit.head ? 'kill head' : 'kill') : 'body');
+      return hit;
     }
     if (hit.drone) {
       hit.drone.kill(shooter);
