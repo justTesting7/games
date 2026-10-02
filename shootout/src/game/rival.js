@@ -1003,7 +1003,8 @@ export class Rival {
       if (dd < 3 && dd > 1e-3) out.dir.add(new THREE.Vector3(dx / dd, 0, dz / dd).multiplyScalar((3 - dd) * 0.6));
     }
     if (out.dir.lengthSq() > 1e-6) out.dir.normalize();
-    if (!danger && !this.peeking && out.speed > 0.6 && !this.world.terrain?.arena) this.navigate(out, dt);
+    // (on the way to a car, walkToCar does the routing, to the door)
+    if (!danger && !this.peeking && out.speed > 0.6 && !this.world.terrain?.arena && this.drive?.phase !== 'walk') this.navigate(out, dt);
     if (this.detour > 0) {
       this.detour -= dt;
       out.dir.applyAxisAngle(UP, this.detourAngle);
@@ -1341,7 +1342,8 @@ export class Rival {
     const cars = this.world.cars;
     if (!cars?.list.length) return;
     const tp = this.threatPos();
-    if (!tp || tp.distanceTo(this.pos) < 70) return;
+    const far = tp ? Math.hypot(tp.x - this.pos.x, tp.z - this.pos.z) : 0;
+    if (!tp || far < 70) return;
     // a parked car boxed in front and back by others can't get out: skip those
     const lane = (car, dir) => !cars.list.some((o) => {
       if (o === car) return false;
@@ -1350,16 +1352,25 @@ export class Rival {
       const side = dx * Math.cos(car.yaw) - dz * Math.sin(car.yaw);
       return along > 0 && along < 6.5 && Math.abs(side) < 1.6;
     });
-    let best = null, bd = 20, out = 0;
+    // any car worth the walk: well short of the way to the target (the nearest wins), not
+    // one another jev is already heading for, nor one that just let this one down
+    const now = this.combat.time;
+    let best = null, bd = Math.min(far * 0.6, 220), out = 0;
     for (const car of cars.list) {
-      if (car.driver || car.wrecked || car.spec) continue;
+      if (car.driver || car.wrecked || car.spec || (car.hp ?? 100) < 30) continue;
+      if (car.claim && car.claim.f !== this.fighter && car.claim.until > now) continue;
+      if ((this.badCars?.get(car) || 0) > now) continue;
       const d = Math.hypot(car.x - this.pos.x, car.z - this.pos.z);
       if (d >= bd) continue;
       const fwdFree = lane(car, 1), backFree = lane(car, -1);
       if (!fwdFree && !backFree) continue;
       bd = d; best = car; out = fwdFree ? 0 : 1.3; // reverse out first when only the back is free
     }
-    if (best) this.drive = { car: best, phase: 'walk', t: 0, stuck: 0, tries: 0, reverse: out };
+    if (best) {
+      // time to get there on foot (round corners), then it gives up on it
+      this.drive = { car: best, phase: 'walk', t: 0, stuck: 0, tries: 0, reverse: out, walkFor: 8 + bd / 2.5 };
+      best.claim = { f: this.fighter, until: now + this.drive.walkFor };
+    }
   }
 
   // Looks ahead along the heading and 25 deg to each side for whatever the car would hit
@@ -1397,10 +1408,11 @@ export class Rival {
     return (l > r ? 1 : -1) * (1 - c / reach); // +steer turns left
   }
 
-  walkToCar(wish) {
+  walkToCar(wish, dt) {
     const car = this.drive.car;
-    this.drive.t += 1 / 60;
-    if (car.driver || car.wrecked || this.drive.t > 8) { this.leaveCar(); return; } // can't get to it
+    this.drive.t += dt;
+    if (car.driver || car.wrecked) { this.leaveCar(); return; } // someone else got there first
+    if (this.drive.t > (this.drive.walkFor || 8)) { this.leaveCar(true); return; } // can't get to it
     const door = exitOf(car, 1);
     const to = new THREE.Vector3(door.x - this.pos.x, 0, door.z - this.pos.z);
     if (to.length() < 1.3) {
@@ -1418,6 +1430,9 @@ export class Rival {
     wish.dir.copy(to.normalize());
     wish.speed = 5.2;
     wish.aim = false;
+    // round the buildings on the walk grid, not straight into a wall
+    this.navGoal = door;
+    this.navigate(wish, dt);
   }
 
   updateDriving(dt) {
@@ -1457,16 +1472,21 @@ export class Rival {
       if (Math.abs(car.speed) < 1.2 && ai.throttle > 0) d.stuck += dt; else d.stuck = Math.max(0, d.stuck - dt);
       if (d.stuck > 1.4) { d.stuck = 0; d.reverse = 1.1; d.tries++; }
     }
-    if ((dist < 32 && Math.abs(car.speed) < 2) || d.tries > 3 || d.t > 45) { this.leaveCar(); return; } // close enough: out and fight
+    if (dist < 32 && Math.abs(car.speed) < 2) { this.leaveCar(); return; } // close enough: out and fight
+    if (d.tries > 3 || d.t > 90) { this.leaveCar(true); return; } // wedged: out, and find another
     this.updateSeated(dt);
   }
 
-  leaveCar() {
+  // failed: the car couldn't be reached or got wedged (it isn't picked again for a while)
+  leaveCar(failed = false) {
     const d = this.drive;
     this.drive = null;
-    this.driveCooldown = this.combat.time + 20;
+    // soon looking for another while the target is still far (considerCar wants 70 m+)
+    this.driveCooldown = this.combat.time + 3;
     if (!d) return;
     const car = d.car;
+    if (car.claim?.f === this.fighter) car.claim = null;
+    if (failed) (this.badCars || (this.badCars = new Map())).set(car, this.combat.time + 40);
     if (car.driver === this.fighter) car.driver = null;
     car.ai = null;
     if (this.seatedIn === car) {
@@ -1505,7 +1525,7 @@ export class Rival {
       if (this.target && !this.enemies().includes(this.target)) this.target = null;
       wish = this.steer(dt);
       this.considerCar();
-      if (this.drive?.phase === 'walk') this.walkToCar(wish);
+      if (this.drive?.phase === 'walk') this.walkToCar(wish, dt);
     }
     this.updateAim(dt, wish);
     const jumpStarted = this.move(dt, wish);
