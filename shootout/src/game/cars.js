@@ -1565,6 +1565,7 @@ export class Cars {
     const { world } = this;
     if (car.driver?.isPlayer) this.ejectLocal(car.driver);
     world.fx?.explosion(pos, 'ground');
+    if (!car.spec) world.fx?.panels?.burst(car, sizeOf); // bonnet, doors and boot blown off
     const cam = world.player?.camera?.position;
     world.audio?.explosion?.(cam ? cam.distanceTo(pos) : 10, 0, false);
     if (car.body) { car.body.rest = false; car.body.pv -= car.spec ? 0 : 2.5; car.body.rv += (Math.random() - 0.5) * 2; }

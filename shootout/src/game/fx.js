@@ -16,6 +16,7 @@ const DEBRIS = {
   glass: { n: 5, kind: 'shard', size: 0.03, color: [0.75, 0.85, 0.9] },
 };
 import { BloodDecals } from './blood.js';
+import { Panels } from './panels.js';
 
 const particleVert = /* glsl */ `
 attribute vec4 iPos;
@@ -219,6 +220,7 @@ export class Effects {
     pipeline.fxScene.add(this.add.mesh, this.alpha.mesh, this.blood.mesh);
     this.decals = new BloodDecals(pipeline.scene, terrain);
     this.holes = new BulletHoles(pipeline.scene);
+    this.panels = new Panels(pipeline.scene, (x, z) => terrain.heightAt(x, z));
     this.skids = new SkidMarks(pipeline.scene);
     this.debris = new Debris(pipeline.scene, (x, z) => terrain.heightAt(x, z));
     this.fireballs = new Fireballs(pipeline.fxScene);
@@ -596,6 +598,7 @@ export class Effects {
 
   update(dt) {
     this.updateFireLight(dt);
+    this.panels.update(dt);
     this.fireballs.update(dt);
     this.updateEmitters(dt);
     this.skids.update(dt);
