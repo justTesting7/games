@@ -553,8 +553,10 @@ async function init() {
     const ch = new Character();
     ch.load(charAssets, looks[(i + 1) % looks.length]);
     ch.addTo(pipeline.scene);
+    // a civilian at the wheel: no guns, no holsters
     if (ch.rifle) ch.rifle.visible = false;
     ch.pistols?.forEach((p) => { p.visible = false; });
+    ch.holsters?.forEach((h) => { h.holster.visible = false; h.band.visible = false; });
     return ch;
   }, mapDef.lab ? 1 : 4, { minDist: mapDef.lab ? 0 : 35 }) : null;
   world.traffic = traffic;

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeStaticParts } from './mergeParts.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 import { loadGLTF, rpmUrl, modelUrl } from '../engine/assets.js';
 import { Ragdoll } from './ragdoll.js';
@@ -598,16 +599,10 @@ export class Character {
   }
 
   buildRifle(gltf) {
-    const rifle = gltf.scene.clone(true);
-    rifle.traverse((o) => {
-      if (!o.isMesh) return;
-      o.castShadow = true;
-      o.receiveShadow = true;
-    });
+    const rifle = Character.rifleTemplate(gltf).clone(true);
     this.bolts = ['bolt_action_rifle_7_62_bolt_a', 'bolt_action_rifle_7_62_bolt_b']
       .map((n) => rifle.getObjectByName(n)).filter(Boolean)
       .map((o) => ({ o, rest: o.position.clone() }));
-    attachSniperScope(rifle);
     rifle.matrixAutoUpdate = false;
     this.rifle = rifle;
     // Slung diagonally across the back, measured in the bind pose.
@@ -619,6 +614,24 @@ export class Character {
     const y = new THREE.Vector3().crossVectors(z, f).normalize();
     const world = new THREE.Matrix4().makeBasis(f, y, z).setPosition(sp.x, sp.y - 0.05, sp.z - 0.17);
     this.rifleBack = spine.matrixWorld.clone().invert().multiply(world);
+  }
+
+  // The rifle with its scope, its fixed parts merged into a mesh per material (the bolts
+  // move): built once, every character carries a copy sharing its geometry.
+  static rifleTemplate(gltf) {
+    const cache = Character.rifles || (Character.rifles = new WeakMap());
+    if (!cache.has(gltf)) {
+      const rifle = gltf.scene.clone(true);
+      rifle.traverse((o) => {
+        if (!o.isMesh) return;
+        o.castShadow = true;
+        o.receiveShadow = true;
+      });
+      attachSniperScope(rifle);
+      mergeStaticParts(rifle, ['bolt_action_rifle_7_62_bolt_a', 'bolt_action_rifle_7_62_bolt_b']);
+      cache.set(gltf, rifle);
+    }
+    return cache.get(gltf);
   }
 
   /** Rain soaks them: clothes, skin and hair darken and gloss over (k 0..1). */
@@ -664,6 +677,8 @@ export class Character {
     const box = new THREE.Box3().setFromObject(src);
     const grip = new THREE.Vector3(-0.09, 0.03, 0);
     src.children.forEach((c) => c.position.sub(grip));
+    // frame, hammer and trigger as one mesh (the slide and magazine move)
+    mergeStaticParts(src, src.children.filter((c) => c.name === slide || c.name.includes('magazine')).map((c) => c.name));
     this.muzzleLocal = new THREE.Vector3(box.max.x - grip.x, box.max.y - grip.y - 0.015, 0);
     const leather = new THREE.MeshStandardMaterial({ color: 0x2b1a10, roughness: 0.7 });
     const strap = new THREE.MeshStandardMaterial({ color: 0x1c130c, roughness: 0.8 });
