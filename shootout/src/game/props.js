@@ -243,6 +243,12 @@ export class Props {
       const dx = b.pos.x - o.x, dz = b.pos.z - o.z;
       const along = dx * d.x + dz * d.z;
       if (along < -2 || along > maxDist + 2) continue;
+      // and the ray must pass within the body's reach (in plan)
+      const a2 = d.x * d.x + d.z * d.z, reach = b.half.length() + 0.1;
+      if (a2 > 1e-8) {
+        const tc = Math.max(0, along / a2), ex = dx - d.x * tc, ez = dz - d.z * tc;
+        if (ex * ex + ez * ez > reach * reach) continue;
+      }
       const r = b.raycast(o, d, best ? best.t : maxDist);
       if (r && (!best || r.t < best.t)) best = { ...r, body: b, surface: b.surface };
     }

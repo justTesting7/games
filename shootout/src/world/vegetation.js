@@ -340,10 +340,13 @@ export class Colliders {
     const step = this.cell;
     const tmp = this._rayTmp || (this._rayTmp = []);
     if (!this.rayMap.size) return null;
+    const ray = (this.rayN = (this.rayN || 0) + 1); // each collider tested once a ray (the samples overlap)
     for (let t = 0; t < maxDist + step; t += step * 0.5) {
       const x = o.x + d.x * t, z = o.z + d.z * t;
       this.query(x, z, step, tmp, this.rayMap);
       for (const c of tmp) {
+        if (c.rayN === ray) continue;
+        c.rayN = ray;
         const hit = c.box ? rayBox(o, d, c, maxDist) : rayCylinder(o, d, c, maxDist);
         if (hit && (!best || hit.t < best.t)) best = hit;
       }

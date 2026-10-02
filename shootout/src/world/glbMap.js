@@ -101,7 +101,7 @@ export function makeHeightAt(root, box) {
   const far = (box ? box.max.y - box.min.y : 8) + 24;
   const meshes = [];
   root.traverse((o) => { if (o.isMesh && o.visible) meshes.push(o); });
-  return (x, z) => {
+  const fn = (x, z) => {
     const key = `${Math.round(x * 2)},${Math.round(z * 2)}`;
     if (cache.has(key)) return cache.get(key);
     origin.set(x, top, z);
@@ -121,6 +121,8 @@ export function makeHeightAt(root, box) {
     cache.set(key, h);
     return h;
   };
+  fn.max = box ? box.max.y : Infinity; // nothing stands higher (terrain.raycast skips rays above)
+  return fn;
 }
 
 export function addStudioColliders(root, colliders, span) {

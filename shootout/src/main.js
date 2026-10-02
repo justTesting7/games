@@ -99,8 +99,12 @@ const surfaceAt = (x, z, y) => {
 // other than `ignore`.
 world.raycast = (o, d, maxDist, ignore) => {
   let best = null;
-  const tt = world.terrain.raycast(o, d, maxDist);
-  if (tt !== null) {
+  // the city's triangles first (a BVH: quick, and usually close), then the ground is only
+  // marched up to that
+  const sh = world.shots?.raycast(o, d, maxDist);
+  if (sh) best = sh;
+  const tt = world.terrain.raycast(o, d, best ? best.t : maxDist);
+  if (tt !== null && (!best || tt < best.t)) {
     const p = o.clone().addScaledVector(d, tt);
     best = { t: tt, normal: world.terrain.normalAt(p.x, p.z), surface: surfaceAt(p.x, p.z) };
   }
@@ -108,8 +112,6 @@ world.raycast = (o, d, maxDist, ignore) => {
     const tw = -o.y / d.y;
     if (tw < (best ? best.t : maxDist)) best = { t: tw, normal: new THREE.Vector3(0, 1, 0), surface: 'water' };
   }
-  const sh = world.shots?.raycast(o, d, best ? best.t : maxDist);
-  if (sh) best = sh;
   const c = world.veg.colliders.raycast(o, d, best ? best.t : maxDist);
   if (c && (!best || c.t < best.t)) best = { t: c.t, normal: c.normal, surface: c.surface || c.collider.type, collider: c.collider };
   const pr = world.props.raycast(o, d, best ? best.t : maxDist);
@@ -349,7 +351,7 @@ async function init() {
   pipeline.indoor = garden;
   let studioHeight = (x, z) => 0;
   const terrain = new Terrain(data, textures, {
-    urban, arena: garden, heightFn: studioMap ? (x, z) => studioHeight(x, z) : garden ? arenaHeightAt : null,
+    urban, arena: garden, heightFn: studioMap ? Object.defineProperty((x, z) => studioHeight(x, z), 'max', { get: () => studioHeight.max ?? Infinity }) : garden ? arenaHeightAt : null,
   });
   world.terrain = terrain;
   pipeline.scene.add(terrain.group);

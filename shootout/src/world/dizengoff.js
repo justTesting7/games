@@ -25,7 +25,9 @@ export function makeNavHeight(nav) {
   const heights = nav.heights instanceof Int16Array ? nav.heights : decodeInt16(nav.heights);
   const { hcell, hw, hh, x0, z0 } = nav;
   const at = (i, j) => heights[Math.max(0, Math.min(hh - 1, j)) * hw + Math.max(0, Math.min(hw - 1, i))] / 100;
-  return (x, z) => {
+  let max = -Infinity;
+  for (const h of heights) if (h > max) max = h;
+  const fn = (x, z) => {
     const fx = (x - x0) / hcell - 0.5, fz = (z - z0) / hcell - 0.5;
     const i = Math.floor(fx), j = Math.floor(fz);
     const tx = fx - i, tz = fz - j;
@@ -33,6 +35,8 @@ export function makeNavHeight(nav) {
     const b = at(i, j + 1) * (1 - tx) + at(i + 1, j + 1) * tx;
     return a * (1 - tz) + b * tz;
   };
+  fn.max = max / 100; // the highest ground (terrain.raycast skips rays above it)
+  return fn;
 }
 
 /**

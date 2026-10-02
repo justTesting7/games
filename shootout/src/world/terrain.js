@@ -391,13 +391,26 @@ export class Terrain {
   }
 
   // Ray march against the heightfield with bisection refinement.
+  // the highest ground anywhere: a ray above it can't hit
+  get maxHeight() {
+    if (this.heightFn) return this.heightFn.max ?? Infinity; // (may be set once the map loads)
+    if (this._maxH === undefined) { let m = -Infinity; for (const h of this.heights) if (h > m) m = h; this._maxH = m; }
+    return this._maxH;
+  }
+
   raycast(origin, dir, maxDist) {
+    const top = this.maxHeight + 0.05;
     let step = 0.5;
-    let tPrev = 0;
     let t = 0.05;
+    if (origin.y > top) {
+      if (dir.y >= 0) return null; // above all the ground and not coming down
+      t = Math.max(t, (origin.y - top) / -dir.y); // skip to where it gets low enough
+    }
+    let tPrev = Math.max(0, t - 0.05);
     while (t < maxDist) {
       const x = origin.x + dir.x * t, y = origin.y + dir.y * t, z = origin.z + dir.z * t;
       if (!this.inBounds(x, z)) return null;
+      if (y > top && dir.y >= 0) return null; // climbed out of reach
       if (y < this.heightAt(x, z)) {
         let a = tPrev, b = t;
         for (let k = 0; k < 10; k++) {
