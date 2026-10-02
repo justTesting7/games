@@ -230,11 +230,18 @@ export class Pipeline {
         uCloudCover: { value: 0.5 },
         uLightning: { value: 0 },
       },
-      depthTest: false,
+      // drawn last among the opaque things, at the far plane: only where no building or
+      // ground is in front does the sky get shaded (it writes the far depth into alpha)
+      depthTest: true,
       depthWrite: false,
+      depthFunc: THREE.LessEqualDepth,
+      defines: { SKY_AT_FAR: 1 },
     });
     this.skyMesh = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.skyMaterial);
     this.skyMesh.frustumCulled = false;
+    this.skyMesh.renderOrder = 1e6;
+    this.skyMesh.castShadow = this.skyMesh.receiveShadow = false;
+    this.scene.add(this.skyMesh);
 
     this.waterMaterial = new THREE.ShaderMaterial({
       vertexShader: S.waterVert,
@@ -557,7 +564,7 @@ export class Pipeline {
     const r = this.renderer, kids = this.scene.children, saved = [];
     for (const k of kids) {
       if (k.isLight || k === this.sun.target || k === this.farSun?.target || k === this.dynSun?.target) continue;
-      const on = show(k);
+      const on = k !== this.skyMesh && show(k); // (the sky is never drawn into a shadow pass)
       if (k.visible !== on) { saved.push([k, k.visible]); k.visible = on; }
     }
     for (const L of lights) L.shadow.needsUpdate = true;
@@ -716,9 +723,12 @@ export class Pipeline {
     this.cullForShadow(F, 'far');
     F.shadow.needsUpdate = true;
     const prev = r.getRenderTarget();
+    const sky = this.skyMesh.visible;
+    this.skyMesh.visible = false;
     r.setRenderTarget(this._farRT);
     r.render(this.scene, this._farCam);
     r.setRenderTarget(prev);
+    this.skyMesh.visible = sky;
     F.shadow.needsUpdate = false;
     this.beforeFarShadow?.(false);
     this.sun.shadow.autoUpdate = nearAuto;
@@ -819,14 +829,14 @@ export class Pipeline {
     r.setRenderTarget(this.sceneRT);
     r.setClearColor(this.indoor ? 0x0c0d10 : 0x000000, 0);
     r.clear(true, true, false);
-    if (!this.indoor) this.timed('sky', () => r.render(this.skyMesh, camera));
+    this.skyMesh.visible = !this.indoor;
     if (this.prof?.ext && this.sun.castShadow && !this.shadowCache) {
       // profiling: draw the near shadow map on its own, so it gets its own line
       this.nullCamera();
       const auto = this.sun.shadow.autoUpdate;
       this.sun.shadow.autoUpdate = false;
       this.sun.shadow.needsUpdate = true;
-      this.timed('shadows', () => { r.setRenderTarget(this._farRT); r.render(this.scene, this._farCam); });
+      this.timed('shadows', () => { const sky = this.skyMesh.visible; this.skyMesh.visible = false; r.setRenderTarget(this._farRT); r.render(this.scene, this._farCam); this.skyMesh.visible = sky; });
       this.sun.shadow.needsUpdate = false;
       r.setRenderTarget(this.sceneRT);
       this.timed('scene', () => r.render(this.scene, camera));

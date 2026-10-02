@@ -40,7 +40,11 @@ export const fullscreenVert = /* glsl */ `
 varying vec2 vUv;
 void main() {
   vUv = uv;
+  #ifdef SKY_AT_FAR
+  gl_Position = vec4(position.xy, 1.0, 1.0); // on the far plane, behind everything
+  #else
   gl_Position = vec4(position.xy, 0.0, 1.0);
+  #endif
 }
 `;
 
