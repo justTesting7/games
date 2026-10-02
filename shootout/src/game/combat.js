@@ -21,7 +21,7 @@ const CAPSULES = [
   ['RightLeg', 'RightFoot', 0.06, 'limb'],
 ];
 export const LIMB_DAMAGE = 0.65;
-const PUSH = { pistols: 1.8, rifle: 3, grenade: 6, drone: 6, car: 7 };
+const PUSH = { knife: 1.2, pistols: 1.8, rifle: 3, grenade: 6, drone: 6, car: 7 };
 
 /** Distance along the unit ray o + t d to capsule a-b of radius r, or null (Inigo Quilez). */
 export function rayCapsule(o, d, a, b, r) {

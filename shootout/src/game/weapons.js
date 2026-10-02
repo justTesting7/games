@@ -22,9 +22,14 @@ export const WEAPONS = {
     key: 'drone', name: 'Suicide drone', short: 'drone', slot: 4,
     count: 10, radius: 9.5, damage: 150,
   },
+  knife: {
+    // a stab lands mid-thrust on whoever is within reach in front; from behind it kills
+    key: 'knife', name: 'Combat knife', short: 'knife', slot: 5, melee: true,
+    interval: 0.55, body: 55, back: 200, reach: 2.0, cone: 0.6,
+  },
   car: { key: 'car', name: 'Car', short: 'car' },
 };
-export const SLOTS = ['pistols', 'rifle', 'grenade', 'drone'];
+export const SLOTS = ['pistols', 'rifle', 'grenade', 'drone', 'knife'];
 const THROW_DUR = 0.8;
 const THROW_RELEASE = 0.42;
 const GRAVITY = 9.8;
@@ -50,6 +55,7 @@ export class Loadout {
   }
 
   has(key) {
+    if (key === 'knife') return true;
     if (key === 'grenade') return this.grenades > 0;
     if (key === 'drone') return this.drones > 0;
     return this.mag[key] + this.reserve[key] > 0;
@@ -137,7 +143,7 @@ export class Weapons {
   reload(f) {
     const L = f.loadout;
     const def = WEAPONS[L.current];
-    if (L.current === 'grenade' || L.current === 'drone' || L.reloading || L.mag[def.key] >= def.mag || L.reserve[def.key] <= 0) return false;
+    if (L.current === 'grenade' || L.current === 'drone' || L.current === 'knife' || L.reloading || L.mag[def.key] >= def.mag || L.reserve[def.key] <= 0) return false;
     if (f.character.weapon !== def.key) return false;
     L.reloadT = def.reload;
     f.character.startAction(def.key === 'rifle' ? 'reload' : 'pistolReload', def.reload);
@@ -158,6 +164,14 @@ export class Weapons {
     const def = WEAPONS[key];
     if (ch.weapon !== key || ch.equipT < 1 || L.reloading || L.cooldown > 0) return false;
     if (key === 'drone') return false;
+    if (key === 'knife') {
+      // the thrust; it strikes partway through (stab, from tick)
+      if (ch.action) return false;
+      ch.startAction('stab', def.interval);
+      L.cooldown = def.interval;
+      this.sound(f, 'swish');
+      return true;
+    }
     if (key === 'grenade') {
       if (L.grenades <= 0 || ch.action) return false;
       L.grenades--;
@@ -239,6 +253,7 @@ export class Weapons {
       this.fx.ejectCasing(port, right, up, this.nearAtt(f));
     }
     ch.showGrenade = L.grenades > 0 || (ch.action?.type === 'throw');
+    if (ch.consumeStrike()) this.stab(f);
     if (ch.consumeRelease()) {
       const from = f.isPlayer ? this.throwOrigin() : ch.handPosition();
       this.throwGrenade(f, from, L.throwVel);
@@ -248,6 +263,58 @@ export class Weapons {
     if (L.current === 'grenade' && L.grenades <= 0 && !ch.action) this.equip(f, L.has('rifle') && f.preferRifle ? 'rifle' : 'pistols');
     if (L.current === 'drone' && L.drones <= 0 && !this.drone.flying) this.equip(f, L.has('pistols') ? 'pistols' : 'rifle');
     if (L.current !== 'grenade' && L.current !== 'drone' && !L.has(L.current)) this.equip(f, L.current === 'rifle' ? 'pistols' : 'rifle');
+  }
+
+  /**
+   * The knife's thrust lands: the nearest fighter within reach and in front (and not
+   * behind a wall) is cut; one facing away is killed outright. Otherwise the blade
+   * meets whatever is in front, or air.
+   */
+  stab(f) {
+    const def = WEAPONS.knife;
+    const ch = f.character;
+    const from = this.combat.chest(f);
+    const aim = ch.aimDir.lengthSq() > 0.5 ? ch.aimDir : tmp.set(0, 0, 1).applyQuaternion(ch.root.quaternion);
+    const fx = aim.x, fz = aim.z, fl = Math.hypot(fx, fz) || 1;
+    let best = null, bestD = def.reach;
+    for (const v of this.combat.fighters) {
+      if (v === f || !v.alive) continue;
+      const to = this.combat.chest(v).sub(from);
+      const d = Math.hypot(to.x, to.z);
+      if (d > bestD || Math.abs(to.y) > 1.2) continue;
+      if ((to.x * fx + to.z * fz) / (fl * (d || 1)) < def.cone) continue; // not in front
+      const len = to.length();
+      const hit = this.world.raycast(from, to.clone().divideScalar(len || 1), len, f);
+      if (hit && !hit.fighter && hit.t < len - 0.35) continue; // a wall between
+      best = v; bestD = d;
+    }
+    const multi = f.isPlayer && this.session?.multi;
+    if (best) {
+      const at = this.combat.chest(best);
+      const dir = at.clone().sub(from).normalize();
+      // from behind: the victim faces the same way the blade goes
+      const vf = best.character?.root ? tmp.set(0, 0, 1).applyQuaternion(best.character.root.quaternion) : null;
+      const back = !!vf && vf.x * dir.x + vf.z * dir.z > 0.45;
+      const dmg = back ? def.back : def.body;
+      this.fx.bloodHit(at, dir, dir.clone().negate(), back ? 1.5 : 1.15);
+      this.sprayBehind(at, dir, best, back ? 0.9 : 0.5);
+      this.audio.impact('flesh', at.distanceTo(this.player.camera.position));
+      this.audio.stab?.(this.nearAtt(f));
+      if (multi && best.net) this.session.reportShot(from, dir, 'knife', best.id, back);
+      this.combat.damage(best, f, dmg, dir, { weapon: 'knife', at, part: 'Spine2', limb: false, head: false });
+      if (f.isPlayer) this.onHit?.(best.alive ? 'body' : 'kill');
+      return best;
+    }
+    if (multi) this.session.reportShot(from, aim, 'knife');
+    // nobody there: the point meets a wall or a car, or just air
+    const ad = tmp.set(fx / fl, aim.y, fz / fl).normalize();
+    const hit = this.world.raycast(from, ad, 1.3, f);
+    if (hit && !hit.fighter) {
+      const p = from.clone().addScaledVector(ad, hit.t);
+      this.fx.impact(p, hit.normal, hit.surface, ad.clone());
+      this.audio.impact(hit.surface, p.distanceTo(this.player.camera.position));
+    }
+    return null;
   }
 
   /**
@@ -728,6 +795,13 @@ export class Weapons {
         } else if (!input.fire && !this.player.sniperPending) {
           this.sniperHeld = false;
         }
+      }
+      if (L.current === 'knife') {
+        // a stab a press (held: one after another); the body turns to face the aim first
+        if (input.fire || this.queued > 0) this.player.aimHold = Math.max(this.player.aimHold, 0.8);
+        if ((input.fire || this.queued > 0) && ch.ready && this.player.facingError < 0.6 && this.trigger(f, this.player.aimPoint)) this.queued = 0;
+        this.tick(f, dt);
+        return;
       }
       const firing = L.current === 'rifle'
         ? this.queued > 0 && !input.fire

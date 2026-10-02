@@ -9,9 +9,10 @@ const DAMAGE = {
   grenade: { body: 120, head: 120 },
   drone: { body: 150, head: 150 },
   car: { body: 200, head: 200 },
+  knife: { body: 55, head: 200 }, // head: a stab from behind
 };
 const ROSTERS = new Set(['adventurer', 'redpolo', 'greytee', 'checkers', 'denim', 'linen']);
-const WEAPONS = new Set(['pistols', 'rifle', 'grenade', 'drone']);
+const WEAPONS = new Set(['pistols', 'rifle', 'grenade', 'drone', 'knife']);
 const MAPS = new Set(['island', 'city', 'garden', 'manhattan', 'dizengoff', 'square', 'bloomfield', 'telaviv']);
 const FLEET = 256; // the Tel Aviv maps park up to ~180 cars and scooters
 const clampMin = (v) => {
@@ -396,7 +397,7 @@ export class GameRoom extends DurableObject {
     const splash = w === 'grenade' || w === 'drone';
     if (!vic.alive || (atk.id === vic.id && !splash)) return;
     const dx = atk.p[0] - vic.p[0], dy = atk.p[1] - vic.p[1], dz = atk.p[2] - vic.p[2];
-    if (Math.hypot(dx, dy, dz) > 220) return;
+    if (Math.hypot(dx, dy, dz) > (w === 'knife' ? 4 : 220)) return; // a knife reaches arm's length
     const def = DAMAGE[w] || DAMAGE.pistols;
     const amt = Math.round((head ? def.head : def.body) * scale);
     if (amt <= 0) return;

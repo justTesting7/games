@@ -1093,6 +1093,9 @@ export class Rival {
     const L = f.loadout;
     const ch = this.character;
     let want = this.want;
+    // someone in arm's reach: out with the knife (and back to the gun once they're off)
+    const close = this.knifeRange();
+    if (want !== 'grenade' && (close < 2.4 || (L.current === 'knife' && close < 3.6))) want = 'knife';
     if (want === 'grenade' && (L.grenades <= 0 || !this.throwAt)) want = this.want = this.gun;
     if (want === 'grenade' && !this.canFight()) want = this.gun;
     if (!L.has(want)) want = L.has(this.gun) ? this.gun : L.has('pistols') ? 'pistols' : 'rifle';
@@ -1192,11 +1195,26 @@ export class Rival {
     return true;
   }
 
+  // how far the target is, when it's alive and in sight (Infinity otherwise)
+  knifeRange() {
+    const T = this.target;
+    if (!T?.alive || !this.seen(T).visible || Math.abs(T.pos.y - this.pos.y) > 1.5) return Infinity;
+    return Math.hypot(T.pos.x - this.pos.x, T.pos.z - this.pos.z);
+  }
+
   shoot(dt, wish) {
     this.cooldown -= dt;
     const T = this.target;
     const L = this.fighter.loadout;
     if (!this.canFight() || L.current === 'grenade') return;
+    if (L.current === 'knife') {
+      // stab when close and turned to them
+      if (!T || this.cooldown > 0 || this.knifeRange() > WEAPONS.knife.reach - 0.2) return;
+      const want = Math.atan2(T.pos.x - this.pos.x, T.pos.z - this.pos.z);
+      if (Math.abs(wrapAngle(want - this.yaw)) > 0.45) return;
+      if (this.weapons.trigger(this.fighter, this.aimPoint)) this.cooldown = 0.25 + Math.random() * 0.35 + (this.persona.reaction || 0) * 0.5;
+      return;
+    }
     if (this.tryShootDrone(dt)) return;
     if (!T || !wish.aim) return;
     const m = this.seen(T);
@@ -1524,6 +1542,14 @@ export class Rival {
       if (this.thinkT <= 0 && !this.thinking) this.think();
       if (this.target && !this.enemies().includes(this.target)) this.target = null;
       wish = this.steer(dt);
+      if (this.fighter.loadout.current === 'knife' && this.target?.alive) {
+        // knife out: straight at them, facing them
+        const T = this.target;
+        const dx = T.pos.x - this.pos.x, dz = T.pos.z - this.pos.z, d = Math.hypot(dx, dz) || 1;
+        wish.dir.set(dx / d, 0, dz / d);
+        wish.speed = d > 1.3 ? 4.6 : 0;
+        wish.aim = true;
+      }
       this.considerCar();
       if (this.drive?.phase === 'walk') this.walkToCar(wish, dt);
     }

@@ -191,7 +191,7 @@ addEventListener('keydown', (e) => {
   if (e.code === 'KeyE' && !e.repeat) input.interact = true;
   if (e.code === 'KeyR' && !e.repeat) input.reload = true;
   if (e.code === 'Enter' && !e.repeat) input.restart = true;
-  if (/^Digit[1-4]$/.test(e.code)) input.slot = Number(e.code.slice(5));
+  if (/^Digit[1-5]$/.test(e.code)) input.slot = Number(e.code.slice(5));
   if (e.code === 'KeyQ' && !e.repeat) input.cycle = 1;
   if (e.code === 'F3') { $('debug').classList.toggle('hidden'); e.preventDefault(); }
 });
@@ -1183,7 +1183,7 @@ async function init() {
     }
     const L = player.fighter.loadout;
     const wdef = WEAPONS[L.current];
-    setText($('ammo'), L.current === 'grenade' ? `${L.grenades}`
+    setText($('ammo'), L.current === 'knife' ? '—' : L.current === 'grenade' ? `${L.grenades}`
       : L.current === 'drone' ? `${L.drones}` : `${L.mag[L.current]} / ${L.reserve[L.current]}`);
     setText($('weaponname'), spec
       ? `Spectating ${spec.persona?.name || spec.fighter.name}`
@@ -1193,7 +1193,7 @@ async function init() {
       : weapons.chargingGrenade ? 'pull back… release to throw'
       : L.reloading ? 'reloading…' : wdef.name);
     $('weapon').classList.toggle('reloading', L.reloading);
-    $('weapon').classList.toggle('empty', L.current !== 'grenade' && L.current !== 'drone' && L.mag[L.current] === 0);
+    $('weapon').classList.toggle('empty', L.current !== 'grenade' && L.current !== 'drone' && L.current !== 'knife' && L.mag[L.current] === 0);
     const gch = $('grenadecharge');
     const charging = alive && L.current === 'grenade' && weapons.chargingGrenade;
     gch.classList.toggle('show', charging);
@@ -1202,7 +1202,7 @@ async function init() {
     if (gbar) setVar(gbar, '--pct', charging ? `${(weapons.grenadeCharge * 100).toFixed(0)}%` : '0%');
     $('crosshair').classList.toggle('grenade', charging);
     document.querySelectorAll('#slots b').forEach((el, i) => {
-      const key = ['pistols', 'rifle', 'grenade', 'drone'][i];
+      const key = ['pistols', 'rifle', 'grenade', 'drone', 'knife'][i];
       el.classList.toggle('on', key === L.current);
       el.classList.toggle('off', key === 'drone' ? L.drones <= 0 && !flying : !L.has(key));
     });

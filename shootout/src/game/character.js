@@ -375,6 +375,9 @@ const RIFLE = {
 // Wrist path for a throw, in body space (x right, y up, z forward) relative
 // to the right shoulder, keyed by the fraction of the throw.
 const THROW = { dur: 0.8, release: 0.42 };
+// a stab, as fractions of its length: drawn back by `back`, the point out at `out`
+// (where it strikes)
+const STAB = { back: 0.28, out: 0.46, strike: 0.42 };
 const THROW_PATH = [
   [0, new THREE.Vector3(0.12, -0.25, 0.25)],
   [0.3, new THREE.Vector3(0.14, 0.2, -0.3)],
@@ -549,6 +552,39 @@ export class Character {
     this.buildRifle(assets.rifleGltf);
     this.grenade = Character.grenadeModel(assets.grenadeGltf);
     this.grenade.matrixAutoUpdate = false;
+    this.knife = Character.knifeModel();
+  }
+
+  // A combat knife, built here: a clip-point steel blade along +y out of the fist, a
+  // small guard and a dark grip, with the middle of the grip at the origin.
+  static knifeModel() {
+    if (!Character.knifeParts) {
+      const steel = new THREE.MeshStandardMaterial({ color: 0xc4c8cc, metalness: 1, roughness: 0.26 });
+      const dark = new THREE.MeshStandardMaterial({ color: 0x1a1b1d, roughness: 0.8, metalness: 0.1 });
+      const sh = new THREE.Shape();
+      sh.moveTo(-0.008, 0);
+      sh.lineTo(0.013, 0);
+      sh.lineTo(0.013, 0.11);
+      sh.quadraticCurveTo(0.012, 0.155, 0.002, 0.172); // the edge sweeps up to the point
+      sh.lineTo(-0.003, 0.14);
+      sh.lineTo(-0.008, 0.13); // the clipped back
+      sh.lineTo(-0.008, 0);
+      const blade = new THREE.ExtrudeGeometry(sh, { depth: 0.0026, bevelEnabled: true, bevelThickness: 0.0011, bevelSize: 0.0012, bevelSegments: 1, curveSegments: 6 });
+      blade.translate(0, 0.056, -0.0013);
+      const guard = new THREE.BoxGeometry(0.046, 0.007, 0.013).translate(0.002, 0.052, 0);
+      const grip = new THREE.CylinderGeometry(0.0115, 0.0125, 0.1, 10).translate(0.002, 0, 0);
+      const pommel = new THREE.CylinderGeometry(0.013, 0.011, 0.012, 10).translate(0.002, -0.055, 0);
+      Character.knifeParts = [[blade, steel], [guard, steel], [grip, dark], [pommel, steel]];
+    }
+    const g = new THREE.Group();
+    for (const [geo, mat] of Character.knifeParts) {
+      const m = new THREE.Mesh(geo, mat);
+      m.castShadow = true;
+      g.add(m);
+    }
+    g.matrixAutoUpdate = false;
+    g.visible = false;
+    return g;
   }
 
   // A copy of the grenade with the handle's grip point at the origin.
@@ -680,6 +716,7 @@ export class Character {
     this.root.clear();
     this.rifle?.removeFromParent();
     this.grenade?.removeFromParent();
+    this.knife?.removeFromParent();
     this.braid?.removeFromParent();
     this.pistols?.forEach((p) => p.removeFromParent());
     this.holsters?.forEach((h) => {
@@ -697,7 +734,7 @@ export class Character {
     this.mixer = null;
     this.load(assets, look);
     if (scene) {
-      scene.add(this.rifle, this.grenade);
+      scene.add(this.rifle, this.grenade, this.knife);
       if (this.braid) scene.add(this.braid);
       this.pistols.forEach((p) => scene.add(p));
       this.holsters.forEach((h) => scene.add(h.holster, h.band));
@@ -705,7 +742,7 @@ export class Character {
   }
 
   addTo(scene) {
-    scene.add(this.root, this.rifle, this.grenade);
+    scene.add(this.root, this.rifle, this.grenade, this.knife);
     if (this.braid) scene.add(this.braid);
     this.pistols.forEach((p) => scene.add(p));
     this.holsters.forEach((h) => scene.add(h.holster, h.band));
@@ -874,6 +911,7 @@ export class Character {
       this.updatePistols(dt);
       this.placeRifle();
       this.placeGrenade();
+      this.placeKnife();
       return;
     }
     const k = Math.min(1, d.t / 0.75);
@@ -892,6 +930,7 @@ export class Character {
     this.updatePistols(dt);
     this.placeRifle();
     this.placeGrenade();
+    this.placeKnife();
   }
 
   // Called by the controller every frame with the movement state.
@@ -1037,8 +1076,10 @@ export class Character {
     if (this.stagger > 0) this.stagger = Math.max(0, this.stagger - dt);
     if (s.swimming) this.applySwim(s, dt);
     if (this.weapon === 'grenade') this.applyThrow(dt);
+    if (this.weapon === 'knife') this.applyStab();
     this.placeRifle(dt);
     this.placeGrenade();
+    this.placeKnife();
     this.updateFeet(dt, s);
     if (near) this.updateBraid(dt);
     this.updatePistols(dt);
@@ -1067,6 +1108,7 @@ export class Character {
       const before = a.t;
       a.t += dt;
       if (a.type === 'throw' && before < THROW.release * (a.dur / THROW.dur) && a.t >= THROW.release * (a.dur / THROW.dur)) this.released = true;
+      if (a.type === 'stab' && before < STAB.strike * a.dur && a.t >= STAB.strike * a.dur) this.struck = true;
       if (a.t >= a.dur) this.action = null;
     }
   }
@@ -1203,6 +1245,63 @@ export class Character {
     solveArm(B, 'Left', reach, shL.clone().addScaledVector(UP, -0.6).addScaledVector(left, 0.4), null, null, w * 0.8, this.tmp);
   }
 
+  // The knife: held low and ready, point forward; a stab draws the hand back past the hip,
+  // drives it out along the aim with the shoulders turning into it, and brings it back.
+  applyStab() {
+    const e = smooth(this.equipT);
+    if (e < 0.01 || this.seated || this.dead) return;
+    const B = this.bones, a = this.action;
+    let twist = 0, phase = -1;
+    if (a?.type === 'stab') {
+      const u = a.t / a.dur;
+      phase = u;
+      twist = u < STAB.back ? -0.3 * smooth(u / STAB.back)
+        : u < STAB.out ? -0.3 + 0.7 * smooth((u - STAB.back) / (STAB.out - STAB.back))
+          : 0.4 * (1 - smooth((u - STAB.out) / (1 - STAB.out)));
+      rotateBoneWorld(B.Spine1, this.tmp.q.setFromAxisAngle(UP, twist * 0.6), this.tmp);
+      rotateBoneWorld(B.Spine2, this.tmp.q.setFromAxisAngle(UP, twist * 0.4), this.tmp);
+    }
+    const { fwd, left, right } = this.bodyAxes();
+    const sh = B.RightArm.getWorldPosition(new THREE.Vector3());
+    const dir = this.aimDir.lengthSq() > 0.5 ? this.aimDir.clone() : fwd.clone();
+    if (dir.dot(fwd) < 0.2) dir.copy(fwd);
+    const ready = sh.clone().addScaledVector(right, 0.1).addScaledVector(UP, -0.38).addScaledVector(fwd, 0.3);
+    let target = ready;
+    if (phase >= 0) {
+      const back = sh.clone().addScaledVector(right, 0.2).addScaledVector(UP, -0.24).addScaledVector(fwd, -0.04);
+      const out = sh.clone().addScaledVector(dir, 0.6).addScaledVector(UP, -0.06).addScaledVector(left, 0.1);
+      if (phase < STAB.back) target = ready.clone().lerp(back, smooth(phase / STAB.back));
+      else if (phase < STAB.out) target = back.clone().lerp(out, smooth((phase - STAB.back) / (STAB.out - STAB.back)));
+      else target = out.clone().lerp(ready, smooth((phase - STAB.out) / (1 - STAB.out)));
+    }
+    solveArm(B, 'Right', target, sh.clone().addScaledVector(UP, -0.5).addScaledVector(right, 0.5), null, null, e, this.tmp);
+  }
+
+  placeKnife() {
+    const k = this.knife;
+    if (!k) return;
+    const show = this.weapon === 'knife' && !this.dead && this.equipT > 0.25;
+    k.visible = show;
+    if (!show) return;
+    const B = this.bones;
+    if (!B.RightHandMiddle1 || !B.RightHandIndex1 || !B.RightHandPinky1) { k.visible = false; return; }
+    // in the fist: the grip across the palm (pinky to index), the blade out above the thumb
+    const hp = B.RightHand.getWorldPosition(V[2]);
+    const fp = B.RightHandMiddle1.getWorldPosition(V[3]);
+    const x = V[4].subVectors(fp, hp).normalize();
+    const y = B.RightHandIndex1.getWorldPosition(V[5]).sub(B.RightHandPinky1.getWorldPosition(V[6]));
+    y.addScaledVector(x, -y.dot(x)).normalize();
+    const z = V[7].crossVectors(x, y);
+    const palm = hp.lerp(fp, 0.6).addScaledVector(z, -0.012);
+    // the wrist cocked: the blade leans forward along the forearm, so a thrust leads with
+    // the point (bx, by: the hand's axes turned ~48 degrees about z)
+    const bx = V[0].copy(x).multiplyScalar(0.66).addScaledVector(y, -0.75);
+    const by = V[1].copy(x).multiplyScalar(0.75).addScaledVector(y, 0.66);
+    k.matrix.makeBasis(bx, by, z).setPosition(palm);
+    k.matrixWorld.copy(k.matrix);
+    k.children.forEach((c) => c.updateMatrixWorld(true));
+  }
+
   placeGrenade() {
     const g = this.grenade;
     const a = this.action;
@@ -1268,6 +1367,13 @@ export class Character {
   consumeRelease() {
     if (!this.released) return false;
     this.released = false;
+    return true;
+  }
+
+  /** The knife's thrust has reached its point this frame (once a stab). */
+  consumeStrike() {
+    if (!this.struck) return false;
+    this.struck = false;
     return true;
   }
 

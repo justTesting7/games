@@ -575,6 +575,11 @@ export class Session {
     if (!dir.lengthSq()) return;
     dir.normalize();
     const ch = r.character;
+    if (msg.w === 'knife') { // a stab: the thrust and its swish (the hit comes from the room)
+      if (!ch.action) ch.startAction?.('stab', 0.55);
+      this.weapons.sound(r.fighter, 'swish');
+      return;
+    }
     const rifle = msg.w === 'rifle';
     const flash = rifle && ch.rifleMuzzle ? ch.rifleMuzzle() : ch.muzzleWorld?.(0) || from;
     this.world.fx.muzzle(flash, dir, rifle ? 2.4 : 1);

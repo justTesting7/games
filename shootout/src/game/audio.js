@@ -395,6 +395,13 @@ export class Audio {
   }
 
   // Gun handling and grenade noises: short filtered clicks and scrapes.
+  // the knife going in: a dull, wet thud
+  stab(att = 1) {
+    if (!this.ctx || att < 0.02) return;
+    this.noiseBurst({ freq: 170, q: 0.7, type: 'lowpass', gain: 0.6 * att, attack: 0.003, release: 0.12, send: 0.08 });
+    this.noiseBurst({ freq: 750, q: 1.2, gain: 0.22 * att, attack: 0.002, release: 0.07 });
+  }
+
   mech(kind, att = 1) {
     if (!this.ctx || att < 0.02) return;
     const click = (freq, gain, rel = 0.025, q = 4) => this.noiseBurst({ freq, q, gain: gain * att, attack: 0.001, release: rel, send: 0.1 });
@@ -441,6 +448,13 @@ export class Audio {
         this.tone(6900 + Math.random() * 900, 0.04, 0.02 * att, 'sine');
         click(5200, 0.08, 0.012, 6);
         break;
+      case 'swish': { // the blade through the air: a breathy sweep that rises and fades
+        const f = this.noiseBurst({ freq: 900, q: 1.6, gain: 0.32 * att, attack: 0.03, release: 0.14, send: 0.04 });
+        const t = this.ctx.currentTime;
+        f.frequency.setValueAtTime(900, t);
+        f.frequency.exponentialRampToValueAtTime(3800, t + 0.12);
+        break;
+      }
       case 'bounce': this.noiseBurst({ freq: 600, q: 1.8, type: 'bandpass', gain: 0.5 * att, attack: 0.001, release: 0.06 }); click(2300, 0.15, 0.03); break;
       default: break;
     }

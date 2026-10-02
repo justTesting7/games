@@ -9,7 +9,9 @@ const earlyOut = weapons.indexOf('if (!hit) return null;');
 if (report < 0 || earlyOut < 0 || report > earlyOut) {
   throw new Error('open-air misses must call reportShot before the no-hit return');
 }
-if ((weapons.match(/this\.session\.reportShot/g) || []).length !== 2) {
+// (the knife's stab reports its own, see stab())
+const guns = weapons.slice(0, weapons.indexOf('  stab(f) {')) + weapons.slice(weapons.indexOf('  ballistic('));
+if ((guns.match(/this\.session\.reportShot/g) || []).length !== 2) {
   throw new Error('expected one miss/hit report plus the drone report');
 }
 
