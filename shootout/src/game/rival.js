@@ -1335,6 +1335,9 @@ export class Rival {
   // and jumps out to fight when close, or when the car is wedged or burning.
   considerCar() {
     if (this.drive || !this.target || this.combat.time < (this.driveCooldown || 0)) return;
+    // looked over a few times a second, not every frame
+    if (this.combat.time < (this.carLookT || 0)) return;
+    this.carLookT = this.combat.time + 0.4;
     const cars = this.world.cars;
     if (!cars?.list.length) return;
     const tp = this.threatPos();
@@ -1366,6 +1369,11 @@ export class Rival {
     const cols = this.world.veg?.colliders, cars = this.world.cars?.list || [];
     const reach = 6 + Math.min(Math.abs(car.speed), 20) * 0.45;
     const tmp = this._avoidTmp || (this._avoidTmp = []);
+    // only the cars that could be within reach (the probes test them ~30 times)
+    const near = this._nearCars || (this._nearCars = []);
+    near.length = 0;
+    const span = reach + 3;
+    for (const o of cars) if (Math.abs(o.x - car.x) < span && Math.abs(o.z - car.z) < span) near.push(o);
     const hitAt = (x, z) => {
       if (cols) {
         for (const c of cols.query(x, z, 1.4, tmp)) {
@@ -1373,7 +1381,7 @@ export class Rival {
           if (c.box ? x > c.x0 - 0.9 && x < c.x1 + 0.9 && z > c.z0 - 0.9 && z < c.z1 + 0.9 : Math.hypot(x - c.x, z - c.z) < (c.r || 0) + 0.9) return true;
         }
       }
-      for (const o of cars) if (o !== car && Math.abs(o.x - x) < 2.4 && Math.abs(o.z - z) < 2.4 && Math.hypot(o.x - x, o.z - z) < 2.2) return true;
+      for (const o of near) if (o !== car && Math.abs(o.x - x) < 2.4 && Math.abs(o.z - z) < 2.4 && Math.hypot(o.x - x, o.z - z) < 2.2) return true;
       return false;
     };
     const look = (a) => {
