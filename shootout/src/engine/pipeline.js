@@ -378,8 +378,12 @@ export class Pipeline {
     if (w > cap) { h = Math.max(2, Math.round(h * cap / w)); w = cap; }
     if (h > cap) { w = Math.max(2, Math.round(w * cap / h)); h = cap; }
     this.renderer.setSize(w, h, false);
+    this.cssSize = [w, h];
     const pr = this.renderer.getPixelRatio();
-    const W = Math.max(2, Math.floor(w * pr)), H = Math.max(2, Math.floor(h * pr));
+    // the 3D frame is drawn at renderScale of the canvas and scaled up by the composite
+    // (TAA keeps it from looking soft); see setRenderScale
+    const k = this.renderScale || 1;
+    const W = Math.max(2, Math.floor(w * pr * k)), H = Math.max(2, Math.floor(h * pr * k));
     this.size.set(W, H);
     if (!this.sceneRT) {
       this.sceneRT = hdrTarget(W, H, this.hdrType, { depthBuffer: true, samples: this.quality.msaa });
@@ -549,7 +553,45 @@ export class Pipeline {
     F.position.copy(snapped).addScaledVector(L, 800);
     F.target.updateMatrixWorld();
     F.updateMatrixWorld();
+    this.farDirty = true; // drawn in render(), on its own (see drawFarShadow)
+  }
+
+  // The far map on its own pass, so the game can leave the small details out of it
+  // (beforeFarShadow(true/false) around the draw); the main render then skips it.
+  drawFarShadow(camera) {
+    const F = this.farSun;
+    if (!this.farDirty || !F?.castShadow) return;
+    this.farDirty = false;
+    const r = this.renderer;
+    // a render of the scene through a camera that sees nothing (so the colour pass culls
+    // everything) into a 1x1 target, with only this shadow due: three draws the far map
+    if (!this._farCam) {
+      this._farCam = new THREE.PerspectiveCamera(1, 1, 0.1, 0.2);
+      this._farCam.position.set(0, -1e5, 0);
+      this._farCam.lookAt(0, -2e5, 0);
+      this._farCam.updateMatrixWorld();
+      this._farRT = new THREE.WebGLRenderTarget(1, 1);
+    }
+    const nearAuto = this.sun.shadow.autoUpdate;
+    this.sun.shadow.autoUpdate = false;
+    this.sun.shadow.needsUpdate = false;
+    this.beforeFarShadow?.(true);
     F.shadow.needsUpdate = true;
+    const prev = r.getRenderTarget();
+    r.setRenderTarget(this._farRT);
+    r.render(this.scene, this._farCam);
+    r.setRenderTarget(prev);
+    F.shadow.needsUpdate = false;
+    this.beforeFarShadow?.(false);
+    this.sun.shadow.autoUpdate = nearAuto;
+  }
+
+  /** Draw the 3D frame at a fraction of the canvas resolution (0.5..1). Reallocates the targets. */
+  setRenderScale(k) {
+    k = THREE.MathUtils.clamp(k, 0.5, 1);
+    if (Math.abs(k - (this.renderScale || 1)) < 0.01) return;
+    this.renderScale = k;
+    if (this.cssSize) this.resize(this.cssSize[0], this.cssSize[1]);
   }
 
   render(camera, dt, opts = {}) {
@@ -575,6 +617,7 @@ export class Pipeline {
     }
 
     this.updateShadowCamera(opts.shadowCenter || camera.position);
+    this.drawFarShadow(camera);
 
     camera.updateMatrixWorld();
     // TAA: this frame is drawn a sub-pixel off along a Halton sequence (undone at the end)

@@ -442,7 +442,11 @@ async function init() {
   }
   pigeons.listener = camera.position;
   pigeons.onTakeoff = (d) => audio.flutter?.(Math.min(1, 6 / Math.max(d, 1)));
-  if (studio?.chunk) studio.chunk();
+  if (studio?.chunk) {
+    studio.chunk();
+    // the far shadow cascade draws only the buildings (small things are near-only anyway)
+    pipeline.beforeFarShadow = (on) => studio.hideDetails?.(on);
+  }
   const weather = new Weather(pipeline.scene);
   world.weather = weather;
   weather.onThunder = (dist) => { if (!pipeline.indoor) audio.thunder(dist); };
@@ -462,6 +466,10 @@ async function init() {
     if (Math.abs(before - weather.amount) > 1e-4 || weather.wetMats === null) weather.wet(studio?.root || arena?.group || city?.group, weather.amount);
     weather.update(dt, camera, pipeline.lightColor, { fx, heightAt: (x, z) => terrain.heightAt(x, z), at: player.pos });
     pipeline.lightning = pipeline.indoor ? 0 : weather.lightning(dt);
+    // small city details only near the camera; how near follows the quality setting
+    if (studio?.cullDetails && (detailT = (detailT || 0) + 1) % 3 === 0) {
+      studio.cullDetails(camera.position, { low: 0.6, medium: 1, high: 1.3, ultra: 1.7 }[pipeline.qualityName] || 1);
+    }
     // the acoustics of where you stand, measured against the city's walls now and then
     spaceT -= dt;
     if (spaceT <= 0 && world.shots) {
@@ -902,6 +910,7 @@ async function init() {
   let hitTimer = 0;
   let slowmo = 0; // real seconds of slow motion left
   let spaceT = 0; // seconds to the next acoustics measurement
+  let detailT = 0; // frames, for the detail culling cadence
   weapons.onHit = (kind) => {
     hitTimer = kind === 'kill' ? 0.5 : 0.25;
     const hm = $('hitmarker');
@@ -989,6 +998,8 @@ async function init() {
 
   let elapsed = 0;
   let fpsT = 0, frames = 0, fps = 0, fpsLast = 0;
+  const dynRes = !bootQuery.has('fixedres'); // &fixedres: always the full resolution
+  let frameEma = 16.7, dynT = 0;
   const clock = startClock((dt, draw) => {
     // the round's last kill plays out in slow motion, easing back to speed
     if (slowmo > 0) {
@@ -1234,14 +1245,26 @@ async function init() {
       frames++;
       // measured on the wall clock (game time slows in slow motion)
       const nowMs = performance.now();
-      fpsT += (nowMs - (fpsLast || nowMs)) / 1000;
+      const frameMs = nowMs - (fpsLast || nowMs);
+      fpsT += frameMs / 1000;
       fpsLast = nowMs;
+      // Dynamic resolution: hold ~60 fps by drawing the 3D frame smaller when frames run
+      // long, and back up when there's headroom. Steps of 10%, decided on a couple of
+      // seconds of frames, so it doesn't hunt.
+      if (dynRes && frameMs > 0 && frameMs < 250) {
+        frameEma += (frameMs - frameEma) * 0.05;
+        dynT += frameMs / 1000;
+        const k = pipeline.renderScale || 1;
+        if (dynT > 1.5 && frameEma > 19 && k > 0.55) { pipeline.setRenderScale(k - 0.1); dynT = 0; frameEma = 16.7; }
+        else if (dynT > 4 && frameEma < 13.5 && k < 1) { pipeline.setRenderScale(k + 0.1); dynT = 0; frameEma = 16.7; }
+      }
       if (fpsT > 0.5) {
         fps = frames / fpsT;
         frames = 0;
         fpsT = 0;
         const fpsEl = $('fps');
-        fpsEl.textContent = `${fps.toFixed(0)} fps`;
+        const sc = pipeline.renderScale || 1;
+        fpsEl.textContent = sc < 0.99 ? `${fps.toFixed(0)} fps · ${Math.round(sc * 100)}%` : `${fps.toFixed(0)} fps`;
         fpsEl.className = fps < 30 ? 'low' : fps < 45 ? 'dip' : '';
         if (!$('debug').classList.contains('hidden')) {
           const info = renderer.info.render;

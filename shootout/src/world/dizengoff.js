@@ -3,7 +3,7 @@ import { loadCity } from './loadCity.js';
 import { extractCityCars, removeInBoxes } from './cityCars.js';
 import { buildStadium, stadiumSlotSpawns, STADIUM } from './stadium.js';
 import { buildShotMesh } from './shotMesh.js';
-import { chunkMeshes } from './chunkMeshes.js';
+import { chunkMeshes, cullDetails, hideDetails } from './chunkMeshes.js';
 import { findLamps } from './nightLights.js';
 import { buildPitchProps } from './pitchProps.js';
 import { pickRivalSpots, slotSpawns } from './rivalSpots.js';
@@ -83,6 +83,7 @@ export async function loadDizengoff(renderer, folder = 'dizengoff-center', { sta
   const stands = stadiumStart && nav.stadium ? stadiumSlotSpawns(nav.stadium) : null;
   const spawn = stands ? { ...stands[0] } : { ...nav.spawn };
   spawn.y = heightAt(spawn.x, spawn.z);
+  let details = null; // the small-detail pieces, culled by distance (see chunk)
   return {
     group,
     root: city.set,
@@ -119,7 +120,10 @@ export async function loadDizengoff(renderer, folder = 'dizengoff-center', { sta
       return nav.scooters;
     },
     /** Splits the district-wide meshes into culling cells; call after the cars and scooters are cut out. */
-    chunk: () => chunkMeshes(city.set),
+    chunk: () => { details = chunkMeshes(city.set).details; return details; },
+    /** Small things only near the camera (see chunkMeshes); `range` scales the distances. */
+    cullDetails: (at, range = 1) => details && cullDetails(details, at, { fine: 150 * range, mid: 320 * range }),
+    hideDetails: (hide) => details && hideDetails(details, hide),
     /** minutes = 0..1439, night = 0..1 */
     update: city.update,
   };

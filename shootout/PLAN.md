@@ -149,6 +149,18 @@ Ordered by how much they lift the whole game; one commit each.
 
 - [x] 83. Realistic smoke: puffs are churning 3D-noise billows, lit by sun and sky and dark where thick, soft where they meet walls and ground; blast columns are fewer, denser puffs.
 
+## Phase 5 (2026-10-02): 60 fps
+Measured in Tel Aviv at 2000x1300: CPU ~17-21 ms a frame just issuing draws (~1100 calls:
+674 colour + 401 near shadow; far cascade +689 every 8th frame), 2.5M + 1.7M + 2.8M triangles.
+- [x] 84. Dynamic resolution: the 3D frame steps between 100% and 55% of the canvas to hold
+      ~60 fps (TAA hides it); the FPS readout shows the scale when below 100%. &fixedres turns it off.
+- [x] 85. Small city details only near the camera: clutter to 150 m, trees and balconies to
+      320 m (x quality), in 128 m pieces; the far shadow cascade is drawn without them on its own
+      pass. Colour 2.5M -> 1.3M tris, far cascade 2.8M -> 0.6M; render CPU 20.8 -> 16.8 ms.
+- [ ] 86. One draw per material: city chunks as BatchedMesh (multi-draw, per-chunk culling).
+- [ ] 87. Cheap smoke: noise from a small tiling texture instead of per-pixel 3D noise.
+- [ ] 88. Near shadow casters trimmed (clutter out of the shadow map, a tighter frustum).
+
 ## Log
 - Tel Aviv load (local, cached): ready in ~8 s; main-thread stages: decode 1.6 s, seam clip 1.0,
   cars 0.4, shot BVH 1.5, chunking 1.3.
