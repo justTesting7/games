@@ -88,12 +88,32 @@ export function addWind(m) {
 // down the walls and plaster that isn't perfectly smooth (roughness and a fine bump). All from world-space noise in the shader.
 const WALLS = /^(facade_.*|side_.*|blank_.*|ground_(?!plain).*|parapet|balcony|roof|hoarding)$/;
 const wallDone = new WeakSet();
+// The noise comes from a small tiling 3D texture (random values on a 32^3 lattice; the
+// hardware's trilinear filter is the interpolation): one fetch per call where a hashed
+// value noise took eight sines, and a wall pixel takes nine.
+let wallNoise = null;
+function wallNoiseTexture() {
+  if (wallNoise) return wallNoise;
+  const N = 32, data = new Uint8Array(N * N * N);
+  let seed = 9871;
+  for (let i = 0; i < data.length; i++) { seed = (seed * 16807) % 2147483647; data[i] = seed & 255; }
+  const t = new THREE.Data3DTexture(data, N, N, N);
+  t.format = THREE.RedFormat;
+  t.type = THREE.UnsignedByteType;
+  t.wrapS = t.wrapT = t.wrapR = THREE.RepeatWrapping;
+  t.minFilter = t.magFilter = THREE.LinearFilter;
+  t.unpackAlignment = 1;
+  t.needsUpdate = true;
+  wallNoise = { value: t };
+  return wallNoise;
+}
 export function addWeathering(m) {
   if (wallDone.has(m) || m.isShaderMaterial) return;
   wallDone.add(m);
   const prev = m.onBeforeCompile;
   m.onBeforeCompile = (sh, r) => {
     prev?.call(m, sh, r);
+    sh.uniforms.uWallNoise = wallNoiseTexture();
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', '#include <common>\nvarying vec3 vWeatherWP;\nvarying vec3 vWeatherN;\n#ifdef USE_BATCHING\n#define WEATHER_M (modelMatrix * batchingMatrix)\n#else\n#define WEATHER_M modelMatrix\n#endif')
       .replace('#include <project_vertex>', '#include <project_vertex>\n  vWeatherWP = (WEATHER_M * vec4(transformed, 1.0)).xyz;\n  vWeatherN = normalize(mat3(WEATHER_M) * objectNormal);');
@@ -102,12 +122,8 @@ export function addWeathering(m) {
 varying vec3 vWeatherWP;
 varying vec3 vWeatherN;
 float wHash(vec3 p) { return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453); }
-float wNoise(vec3 p) {
-  vec3 i = floor(p), f = fract(p);
-  vec3 u = f * f * (3.0 - 2.0 * f);
-  return mix(mix(mix(wHash(i), wHash(i + vec3(1, 0, 0)), u.x), mix(wHash(i + vec3(0, 1, 0)), wHash(i + vec3(1, 1, 0)), u.x), u.y),
-             mix(mix(wHash(i + vec3(0, 0, 1)), wHash(i + vec3(1, 0, 1)), u.x), mix(wHash(i + vec3(0, 1, 1)), wHash(i + vec3(1, 1, 1)), u.x), u.y), u.z);
-}`)
+uniform highp sampler3D uWallNoise;
+float wNoise(vec3 p) { return texture(uWallNoise, (p + 0.5) / 32.0).r; }`)
       .replace('#include <map_fragment>', `#include <map_fragment>
   {
     vec3 wp = vWeatherWP;
