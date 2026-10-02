@@ -31,6 +31,10 @@ const SWING = [['LeftArm', 'LeftForeArm'], ['LeftForeArm', 'LeftHand'], ['RightA
   ['RightForeArm', 'RightHand'], ['LeftUpLeg', 'LeftLeg'], ['LeftLeg', 'LeftFoot'], ['RightUpLeg', 'RightLeg'], ['RightLeg', 'RightFoot']];
 
 const RADIUS = 0.07;
+// velocity kept per step: the trunk carries on, the extremities trail
+const LIMP = JOINTS.map((n) => (/Hand$/.test(n) ? 0.94 : /ForeArm$|Foot$/.test(n) ? 0.965 : /Arm$|Leg$/.test(n) ? 0.985 : 0.995));
+// ground grip: limbs drag on the ground more than the trunk slides
+const GRIP = JOINTS.map((n) => (/Hand$|Foot$|ForeArm$/.test(n) ? 0.85 : 0.6));
 const GRAVITY = 9.8;
 const _a = new THREE.Vector3(), _b = new THREE.Vector3(), _c = new THREE.Vector3();
 const _q = new THREE.Quaternion(), _q2 = new THREE.Quaternion(), _m = new THREE.Matrix4();
@@ -63,6 +67,15 @@ export class Ragdoll {
       const upper = i <= J.RightHand ? 1 : 0.45;
       this.prev[i].addScaledVector(vel, -dt).addScaledVector(push, -dt * upper);
     });
+    // the legs give way: the hips drop and the knees buckle forward, so a body folds as it
+    // goes down instead of toppling like a plank (forward: where the body faces)
+    const fwd = _a.set(0, 0, 1).applyQuaternion(character.root.quaternion).setY(0);
+    if (fwd.lengthSq() < 1e-4) fwd.set(0, 0, 1);
+    fwd.normalize();
+    const drop = (i, down, ahead) => { this.prev[i].y += down * dt; this.prev[i].addScaledVector(fwd, -ahead * dt); };
+    drop(J.Hips, 1.6, 0); drop(J.Spine2, 1.2, 0);
+    drop(J.LeftLeg, 0.4, 1.4 + Math.random() * 0.6); drop(J.RightLeg, 0.4, 1.2 + Math.random() * 0.6);
+    drop(J.LeftUpLeg, 1.2, 0.2); drop(J.RightUpLeg, 1.2, 0.2);
     // rest frames of the pelvis and chest, to carry their orientation over from the particles
     this.hips0 = B.Hips.getWorldQuaternion(new THREE.Quaternion());
     this.chest0 = B.Spine2.getWorldQuaternion(new THREE.Quaternion());
@@ -102,7 +115,10 @@ export class Ragdoll {
     let motion = 0;
     for (let i = 0; i < this.p.length; i++) {
       const p = this.p[i], q = this.prev[i];
-      const vx = (p.x - q.x) * 0.995, vy = (p.y - q.y) * 0.995, vz = (p.z - q.z) * 0.995;
+      // limp limbs: hands and forearms (and feet) lose their swing fast, so a blow doesn't
+      // fling the arms over the head; the trunk keeps its momentum
+      const keep = LIMP[i];
+      const vx = (p.x - q.x) * keep, vy = (p.y - q.y) * keep, vz = (p.z - q.z) * keep;
       q.copy(p);
       p.x += vx; p.y += vy - GRAVITY * h * h; p.z += vz;
       motion += Math.abs(vx) + Math.abs(vy) + Math.abs(vz);
@@ -131,8 +147,8 @@ export class Ragdoll {
         if (p.y < g) {
           p.y = g;
           // ground friction: drag the stored motion toward rest along the ground
-          q.x += (p.x - q.x) * 0.6;
-          q.z += (p.z - q.z) * 0.6;
+          q.x += (p.x - q.x) * GRIP[i];
+          q.z += (p.z - q.z) * GRIP[i];
           if (q.y < p.y - 0.02) q.y = p.y - (p.y - q.y) * 0.3; // soak the landing
         }
       }

@@ -848,11 +848,9 @@ async function init() {
   };
   combat.onKill = (victim, attacker, info) => {
     fx.decals.bleed(info.at || victim.pos, info.dir, info.head ? 50 : 30);
-    if (info.dir) {
-      const flat = new THREE.Vector3(info.dir.x, 0, info.dir.z);
-      if (flat.lengthSq() > 1e-4) flat.normalize();
-      fx.decals.pool(victim.pos.clone().addScaledVector(flat, 0.75), info.head ? 1.9 : 1.5, 1.2);
-    }
+    // the pool spreads from under the body where it came to rest, not where it stood
+    const torso = victim.character?.bones?.Spine1 || victim.character?.bones?.Hips;
+    fx.decals.pool(() => (torso ? torso.getWorldPosition(new THREE.Vector3()) : victim.pos.clone()), info.head ? 1.9 : 1.5, 1.2);
     const how = `${WEAPONS[info.weapon]?.short || ''}${info.head ? ' · headshot' : ''}`;
     const by = attacker === victim ? '' : attacker ? tagName(attacker) : '';
     feed(`${by} <span class="gun">▸ ${how} ▸</span> ${tagName(victim)}`);

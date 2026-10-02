@@ -204,6 +204,7 @@ export class BloodDecals {
     this.maxSplats = maxSplats;
     this.splats = [];
     this.pools = [];
+    this.pending = [];
     this.wounds = [];
 
     const atlas = document.createElement('canvas');
@@ -365,8 +366,17 @@ export class BloodDecals {
     return w;
   }
 
-  /** A pool that seeps out from under a body over several seconds. */
+  /**
+   * A pool that seeps out from under a body over several seconds. `point` may be a function
+   * giving where the body is: the pool is laid when it starts to spread, under the body as
+   * it came to rest (a ragdoll thrown by the killing shot ends up metres from where it stood).
+   */
   pool(point, size = 1.6, delay = 0.8) {
+    if (typeof point === 'function') {
+      this.pending = this.pending || [];
+      this.pending.push({ at: point, size, t: -delay });
+      return;
+    }
     const p = point.clone();
     p.y = this.terrain.heightAt(p.x, p.z);
     const mesh = this.keep(this.splat(p, this.terrain.normalAt(p.x, p.z), new THREE.Vector3(Math.random() - 0.5, 0, Math.random() - 0.5), size, 'pool'));
@@ -394,6 +404,13 @@ export class BloodDecals {
   }
 
   update(dt) {
+    if (this.pending?.length) {
+      for (const q of this.pending) {
+        q.t += dt;
+        if (q.t >= 0) { const at = q.at(); if (at) this.pool(at, q.size, 0); q.done = true; }
+      }
+      this.pending = this.pending.filter((q) => !q.done);
+    }
     for (const p of this.pools) {
       p.t += dt;
       if (p.t <= 0) continue;
