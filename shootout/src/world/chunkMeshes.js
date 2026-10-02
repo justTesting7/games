@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { arrayKey, arrayMaterial, setLayers } from './textureArrays.js';
 
 // The city exports batch everything by material: each mesh spans the whole district,
 // so frustum culling can never skip one, and the camera and the small shadow frustum
@@ -185,7 +186,8 @@ function batchKey(o) {
   if (!o.visible || o.userData?.hours || Array.isArray(m) || !m || m.transparent || m.isShaderMaterial) return null;
   if (/glass/i.test(o.name) || /glass/i.test(m.name || '') || (g.groups?.length || 0) > 1 || g.morphAttributes?.position) return null;
   const sig = Object.entries(g.attributes).map(([n, a]) => `${n}:${a.itemSize}:${a.normalized}:${(a.isInterleavedBufferAttribute ? a.data.array : a.array).constructor.name}`).sort().join(',');
-  return `${materialKey(m)}#${sig}#${o.castShadow}${o.receiveShadow}${o.renderOrder}`;
+  // materials that differ only in their textures share a draw through array textures
+  return `${arrayKey(o) || materialKey(m)}#${sig}#${o.castShadow}${o.receiveShadow}${o.renderOrder}`;
 }
 function addToGroup(groups, key, o, triLists) {
   let gr = groups.get(key);
@@ -210,12 +212,29 @@ function batchGroups(root, groups, cells) {
     const verts = parts.reduce((a, p) => a + p.geo.attributes.position.count, 0);
     const index = parts.reduce((a, p) => a + p.geo.index.count, 0);
     const first = list[0].o;
+    // an array class: a layer per distinct material (identical copies from the city's
+    // tiles share one), the first material made the shared one
+    let layerOf = null, layers = null, layerIx = null;
+    if (list.length > 1 && arrayKey(first)) {
+      layers = []; layerIx = new Map();
+      const byLook = new Map();
+      for (const { o } of list) {
+        if (layerIx.has(o.material)) continue;
+        const look = materialKey(o.material);
+        if (!byLook.has(look)) { byLook.set(look, layers.length); layers.push(o.material); }
+        layerIx.set(o.material, byLook.get(look));
+      }
+      if (layers.length > 1) layerOf = [];
+      else layers = null;
+    }
     let mesh;
     const start = cells.length;
     try {
-      mesh = new THREE.BatchedMesh(parts.length, verts, index, first.material);
+      const material = layers ? arrayMaterial(layers) : first.material;
+      mesh = new THREE.BatchedMesh(parts.length, verts, index, material);
       for (const { o, geo } of parts) {
         const id = mesh.addInstance(mesh.addGeometry(geo));
+        if (layerOf) layerOf[id] = layerIx.get(o.material);
         mesh.setMatrixAt(id, m.multiplyMatrices(inv, o.matrixWorld));
         const tier = FINE.test(o.name) ? 'fine' : MID.test(o.name) ? 'mid' : null;
         cells.push({ batch: mesh, id, sphere: geo.boundingSphere.clone().applyMatrix4(o.matrixWorld), tier });
@@ -226,6 +245,7 @@ function batchGroups(root, groups, cells) {
       cells.length = start;
       continue;
     }
+    if (layerOf) setLayers(mesh, layerOf);
     mesh.name = first.name;
     mesh.castShadow = first.castShadow;
     mesh.receiveShadow = first.receiveShadow;
