@@ -245,7 +245,10 @@ function batchGroups(root, groups, cells) {
       cells.length = start;
       continue;
     }
-    if (layerOf) setLayers(mesh, layerOf);
+    if (layerOf) {
+      setLayers(mesh, layerOf);
+      if (mesh.material.userData.cityArrays.depth) mesh.customDepthMaterial = mesh.material.userData.cityArrays.depth;
+    }
     mesh.name = first.name;
     mesh.castShadow = first.castShadow;
     mesh.receiveShadow = first.receiveShadow;

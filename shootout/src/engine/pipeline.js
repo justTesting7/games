@@ -787,7 +787,12 @@ export class Pipeline {
         this.staticDirty = false;
         this.timed('static shadow', () => { this.cullForShadow(this.sun, 'static'); this.shadowPass([this.sun], isStatic); });
       }
-      this.timed('moving shadows', () => this.shadowPass([this.dynSun], (k) => !isStatic(k)));
+      // moving things' shadows every other frame: the map keeps the matrix it was drawn
+      // with, so a skipped frame shows last frame's shadows where they were (~60 draws saved)
+      if (this.frame % 2 === 0 || this.dynFresh !== true) {
+        this.dynFresh = true;
+        this.timed('moving shadows', () => this.shadowPass([this.dynSun], (k) => !isStatic(k)));
+      }
     } else this.sun.shadow.autoUpdate = true;
 
     camera.updateMatrixWorld();
