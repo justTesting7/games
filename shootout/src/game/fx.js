@@ -26,8 +26,11 @@ attribute float iSeed;
 varying vec2 vUv;
 varying vec4 vColor;
 varying float vSeed;
+varying float vViewZ;
+varying float vSize;
 void main() {
   vUv = position.xy;
+  vSize = iPos.w;
   vColor = iColor;
   vSeed = iSeed;
   vec3 camRight = vec3(viewMatrix[0][0], viewMatrix[1][0], viewMatrix[2][0]);
@@ -43,7 +46,9 @@ void main() {
   } else {
     wp += (camRight * position.x + camUp * position.y) * size;
   }
-  gl_Position = projectionMatrix * viewMatrix * vec4(wp, 1.0);
+  vec4 mv = viewMatrix * vec4(wp, 1.0);
+  vViewZ = -mv.z;
+  gl_Position = projectionMatrix * mv;
 }
 `;
 
@@ -51,8 +56,22 @@ const particleFrag = /* glsl */ `
 varying vec2 vUv;
 varying vec4 vColor;
 varying float vSeed;
+varying float vViewZ;
+varying float vSize;
 uniform vec3 uLight;
 uniform vec3 uAmbient;
+uniform sampler2D tDepth; // the opaque scene, view distance in alpha
+uniform vec2 uRes;
+uniform vec3 uSunView;    // toward the sun (or moon), in view space
+uniform float uTime;
+float sHash(vec3 p) { return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453); }
+float sNoise(vec3 p) {
+  vec3 i = floor(p), f = fract(p);
+  vec3 u = f * f * (3.0 - 2.0 * f);
+  return mix(mix(mix(sHash(i), sHash(i + vec3(1, 0, 0)), u.x), mix(sHash(i + vec3(0, 1, 0)), sHash(i + vec3(1, 1, 0)), u.x), u.y),
+             mix(mix(sHash(i + vec3(0, 0, 1)), sHash(i + vec3(1, 0, 1)), u.x), mix(sHash(i + vec3(0, 1, 1)), sHash(i + vec3(1, 1, 1)), u.x), u.y), u.z);
+}
+float sFbm(vec3 p) { return sNoise(p) * 0.5 + sNoise(p * 2.03 + 3.1) * 0.3 + sNoise(p * 4.1 + 7.7) * 0.2; }
 #ifdef BLOOD
 float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 float vnoise(vec2 p) {
@@ -83,12 +102,34 @@ void main() {
     float a = pow(1.0 - r, 2.0);
     gl_FragColor = vec4(vColor.rgb * a * vColor.a, 0.0);
   #else
-    float a = smoothstep(1.0, 0.2, r) * vColor.a;
-    vec3 lit = vColor.rgb * (uAmbient + uLight * 0.25);
+    // Smoke and dust: a lumpy, slowly churning puff (3D noise turned by the particle's
+    // own seed), lit as a soft ball by the sun and the sky above and dark where it's
+    // thick, and faded where it meets the ground or a wall so no edge shows.
+    float ang = vSeed * 6.2831 + uTime * (fract(vSeed * 7.3) - 0.5) * 0.6;
+    vec2 q = mat2(cos(ang), -sin(ang), sin(ang), cos(ang)) * vUv;
+    vec3 np = vec3(q * 2.4, vSeed * 17.0 + uTime * 0.15);
+    float n = sFbm(np);
+    // cauliflower lumps: the noise carves the edge, crisp enough to read as billows
+    float body = smoothstep(0.32, 0.62, (1.0 - r * r) * (0.35 + n * 1.1));
+    float a = body * vColor.a;
+    if (vSize < 0.05) a = smoothstep(1.0, 0.2, r) * vColor.a; // droplets and specks stay round
+    // a ball normal bent by the lumps, facing the camera
+    vec3 nrm = normalize(vec3(q + (vec2(sNoise(np + vec3(0.13, 0, 0)), sNoise(np + vec3(0, 0.13, 0))) - n) * 2.5, sqrt(max(0.0, 1.0 - r * r)) + 0.35));
+    float sun = clamp(dot(nrm, uSunView) * 0.5 + 0.5, 0.0, 1.0);
+    float sky = clamp(nrm.y * 0.5 + 0.6, 0.0, 1.0);
+    float thick = 1.0 - 0.45 * body * vColor.a; // light gets through thin edges, not the middle
+    vec3 lit = vColor.rgb * (uAmbient * (0.35 + 0.8 * sky) + uLight * 0.5 * sun * sun) * thick;
+    // soft against the scene: fade within a puff's radius of whatever is behind it
+    float sceneZ = texture(tDepth, gl_FragCoord.xy / uRes).a;
+    a *= clamp((sceneZ - vViewZ) / max(vSize * 0.8, 0.05), 0.0, 1.0);
+    // and when the camera is inside it
+    a *= smoothstep(0.2, 1.2, vViewZ / max(vSize, 0.1));
     gl_FragColor = vec4(lit, a);
   #endif
 }
 `;
+
+export const particleShaders = { vert: particleVert, frag: particleFrag };
 
 class ParticlePool {
   constructor(max, additive, uniforms, defines = {}) {
@@ -212,7 +253,7 @@ export class Effects {
     this.pipeline = pipeline;
     this.terrain = terrain;
     this.audio = audio;
-    const uniforms = { uLight: { value: pipeline.lightColor }, uAmbient: { value: new THREE.Vector3(0.3, 0.33, 0.38) } };
+    const uniforms = { uLight: { value: pipeline.lightColor }, uAmbient: { value: new THREE.Vector3(0.3, 0.33, 0.38) }, ...pipeline.fxUniforms };
     this.uniforms = uniforms;
     this.add = new ParticlePool(800, true, uniforms);
     this.alpha = new ParticlePool(1200, false, uniforms);
@@ -561,7 +602,7 @@ export class Effects {
       e.t += dt;
       e.acc += dt;
       const k = 1 - e.t / e.dur;
-      const every = 0.06 / Math.max(0.2, k);
+      const every = 0.11 / Math.max(0.2, k); // fewer, denser puffs read as billowing smoke, not fog
       // the ground still burns hot for a while: the air over it shimmers
       if (e.t < 6) { this.haze?.add(e.pos, 2.4, 4.5, (1 - e.t / 6) * 1.2); this.fire(e.pos, (1 - e.t / 6) * 0.8); }
       while (e.acc > every) {
@@ -569,8 +610,8 @@ export class Effects {
         this.alpha.spawn({
           pos: e.pos.clone().add(new THREE.Vector3((Math.random() - 0.5) * 0.8, 0.2, (Math.random() - 0.5) * 0.8)),
           vel: new THREE.Vector3(wind.x * 0.4 + (Math.random() - 0.5) * 0.5, 1.6 + Math.random() * 1.2, wind.z * 0.4 + (Math.random() - 0.5) * 0.5),
-          size: 0.7 + Math.random() * 0.4, grow: 2.2, life: 3.5 + Math.random() * 1.5,
-          color: [0.07, 0.065, 0.06], alpha: 0.45 * k + 0.1, drag: 0.35, gravity: -0.15,
+          size: 0.6 + Math.random() * 0.5, grow: 1.25, life: 3.5 + Math.random() * 1.5, // grow slowly: stay distinct puffs
+          color: [0.09, 0.085, 0.08], alpha: 0.7 * k + 0.15, drag: 0.35, gravity: -0.15,
         });
       }
       return e.t < e.dur;

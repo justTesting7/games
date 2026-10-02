@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 
 // Heat haze: the air over a fire shimmers. Each source is an upright quad turned to the
-// camera that redraws the scene behind it (the opaque copy the water pass also reads)
+// camera that adds the bend to the scene behind it (sampled from the opaque copy the water pass also reads)
 // through rising, flowing noise, strongest low down and fading to the edges. Sources are
 // added each frame by the game; the colour blend leaves the depth in alpha alone.
 
@@ -41,8 +41,10 @@ void main() {
   float mask = sin(3.14159 * vUv.x) * pow(1.0 - vUv.y, 0.8) * smoothstep(0.0, 0.12, vUv.y);
   vec2 q = vec2(vUv.x * 5.0, vUv.y * 4.0 - uTime * 2.6);
   vec2 n = vec2(vn(q) + 0.5 * vn(q * 2.1 + 5.0), vn(q + 11.3) + 0.5 * vn(q * 2.3 + 17.0)) / 1.5 - 0.5;
-  vec2 suv = gl_FragCoord.xy / uRes + n * mask * uK * 0.09 / max(vDepth, 2.0);
-  gl_FragColor = vec4(texture(uScene, suv).rgb, 1.0);
+  vec2 uv = gl_FragCoord.xy / uRes;
+  vec2 suv = uv + n * mask * uK * 0.09 / max(vDepth, 2.0);
+  // add only what the bend changes, so unbent pixels stay exactly as drawn
+  gl_FragColor = vec4(texture(uScene, suv).rgb - texture(uScene, uv).rgb, 1.0);
 }`;
 
 export const hazeShaders = { vert, frag };
@@ -55,10 +57,10 @@ export class Haze {
         vertexShader: vert, fragmentShader: frag, depthWrite: false, transparent: true,
         uniforms: { uScene: { value: null }, uRes: { value: new THREE.Vector2() }, uTime: { value: 0 }, uK: { value: 0 }, uSize: { value: new THREE.Vector2(1, 1) } },
       });
-      // replace the colour behind, keep the scene depth stored in alpha (engine/patch.js)
+      // add the bend's change to the colour behind, keep the scene depth in alpha (engine/patch.js)
       mat.blending = THREE.CustomBlending;
       mat.blendSrc = THREE.OneFactor;
-      mat.blendDst = THREE.ZeroFactor;
+      mat.blendDst = THREE.OneFactor;
       mat.blendSrcAlpha = THREE.ZeroFactor;
       mat.blendDstAlpha = THREE.OneFactor;
       const mesh = new THREE.Mesh(geo, mat);
@@ -121,8 +123,9 @@ void main() {
   float band = (r - uR) / 0.07;
   float ring = exp(-band * band) * sign(band + 0.0001) * -1.0; // pushes out ahead of the front, in behind it
   vec2 dir = r > 1e-4 ? vUv / r : vec2(0.0);
-  vec2 suv = gl_FragCoord.xy / uRes + dir * ring * uK * 0.6 / max(vDepth, 3.0);
-  gl_FragColor = vec4(texture(uScene, suv).rgb, 1.0);
+  vec2 uv = gl_FragCoord.xy / uRes;
+  vec2 suv = uv + dir * ring * uK * 0.6 / max(vDepth, 3.0);
+  gl_FragColor = vec4(texture(uScene, suv).rgb - texture(uScene, uv).rgb, 1.0);
 }`;
 
 export const waveShaders = { vert: waveVert, frag: waveFrag };
@@ -137,7 +140,7 @@ export class Shockwaves {
       });
       mat.blending = THREE.CustomBlending;
       mat.blendSrc = THREE.OneFactor;
-      mat.blendDst = THREE.ZeroFactor;
+      mat.blendDst = THREE.OneFactor;
       mat.blendSrcAlpha = THREE.ZeroFactor;
       mat.blendDstAlpha = THREE.OneFactor;
       const mesh = new THREE.Mesh(geo, mat);

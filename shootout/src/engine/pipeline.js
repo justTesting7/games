@@ -123,6 +123,8 @@ export class Pipeline {
     this.scene = new THREE.Scene();
     this.waterScene = new THREE.Scene();
     this.haze = new Haze(this.waterScene); // drawn with the water: both read the opaque copy
+    // shared with the effect particles (game/fx.js): scene depth for soft edges, the sun for lighting
+    this.fxUniforms = { tDepth: { value: null }, uRes: { value: new THREE.Vector2(1, 1) }, uSunView: { value: new THREE.Vector3(0, 1, 0) }, uTime: { value: 0 } };
     this.waves = new Shockwaves(this.waterScene);
     this.fxScene = new THREE.Scene();
 
@@ -622,6 +624,11 @@ export class Pipeline {
     this.haze.flush(this.copyRT.texture, W, H, this.u.uTime.value);
     this.waves.flush(dt, this.copyRT.texture, W, H);
     r.render(this.waterScene, camera);
+    const xu = this.fxUniforms;
+    xu.tDepth.value = this.copyRT.texture;
+    xu.uRes.value.set(W, H);
+    xu.uTime.value = this.u.uTime.value;
+    xu.uSunView.value.copy(this.lightDir).transformDirection(camera.matrixWorldInverse);
     r.render(this.fxScene, camera);
 
     const fu = this.fogMaterial.uniforms;
