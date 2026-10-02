@@ -766,7 +766,12 @@ export class Character {
   dropGun(gun, vel, blow) {
     if (!gun?.parent) return;
     gun.updateMatrixWorld(true);
+    // Object3D.clone deep-copies userData through JSON, and a pistol's userData holds its
+    // magazine mesh: serialising that took ~200 ms a gun. Clone without it.
+    const saved = [];
+    gun.traverse((o) => { saved.push([o, o.userData]); o.userData = {}; });
     const copy = gun.clone(true);
+    for (const [o, u] of saved) o.userData = u;
     copy.matrixAutoUpdate = false;
     const p = new THREE.Vector3(), q = new THREE.Quaternion(), s = new THREE.Vector3();
     gun.matrixWorld.decompose(p, q, s);
