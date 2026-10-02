@@ -76,7 +76,10 @@ export function addWind(m) {
     transformed += inverse(mat3(WIND_M)) * ((vec3(sway.x, 0.0, sway.y) + flutter) * uWindK);
   }`);
   };
-  m.customProgramCacheKey = () => `${m.uuid}-wind`;
+  // keyed by the patch, not the material: every city material with it shares one program
+  // per variant (a program switch re-uploads every light and shadow uniform, per draw)
+  const key = m.customProgramCacheKey?.bind(m);
+  m.customProgramCacheKey = () => `${key ? key() : ''}city-wind`;
   m.needsUpdate = true;
 }
 
@@ -134,7 +137,7 @@ float wNoise(vec3 p) {
   }`);
   };
   const key = m.customProgramCacheKey?.bind(m);
-  m.customProgramCacheKey = () => `${key ? key() : m.uuid}-weather`;
+  m.customProgramCacheKey = () => `${key ? key() : ''}city-weather`;
   m.needsUpdate = true;
 }
 

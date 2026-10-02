@@ -732,10 +732,24 @@ export class Pipeline {
     if (this.cssSize) this.resize(this.cssSize[0], this.cssSize[1]);
   }
 
+  // Instanced pools with nothing in them (bullet holes, casings, debris before any fight)
+  // still cost a draw and its state changes in every pass: hidden while empty. Only what
+  // this hid is shown again, so a pool hidden on purpose (pigeons at night) stays hidden.
+  hideEmptyPools(root) {
+    for (const o of root.children) {
+      const n = o.isInstancedMesh ? o.count : o.geometry?.isInstancedBufferGeometry ? o.geometry.instanceCount : -1;
+      if (n < 0) continue;
+      if (n === 0 && o.visible) { o.visible = false; o.userData.emptyHidden = true; }
+      else if (n > 0 && o.userData.emptyHidden) { o.visible = true; o.userData.emptyHidden = false; }
+    }
+  }
+
   render(camera, dt, opts = {}) {
     const r = this.renderer;
     const W = this.size.x, H = this.size.y;
     this.frame++;
+    this.hideEmptyPools(this.scene);
+    this.hideEmptyPools(this.fxScene);
     r.autoClear = false;
 
     if (this.firstFrame || this.frame % 6 === 1) {
