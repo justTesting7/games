@@ -703,6 +703,7 @@ export class Pipeline {
     this.sun.shadow.autoUpdate = false;
     this.sun.shadow.needsUpdate = false;
     this.beforeFarShadow?.(true);
+    this.cullForShadow(F, 'far');
     F.shadow.needsUpdate = true;
     const prev = r.getRenderTarget();
     r.setRenderTarget(this._farRT);
@@ -711,6 +712,16 @@ export class Pipeline {
     F.shadow.needsUpdate = false;
     this.beforeFarShadow?.(false);
     this.sun.shadow.autoUpdate = nearAuto;
+  }
+
+  // The game's own culling (pipeline.cull(camera, kind), for the batched city): before a
+  // shadow map is drawn the light's camera decides what is in it, then the view again.
+  cullForShadow(light, kind) {
+    if (!this.cull) return;
+    light.updateMatrixWorld();
+    light.target.updateMatrixWorld();
+    light.shadow.updateMatrices(light);
+    this.cull(light.shadow.camera, kind);
   }
 
   /** Draw the 3D frame at a fraction of the canvas resolution (0.5..1). Reallocates the targets. */
@@ -750,12 +761,15 @@ export class Pipeline {
       this.sun.shadow.autoUpdate = false;
       if (this.staticDirty) {
         this.staticDirty = false;
-        this.timed('static shadow', () => this.shadowPass([this.sun], isStatic));
+        this.timed('static shadow', () => { this.cullForShadow(this.sun, 'static'); this.shadowPass([this.sun], isStatic); });
       }
       this.timed('moving shadows', () => this.shadowPass([this.dynSun], (k) => !isStatic(k)));
     } else this.sun.shadow.autoUpdate = true;
 
     camera.updateMatrixWorld();
+    // the view's culling (when the near shadow is drawn in the main render, it sees what the
+    // view sees, so then everything in range stays: casters behind you still shade the street)
+    this.timed('cull', () => this.cull?.(camera, this.shadowCache || !this.sun.castShadow ? 'view' : 'all'));
     // TAA: this frame is drawn a sub-pixel off along a Halton sequence (undone at the end)
     const taa = !!this.quality.taa && !this.mobile && !opts.outViewport && !Pipeline.noTAA;
     const unjVP = this._unjVP || (this._unjVP = new THREE.Matrix4());

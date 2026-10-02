@@ -443,9 +443,19 @@ async function init() {
   pigeons.listener = camera.position;
   pigeons.onTakeoff = (d) => audio.flutter?.(Math.min(1, 6 / Math.max(d, 1)));
   if (studio?.chunk) {
-    studio.chunk();
+    const t0 = performance.now();
+    const ch = studio.chunk();
+    console.info(`city: ${ch?.split} meshes into ${ch?.pieces} cells, ${ch?.cells?.length ?? 0} batched, ${Math.round(performance.now() - t0)} ms`);
     // the far shadow cascade draws only the buildings (small things are near-only anyway)
     pipeline.beforeFarShadow = (on) => studio.hideDetails?.(on);
+    // the batched city is culled by the game itself: for the view, and for each shadow map's
+    // light before it is drawn (details only near the camera, how near follows the quality)
+    if (studio.cull) {
+      pipeline.cull = (cam, kind) => {
+        const range = { low: 0.6, medium: 1, high: 1.3, ultra: 1.7 }[pipeline.qualityName] || 1;
+        studio.cull(cam, camera.position, range, { details: kind !== 'far', frustum: kind !== 'all' });
+      };
+    }
     // the city doesn't move: its near shadow map is cached, only moving things redrawn each frame
     if (studio.group) pipeline.staticRoots = [studio.group];
   }
@@ -469,7 +479,7 @@ async function init() {
     weather.update(dt, camera, pipeline.lightColor, { fx, heightAt: (x, z) => terrain.heightAt(x, z), at: player.pos });
     pipeline.lightning = pipeline.indoor ? 0 : weather.lightning(dt);
     // small city details only near the camera; how near follows the quality setting
-    if (studio?.cullDetails && (detailT = (detailT || 0) + 1) % 3 === 0) {
+    if (studio?.cullDetails && !studio.cull && (detailT = (detailT || 0) + 1) % 3 === 0) {
       studio.cullDetails(camera.position, { low: 0.6, medium: 1, high: 1.3, ultra: 1.7 }[pipeline.qualityName] || 1);
     }
     // the acoustics of where you stand, measured against the city's walls now and then

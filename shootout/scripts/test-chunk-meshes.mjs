@@ -1,7 +1,7 @@
 // City meshes are split into culling cells: every triangle ends up in exactly one piece,
 // pieces share the original vertex buffer, and each piece's bounds hug its own triangles.
 import * as THREE from 'three';
-import { chunkMeshes } from '../src/world/chunkMeshes.js';
+import { chunkMeshes, CityCuller } from '../src/world/chunkMeshes.js';
 
 const root = new THREE.Group();
 const plane = new THREE.PlaneGeometry(1000, 1000, 100, 100).rotateX(-Math.PI / 2); // 20k triangles over 1 km
@@ -46,6 +46,30 @@ if (!root.children.includes(small)) throw new Error('small meshes stay as they a
     if (bs.radius > 128) throw new Error('each cell keeps its own bounds');
   }
   if (t2 !== plane2.index.count / 3) throw new Error(`every triangle kept once in the batch: ${t2}`);
-  if (!b.castShadow || !b.perObjectFrustumCulled) throw new Error('the batch casts shadows and culls per cell');
+  if (!b.castShadow || b.perObjectFrustumCulled) throw new Error('the batch casts shadows, culled by CityCuller not three');
+  // the culler: a camera looking down -z sees the cells in front, not those behind
+  const { cells } = chunkMeshes(root2, { cell: 128 });
+  if (cells.length) throw new Error('already batched: nothing more to do');
+}
+{
+  const root3 = new THREE.Group();
+  const p3 = new THREE.PlaneGeometry(1000, 1000, 100, 100).rotateX(-Math.PI / 2);
+  root3.add(Object.assign(new THREE.Mesh(p3, new THREE.MeshBasicMaterial()), { name: 'asphalt' }));
+  const { cells } = chunkMeshes(root3, { cell: 128, batch: true });
+  const c = new CityCuller(cells);
+  const cam = new THREE.PerspectiveCamera(60, 1, 0.1, 2000);
+  cam.position.set(0, 2, 0); cam.lookAt(0, 2, -10); cam.updateMatrixWorld();
+  c.updateFor(cam, cam.position, 0, 0);
+  const b = root3.children[0];
+  let ahead = 0, behind = 0;
+  cells.forEach((cl, i) => {
+    const v = b.getVisibleAt(cl.id);
+    if (v !== !!c.vis[i]) throw new Error('visibility mirrors the culler');
+    if (cl.sphere.center.z < -cl.sphere.radius - 1) ahead += v ? 1 : 0;
+    if (cl.sphere.center.z > cl.sphere.radius + 1 && v) behind++;
+  });
+  if (!ahead || behind) throw new Error(`cells ahead drawn (${ahead}), behind culled (${behind})`);
+  c.updateFor(null, cam.position, 0, 0);
+  if (!cells.every((cl) => b.getVisibleAt(cl.id))) throw new Error('no frustum: everything shown');
 }
 console.log('ok chunk meshes', pieces, 'pieces');

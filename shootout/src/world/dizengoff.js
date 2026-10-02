@@ -3,7 +3,7 @@ import { loadCity } from './loadCity.js';
 import { extractCityCars, removeInBoxes } from './cityCars.js';
 import { buildStadium, stadiumSlotSpawns, STADIUM } from './stadium.js';
 import { buildShotMesh } from './shotMesh.js';
-import { chunkMeshes, cullDetails, hideDetails } from './chunkMeshes.js';
+import { chunkMeshes, cullDetails, hideDetails, CityCuller } from './chunkMeshes.js';
 import { findLamps } from './nightLights.js';
 import { buildPitchProps } from './pitchProps.js';
 import { pickRivalSpots, slotSpawns } from './rivalSpots.js';
@@ -83,7 +83,8 @@ export async function loadDizengoff(renderer, folder = 'dizengoff-center', { sta
   const stands = stadiumStart && nav.stadium ? stadiumSlotSpawns(nav.stadium) : null;
   const spawn = stands ? { ...stands[0] } : { ...nav.spawn };
   spawn.y = heightAt(spawn.x, spawn.z);
-  let details = null; // the small-detail pieces, culled by distance (see chunk)
+  let details = null; // the small-detail pieces left as meshes, culled by distance (see chunk)
+  let culler = null; // the batched city cells (see chunk)
   return {
     group,
     root: city.set,
@@ -120,8 +121,22 @@ export async function loadDizengoff(renderer, folder = 'dizengoff-center', { sta
       return nav.scooters;
     },
     /** Splits the district-wide meshes into culling cells; call after the cars and scooters are cut out. */
-    chunk: () => { details = chunkMeshes(city.set).details; return details; },
-    /** Small things only near the camera (see chunkMeshes); `range` scales the distances. */
+    chunk: () => {
+      const res = chunkMeshes(city.set, { batch: true });
+      details = res.details;
+      culler = res.cells.length ? new CityCuller(res.cells) : null;
+      return res;
+    },
+    /**
+     * What of the city to draw for a camera (the view, or a shadow map's light camera):
+     * cells in its frustum, small things only near `at`; `range` scales those distances,
+     * `details: false` leaves them out altogether (the far shadow cascade).
+     */
+    cull: (camera, at, range = 1, { details: withDetails = true, frustum = true } = {}) => {
+      const f = withDetails ? 150 * range : 0, m = withDetails ? 320 * range : 0;
+      culler?.updateFor(frustum ? camera : null, at, f, m);
+      if (details?.length) cullDetails(details, at, { fine: f, mid: m });
+    },
     cullDetails: (at, range = 1) => details && cullDetails(details, at, { fine: 150 * range, mid: 320 * range }),
     hideDetails: (hide) => details && hideDetails(details, hide),
     /** minutes = 0..1439, night = 0..1 */

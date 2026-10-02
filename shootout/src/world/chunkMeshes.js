@@ -25,7 +25,7 @@ export function chunkMeshes(root, { cell = 256, minTris = 3000, detailCell = 128
     list.push(o);
   });
   let before = 0, after = 0;
-  const details = [];
+  const details = [], cells = [];
   for (const o of list) {
     const g = o.geometry, idx = g.index, pos = g.attributes.position;
     if (!pos || g.morphAttributes?.position) continue;
@@ -55,7 +55,7 @@ export function chunkMeshes(root, { cell = 256, minTris = 3000, detailCell = 128
       if (b) {
         o.parent.add(b.mesh);
         after += b.ids.length;
-        if (tier) b.ids.forEach((id, i) => details.push({ batch: b.mesh, id, box: b.boxes[i], tier }));
+        b.ids.forEach((id, i) => cells.push({ batch: b.mesh, id, sphere: b.spheres[i], tier }));
         o.parent.remove(o);
         continue;
       }
@@ -101,19 +101,21 @@ export function chunkMeshes(root, { cell = 256, minTris = 3000, detailCell = 128
     details.push({ mesh: o, box: o.geometry.boundingBox.clone().applyMatrix4(o.matrixWorld), tier });
   });
   root.updateMatrixWorld(true);
-  return { split: before, pieces: after, details };
+  return { split: before, pieces: after, details, cells };
 }
 
 // A compact copy of the triangles `tris` (indices into g) with only the vertices they use;
 // attribute types and quantisation are kept as they are.
-function compactCell(g, tris) {
-  const remap = new Map(), order = [];
-  const idx = new Array(tris.length);
+// (remap: a scratch Int32Array the size of g's vertex count, all -1; it's left that way)
+function compactCell(g, tris, remap) {
+  const order = [];
+  const idx = new Uint32Array(tris.length);
   for (let i = 0; i < tris.length; i++) {
-    let v = remap.get(tris[i]);
-    if (v === undefined) { v = order.length; remap.set(tris[i], v); order.push(tris[i]); }
+    let v = remap[tris[i]];
+    if (v < 0) { v = order.length; remap[tris[i]] = v; order.push(tris[i]); }
     idx[i] = v;
   }
+  for (let k = 0; k < order.length; k++) remap[order[k]] = -1;
   const geo = new THREE.BufferGeometry();
   for (const [name, attr] of Object.entries(g.attributes)) {
     const size = attr.itemSize;
@@ -126,14 +128,15 @@ function compactCell(g, tris) {
     }
     geo.setAttribute(name, new THREE.BufferAttribute(out, size, attr.normalized));
   }
-  geo.setIndex(idx);
+  geo.setIndex(new THREE.BufferAttribute(idx, 1));
   geo.computeBoundingBox();
   geo.computeBoundingSphere();
   return geo;
 }
 
 function batchCells(o, cells) {
-  const geos = cells.map((tris) => compactCell(o.geometry, tris));
+  const remap = new Int32Array(o.geometry.attributes.position.count).fill(-1);
+  const geos = cells.map((tris) => compactCell(o.geometry, tris, remap));
   const verts = geos.reduce((a, g) => a + g.attributes.position.count, 0);
   const index = geos.reduce((a, g) => a + g.index.count, 0);
   let mesh;
@@ -142,12 +145,12 @@ function batchCells(o, cells) {
   } catch {
     return null;
   }
-  const ids = [], boxes = [];
+  const ids = [], spheres = [];
   o.updateMatrixWorld(true);
   for (const g of geos) {
     const id = mesh.addInstance(mesh.addGeometry(g));
     ids.push(id);
-    boxes.push(g.boundingBox.clone().applyMatrix4(o.matrixWorld));
+    spheres.push(g.boundingSphere.clone().applyMatrix4(o.matrixWorld));
     g.dispose();
   }
   mesh.name = o.name;
@@ -155,14 +158,78 @@ function batchCells(o, cells) {
   mesh.receiveShadow = o.receiveShadow;
   mesh.renderOrder = o.renderOrder;
   mesh.userData = o.userData;
-  mesh.perObjectFrustumCulled = true;
-  mesh.sortObjects = !!o.material?.transparent;
+  // culled by CityCuller (cheap, and only touched when a cell's visibility changes),
+  // so three does no per-cell work per frame and draws the batch in one multi-draw
+  mesh.perObjectFrustumCulled = false;
+  mesh.sortObjects = false;
   mesh.matrixAutoUpdate = false;
   mesh.matrix.copy(o.matrix);
   mesh.position.copy(o.position); mesh.quaternion.copy(o.quaternion); mesh.scale.copy(o.scale);
   mesh.computeBoundingBox();
   mesh.computeBoundingSphere();
-  return { mesh, ids, boxes };
+  return { mesh, ids, spheres };
+}
+
+// Which batched city cells to draw: in view (a sphere against the frustum of a view-projection
+// matrix: the camera, or a shadow map's light) and, for the small details, within range.
+// Only cells whose visibility changes are touched, so a still frame costs one quick pass.
+const TIER = { fine: 1, mid: 2 };
+export class CityCuller {
+  constructor(cells) {
+    const n = cells.length;
+    this.n = n;
+    this.cx = new Float32Array(n); this.cy = new Float32Array(n); this.cz = new Float32Array(n); this.r = new Float32Array(n);
+    this.tier = new Uint8Array(n);
+    this.vis = new Uint8Array(n).fill(1);
+    this.batch = cells.map((c) => c.batch);
+    this.id = new Int32Array(n);
+    cells.forEach((c, i) => {
+      this.cx[i] = c.sphere.center.x; this.cy[i] = c.sphere.center.y; this.cz[i] = c.sphere.center.z; this.r[i] = c.sphere.radius;
+      this.tier[i] = TIER[c.tier] || 0;
+      this.id[i] = c.id;
+    });
+    this.planes = new Float32Array(24);
+    this._m = new THREE.Matrix4();
+  }
+
+  /** viewProj: Matrix4; at: Vector3 (for the detail ranges); fine/mid: metres (0 = hide that tier). */
+  update(viewProj, at, fine, mid) {
+    const P = this.planes;
+    if (!viewProj) P.fill(0); // all planes 0: every sphere passes
+    else this._planes(viewProj.elements, P);
+    const f2 = fine * fine, m2 = mid * mid, ax = at.x, az = at.z;
+    const { cx, cy, cz, r, tier, vis } = this;
+    for (let i = 0; i < this.n; i++) {
+      let on = 1;
+      const t = tier[i];
+      if (t) {
+        const dx = cx[i] - ax, dz = cz[i] - az, rr = Math.max(0, Math.sqrt(dx * dx + dz * dz) - r[i]);
+        if (rr * rr > (t === 1 ? f2 : m2)) on = 0;
+      }
+      if (on) {
+        const x = cx[i], y = cy[i], z = cz[i], rad = -r[i];
+        for (let k = 0; k < 24; k += 4) if (P[k] * x + P[k + 1] * y + P[k + 2] * z + P[k + 3] < rad) { on = 0; break; }
+      }
+      if (vis[i] !== on) { vis[i] = on; this.batch[i].setVisibleAt(this.id[i], !!on); }
+    }
+  }
+
+  _planes(e, P) {
+    const rows = [[3, 0, 1], [3, 0, -1], [3, 1, 1], [3, 1, -1], [3, 2, 1], [3, 2, -1]];
+    for (let k = 0; k < 6; k++) {
+      const [w, a, sgn] = rows[k];
+      const x = e[w] + sgn * e[a], y = e[w + 4] + sgn * e[a + 4], z = e[w + 8] + sgn * e[a + 8], d = e[w + 12] + sgn * e[a + 12];
+      const l = Math.hypot(x, y, z) || 1;
+      P[k * 4] = x / l; P[k * 4 + 1] = y / l; P[k * 4 + 2] = z / l; P[k * 4 + 3] = d / l;
+    }
+  }
+
+  /** Culls for a camera (main view) or a shadow light's camera. */
+  updateFor(camera, at, fine, mid) {
+    if (!camera) return this.update(null, at, fine, mid); // no frustum: range only
+    this._m.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+    this.update(this._m, at, fine, mid);
+  }
 }
 
 /** Shows the detail pieces within range of the camera: fine ones to `fine` m, the rest to `mid` m. */
