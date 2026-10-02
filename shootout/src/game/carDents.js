@@ -154,7 +154,9 @@ export function dentCar(car, at, dir, depth, radius = 0.7) {
     const before = mesh.geometry;
     const shared = !!before.userData.shared; // fleet styles: every parked copy uses this buffer
     mesh.geometry = tessellate(before, EDGE / scale, { center: _p, radius: r * 1.1 });
-    if (!shared) before.dispose();
+    // the undented body is kept for a new round (cars.reset puts it back)
+    if (!part.base) part.base = before;
+    else if (!shared && before !== part.base) before.dispose();
     if (!part.own) {
       part.own = true;
       mesh.visible = true;

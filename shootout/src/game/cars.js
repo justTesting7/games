@@ -947,9 +947,45 @@ export class Cars {
       car.windHits = 0;
       this.world.fx?.holes?.clearCar(car);
       car.holes = [];
+      this.repair(car);
       this.placeMesh(car);
       this.refreshSeat(car);
     }
+  }
+
+  // As good as new for a new round: full health, no fire or smoke, the paint back from
+  // charred, the dents knocked out (each part's undented body, drawn by the batch again).
+  repair(car) {
+    car.hp = hpMax(car);
+    car.wrecked = false;
+    car.burnT = 0;
+    car.coolT = 0;
+    car.fxT = 0;
+    car.lastHitBy = null;
+    car.slide = null;
+    car.dentTotal = 0;
+    car.ai = null;
+    if (car.body) { car.body.p = car.body.pv = car.body.r = car.body.rv = 0; car.body.rest = false; }
+    for (const p of car.batched || []) {
+      if (p.paint) { p.batch.setColorAt(p.id, p.paint); p.paint = null; }
+      if (p.baseMat) { p.mesh.material.dispose(); p.mesh.material = p.baseMat; p.baseMat = null; }
+      if (p.base) {
+        if (p.mesh.geometry !== p.base && !p.mesh.geometry.userData.shared) p.mesh.geometry.dispose();
+        p.mesh.geometry = p.base;
+        p.base = null;
+      }
+      if (p.own) {
+        p.own = false;
+        p.mesh.visible = false;
+        p.batch.setVisibleAt(p.id, p.want !== false && p.near !== false);
+      }
+    }
+    for (const p of car.ownParts || []) {
+      if (p.base) { if (p.mesh.geometry !== p.base) p.mesh.geometry.dispose(); p.mesh.geometry = p.base; p.base = null; }
+    }
+    if (!car.batched) car.mesh.traverse((o) => {
+      if (o.userData.baseMat) { o.material.dispose(); o.material = o.userData.baseMat; o.userData.baseMat = null; }
+    });
   }
 
   byId(id) {
@@ -1621,10 +1657,12 @@ export class Cars {
     // charred: every part of it in the batch turns near black
     const char = new THREE.Color(0.1, 0.09, 0.085);
     for (const p of car.batched || []) {
+      // (the paint before is kept for a new round, see reset)
+      if (!p.paint) p.paint = p.batch.colorsTexture ? p.batch.getColorAt(p.id, new THREE.Color()) : new THREE.Color(1, 1, 1);
       p.batch.setColorAt(p.id, char);
-      if (p.own) { p.mesh.material = p.mesh.material.clone(); p.mesh.material.color.multiply(char); } // dented: drawn on its own
+      if (p.own) { p.baseMat = p.baseMat || p.mesh.material; p.mesh.material = p.mesh.material.clone(); p.mesh.material.color.multiply(char); } // dented: drawn on its own
     }
-    if (!car.batched) car.mesh.traverse((o) => { if (o.isMesh && o.material?.color) { o.material = o.material.clone(); o.material.color.multiplyScalar(0.12); } });
+    if (!car.batched) car.mesh.traverse((o) => { if (o.isMesh && o.material?.color) { o.userData.baseMat = o.userData.baseMat || o.material; o.material = o.material.clone(); o.material.color.multiplyScalar(0.12); } });
     world.combat?.explode(world, pos, car.spec ? 4 : 7.5, car.spec ? 60 : 110, car.lastHitBy || null, { weapon: 'car' });
   }
 
