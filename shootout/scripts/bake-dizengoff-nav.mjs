@@ -424,70 +424,114 @@ var rideRemove = [];
   const find = (a) => { while (par.get(a) !== a) { par.set(a, par.get(par.get(a))); a = par.get(a); } return a; };
   for (const t of all) for (const q of t) { const k = key(q); if (!par.has(k)) par.set(k, k); }
   for (const t of all) { const a = find(key(t[0])); for (let i = 1; i < 3; i++) { const b = find(key(t[i])); if (a !== b) par.set(b, a); } }
-  const byRoot = new Map();
-  for (const t of all) { const r = find(key(t[0])); (byRoot.get(r) || byRoot.set(r, []).get(r)).push(t); }
-  const pieces = [...byRoot.values()].map((ts) => {
+  // the pieces that touch (within pad) put together: a list of triangle lists, one an object
+  const groupObjects = (list, pad) => {
+    const byRoot = new Map();
+    for (const t of list) { const r = find(key(t[0])); (byRoot.get(r) || byRoot.set(r, []).get(r)).push(t); }
+    const pieces = [...byRoot.values()].map((ts) => {
+      const mn = [1e9, 1e9, 1e9], mx = [-1e9, -1e9, -1e9];
+      for (const t of ts) for (const q of t) for (let k = 0; k < 3; k++) { mn[k] = Math.min(mn[k], q[k]); mx[k] = Math.max(mx[k], q[k]); }
+      return { ts, mn, mx };
+    }).filter((pc) => pc.mx[1] - pc.mn[1] < 1.6 && Math.max(pc.mx[0] - pc.mn[0], pc.mx[2] - pc.mn[2]) < 2.4);
+    // pieces whose boxes touch (within pad) make one object
+    const G = new Map();
+    pieces.forEach((pc, i) => {
+      for (let x = Math.floor(pc.mn[0] - pad); x <= Math.floor(pc.mx[0] + pad); x++) for (let z = Math.floor(pc.mn[2] - pad); z <= Math.floor(pc.mx[2] + pad); z++) {
+        const k = `${x},${z}`; (G.get(k) || G.set(k, []).get(k)).push(i);
+      }
+    });
+    const up = pieces.map((_, i) => i);
+    const f = (a) => { while (up[a] !== a) { up[a] = up[up[a]]; a = up[a]; } return a; };
+    for (const list of G.values()) for (let a = 0; a < list.length; a++) for (let b = a + 1; b < list.length; b++) {
+      const A = pieces[list[a]], B = pieces[list[b]];
+      if (A.mn[0] > B.mx[0] + pad || B.mn[0] > A.mx[0] + pad || A.mn[1] > B.mx[1] + pad || B.mn[1] > A.mx[1] + pad || A.mn[2] > B.mx[2] + pad || B.mn[2] > A.mx[2] + pad) continue;
+      up[f(list[b])] = f(list[a]);
+    }
+    const objs = new Map();
+    pieces.forEach((pc, i) => { const r = f(i); (objs.get(r) || objs.set(r, []).get(r)).push(pc); });
+    return [...objs.values()].map((ps) => ps.flatMap((pc) => pc.ts));
+  };
+
+  // what an object is, by its size: a bicycle is under 1 m high, a moped and a kick scooter
+  // taller (a kick scooter short and narrow); triangles a vehicle, to split rows parked
+  // tight enough to touch
+  const TYPICAL = { kick: 124, bike: 316, moped: 300 };
+  const classify = (L, W, H) => (H > 0.82 && H < 1.0 && L > 1.5 && L < 1.98 && W < 0.8 ? 'bike'
+    : H >= 1.0 && H < 1.32 && L > 1.75 && L < 2.2 && W < 0.95 ? 'moped'
+      : H > 1.04 && H < 1.32 && L > 0.95 && L < 1.38 && W < 0.45 ? 'kick' : null);
+  const measure = (ts) => {
     const mn = [1e9, 1e9, 1e9], mx = [-1e9, -1e9, -1e9];
     for (const t of ts) for (const q of t) for (let k = 0; k < 3; k++) { mn[k] = Math.min(mn[k], q[k]); mx[k] = Math.max(mx[k], q[k]); }
-    return { ts, mn, mx };
-  }).filter((pc) => pc.mx[1] - pc.mn[1] < 1.6 && Math.max(pc.mx[0] - pc.mn[0], pc.mx[2] - pc.mn[2]) < 2.4);
-  // pieces whose boxes touch (8 cm) make one object
-  const pad = 0.08, G = new Map();
-  pieces.forEach((pc, i) => {
-    for (let x = Math.floor(pc.mn[0] - pad); x <= Math.floor(pc.mx[0] + pad); x++) for (let z = Math.floor(pc.mn[2] - pad); z <= Math.floor(pc.mx[2] + pad); z++) {
-      const k = `${x},${z}`; (G.get(k) || G.set(k, []).get(k)).push(i);
-    }
-  });
-  const up = pieces.map((_, i) => i);
-  const f = (a) => { while (up[a] !== a) { up[a] = up[up[a]]; a = up[a]; } return a; };
-  for (const list of G.values()) for (let a = 0; a < list.length; a++) for (let b = a + 1; b < list.length; b++) {
-    const A = pieces[list[a]], B = pieces[list[b]];
-    if (A.mn[0] > B.mx[0] + pad || B.mn[0] > A.mx[0] + pad || A.mn[1] > B.mx[1] + pad || B.mn[1] > A.mx[1] + pad || A.mn[2] > B.mx[2] + pad || B.mn[2] > A.mx[2] + pad) continue;
-    up[f(list[b])] = f(list[a]);
-  }
-  const objs = new Map();
-  pieces.forEach((pc, i) => { const r = f(i); (objs.get(r) || objs.set(r, []).get(r)).push(pc); });
-  for (const ps of objs.values()) {
-    const mn = [1e9, 1e9, 1e9], mx = [-1e9, -1e9, -1e9], ts = [];
-    for (const pc of ps) { ts.push(...pc.ts); for (let k = 0; k < 3; k++) { mn[k] = Math.min(mn[k], pc.mn[k]); mx[k] = Math.max(mx[k], pc.mx[k]); } }
-    const H = mx[1] - mn[1];
-    // the colours: mostly black (tyres, seat, frame joints), the rest is its paint
-    let black = 0, paintN = 0; const paintC = [0, 0, 0];
-    for (const t of ts) {
-      const c = t.rgb; if (!c) continue;
-      if (c[0] + c[1] + c[2] < 0.12) black++; else { paintN++; paintC[0] += c[0]; paintC[1] += c[1]; paintC[2] += c[2]; }
-    }
-    if (black < ts.length * 0.3) continue;
-    // plan axis by the spread of the vertices
     let cx = 0, cz = 0, cn = 0;
     for (const t of ts) for (const q of t) { cx += q[0]; cz += q[2]; cn++; }
     cx /= cn; cz /= cn;
     let sxx = 0, szz = 0, sxz = 0;
     for (const t of ts) for (const q of t) { const dx = q[0] - cx, dz = q[2] - cz; sxx += dx * dx; szz += dz * dz; sxz += dx * dz; }
     const ang = 0.5 * Math.atan2(2 * sxz, sxx - szz);
-    let ax = Math.cos(ang), az = Math.sin(ang);
+    const ax = Math.cos(ang), az = Math.sin(ang);
     let lo = 1e9, hi = -1e9, wlo = 1e9, whi = -1e9;
     for (const t of ts) for (const q of t) { const a = (q[0] - cx) * ax + (q[2] - cz) * az, w = (q[0] - cx) * az - (q[2] - cz) * ax; lo = Math.min(lo, a); hi = Math.max(hi, a); wlo = Math.min(wlo, w); whi = Math.max(whi, w); }
-    const L = hi - lo, W = whi - wlo;
-    const kind = L > 1.82 && L < 2.15 && W < 0.95 && H > 1.02 && H < 1.28 ? 'moped'
-      : L > 1.5 && L <= 1.82 && W < 0.75 && H > 0.82 && H < 1.06 ? 'bike' : null;
-    if (!kind) continue;
-    const k0 = cellOf(cx, cz);
-    if (k0 < 0 || ground[k0] < -1e8 || Math.abs(mn[1] - ground[k0]) > 0.2) continue; // standing on the street
+    return { mn, mx, cx, cz, ax, az, lo, hi, wlo, whi, L: hi - lo, W: whi - wlo, H: mx[1] - mn[1] };
+  };
+  // k groups of triangles by their plan position (a few rounds of k-means)
+  const split = (ts, k) => {
+    const cs = ts.map((t) => [(t[0][0] + t[1][0] + t[2][0]) / 3, (t[0][2] + t[1][2] + t[2][2]) / 3]);
+    const m = measure(ts);
+    let cent = Array.from({ length: k }, (_, i) => { const w = m.wlo + ((i + 0.5) / k) * (m.whi - m.wlo), a = (m.lo + m.hi) / 2; return [m.cx + m.ax * a + m.az * w, m.cz + m.az * a - m.ax * w]; });
+    let lab = new Array(ts.length).fill(0);
+    for (let it = 0; it < 12; it++) {
+      lab = cs.map((c) => { let b = 0, bd = 1e9; cent.forEach((e, j) => { const d = (c[0] - e[0]) ** 2 + (c[1] - e[1]) ** 2; if (d < bd) { bd = d; b = j; } }); return b; });
+      cent = cent.map((e, j) => { let x = 0, z = 0, n = 0; cs.forEach((c, i) => { if (lab[i] === j) { x += c[0]; z += c[1]; n++; } }); return n ? [x / n, z / n] : e; });
+    }
+    return cent.map((_, j) => ts.filter((_, i) => lab[i] === j)).filter((g) => g.length);
+  };
+  const consider = (ts, depth = 0, only = null) => {
+    const m = measure(ts);
+    const H = m.H;
+    let kind = classify(m.L, m.W, H);
+    if (only && kind !== only) return;
+    if (!kind) {
+      // a row of them touching: split by how many it would hold, each part on its own
+      if (depth === 0 && H > 0.82 && H < 1.32) {
+        const per = H < 1.0 ? TYPICAL.bike : TYPICAL.kick;
+        const k = Math.round(ts.length / per);
+        if (k >= 2 && k <= 12) for (const g of split(ts, k)) consider(g, 1, only);
+      }
+      if (process.env.RIDE_DBG && depth === 0 && H > 0.8 && H < 1.4 && m.L > 0.8 && m.L < 3) console.log('REJECT', JSON.stringify({ at: [m.cx, m.cz].map((v) => +v.toFixed(1)), L: +m.L.toFixed(2), W: +m.W.toFixed(2), H: +H.toFixed(2), n: ts.length }));
+      return;
+    }
+    // the colours: mostly black (tyres, seat, frame joints), the rest is its paint
+    let black = 0, paintN = 0, coloured = 0; const paintC = [0, 0, 0];
+    for (const t of ts) {
+      const c = t.rgb; if (!c) continue;
+      coloured++;
+      if (c[0] + c[1] + c[2] < 0.12) black++; else { paintN++; paintC[0] += c[0]; paintC[1] += c[1]; paintC[2] += c[2]; }
+    }
+    if (coloured && black < coloured * 0.3) return;
+    const k0 = cellOf(m.cx, m.cz);
+    if (k0 < 0 || ground[k0] < -1e8 || Math.abs(m.mn[1] - ground[k0]) > 0.2) return; // standing on the street
     // the nose: the end with the highest part (handlebars, a moped's front shield)
+    let { ax, az } = m;
     let topF = -1e9, topB = -1e9;
-    const mid = (lo + hi) / 2;
-    for (const t of ts) for (const q of t) { const a = (q[0] - cx) * ax + (q[2] - cz) * az; if (a > mid) topF = Math.max(topF, q[1]); else topB = Math.max(topB, q[1]); }
+    const mid = (m.lo + m.hi) / 2;
+    for (const t of ts) for (const q of t) { const a = (q[0] - m.cx) * ax + (q[2] - m.cz) * az; if (a > mid) topF = Math.max(topF, q[1]); else topB = Math.max(topB, q[1]); }
     if (topB > topF + 0.02) { ax = -ax; az = -az; }
-    const c = (lo + hi) / 2, wc = (wlo + whi) / 2;
+    const wc = (m.wlo + m.whi) / 2, ac = mid * (ax === m.ax ? 1 : -1);
     const color = paintN ? paintC.map((v) => Math.round((v / paintN) * 255)) : [40, 40, 44];
     rides.push({
-      x: +(cx + ax * c + az * wc).toFixed(2), z: +(cz + az * c - ax * wc).toFixed(2), y: +ground[k0].toFixed(2),
+      x: +(m.cx + m.ax * mid + m.az * wc).toFixed(2), z: +(m.cz + m.az * mid - m.ax * wc).toFixed(2), y: +ground[k0].toFixed(2),
       yaw: +Math.atan2(ax, az).toFixed(3), kind, color,
     });
-    rideRemove.push([mn[0] - 0.05, mn[1] - 0.05, mn[2] - 0.05, mx[0] + 0.05, mx[1] + 0.05, mx[2] + 0.05].map((v) => +v.toFixed(2)));
-  }
-  console.log('rideable bikes', rides.filter((r) => r.kind === 'bike').length, 'mopeds', rides.filter((r) => r.kind === 'moped').length);
+    void ac;
+    rideRemove.push([m.mn[0] - 0.05, m.mn[1] - 0.05, m.mn[2] - 0.05, m.mx[0] + 0.05, m.mx[1] + 0.05, m.mx[2] + 0.05].map((v) => +v.toFixed(2)));
+  };
+  // two passes: mopeds come in more pieces, joined only when grouped loosely; bikes and
+  // kick scooters park close enough that loose grouping runs them together
+  const used = new Set();
+  const take = (ts, only) => { const n = rides.length; consider(ts, 0, only); if (rides.length > n) for (const t of ts) used.add(t); };
+  for (const ts of groupObjects(all, 0.08)) take(ts, 'moped');
+  for (const ts of groupObjects(all.filter((t) => !used.has(t)), 0.03)) take(ts, null);
+  console.log('rideable bikes', rides.filter((r) => r.kind === 'bike').length, 'mopeds', rides.filter((r) => r.kind === 'moped').length, 'kick scooters', rides.filter((r) => r.kind === 'kick').length);
 }
 
 const inScooter = (x, y, z) => [...scooterRemove, ...rideRemove].some((b) => x > b[0] - 0.1 && x < b[3] + 0.1 && y > b[1] - 0.1 && y < b[4] + 0.1 && z > b[2] - 0.1 && z < b[5] + 0.1);
