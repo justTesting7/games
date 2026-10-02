@@ -109,6 +109,13 @@ export class Pipeline {
   constructor(renderer) {
     patchShaderChunks();
     this.renderer = renderer;
+    // Opaque draws grouped by shader program, then material (three sorts by material id
+    // alone, so materials sharing a program end up apart; every program switch uploads
+    // the camera, light and shadow uniforms again)
+    const props = renderer.properties;
+    const progOf = (m) => props.get(m).currentProgram?.id ?? 0;
+    renderer.setOpaqueSort((a, b) => a.groupOrder - b.groupOrder || a.renderOrder - b.renderOrder
+      || progOf(a.material) - progOf(b.material) || a.material.id - b.material.id || a.z - b.z || a.id - b.id);
     renderer.toneMapping = THREE.NoToneMapping;
     renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
     renderer.setClearColor(0x05080b, 1);
