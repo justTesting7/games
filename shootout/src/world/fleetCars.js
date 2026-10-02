@@ -1,0 +1,235 @@
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { paneOf } from './cityCars.js';
+
+// Tel Aviv's parked cars. The blender file is hundreds of thousands of triangles per
+// body; bake-fleet.mjs reduces each style to a few thousand, and every spot of one
+// style shares that geometry. Wheels are baked on, so they don't spin.
+const BASE = import.meta.env?.BASE_URL || '/shootout/';
+const BAY_HL = 2.30; // nav bays are about 2.34 x 0.89; leave a little air
+const BAY_HW = 0.87;
+
+const paint = new THREE.MeshPhysicalMaterial({
+  name: 'fleet-paint', color: 0x303032, roughness: 0.3, metalness: 0.25,
+  clearcoat: 1, clearcoatRoughness: 0.05, envMapIntensity: 1.2,
+});
+const glass = new THREE.MeshPhysicalMaterial({
+  name: 'fleet-glass', color: 0x1c262c, roughness: 0.04, metalness: 0, ior: 1.52,
+  envMapIntensity: 1.6, transparent: true, opacity: 0.5, depthWrite: false, side: THREE.DoubleSide,
+});
+glass.blending = THREE.CustomBlending;
+glass.blendSrc = THREE.SrcAlphaFactor;
+glass.blendDst = THREE.OneMinusSrcAlphaFactor;
+glass.blendSrcAlpha = THREE.ZeroFactor;
+glass.blendDstAlpha = THREE.OneFactor;
+const tyre = new THREE.MeshStandardMaterial({ name: 'fleet-tyre', color: 0x141414, roughness: 0.92, metalness: 0 });
+const metal = new THREE.MeshStandardMaterial({ name: 'fleet-metal', color: 0xc5c8cc, roughness: 0.25, metalness: 0.85, envMapIntensity: 1.1 });
+const trim = new THREE.MeshStandardMaterial({ name: 'fleet-trim', color: 0x1a1a1c, roughness: 0.45, metalness: 0.7, envMapIntensity: 1 });
+const head = new THREE.MeshStandardMaterial({
+  name: 'fleet-head', color: 0xdfe7ee, roughness: 0.15, metalness: 0, emissive: 0xfff2d0, emissiveIntensity: 0.35,
+});
+const tail = new THREE.MeshStandardMaterial({
+  name: 'fleet-tail', color: 0x6a1010, roughness: 0.3, metalness: 0, emissive: 0xff2200, emissiveIntensity: 0.6,
+});
+const MATERIALS = { paint, glass, tyre, metal, trim, head, tail };
+
+let templates = [];
+
+function kind(name) {
+  if (/^Paint/.test(name)) return 'paint';
+  if (name === 'Glass') return 'glass';
+  if (/Tyre/.test(name)) return 'tyre';
+  if (/Headlight|Reverse/.test(name)) return 'head';
+  if (/Taillight/.test(name)) return 'tail';
+  if (/Chrome|Alloy|Mirror/.test(name)) return 'metal';
+  return 'trim';
+}
+
+/** Same style on every client for a given parking spot. */
+export function fleetVariant(i, n) {
+  let h = Math.imul(i + 1, 0x9e3779b1);
+  h = Math.imul(h ^ (h >>> 16), 0x85ebca6b);
+  h ^= h >>> 13;
+  return (h >>> 0) % n;
+}
+
+function strip(geometry) {
+  const g = geometry.index ? geometry.toNonIndexed() : geometry;
+  if (g !== geometry) geometry.dispose();
+  for (const name of Object.keys(g.attributes)) {
+    if (name !== 'position' && name !== 'normal') g.deleteAttribute(name);
+  }
+  if (!g.attributes.normal) g.computeVertexNormals();
+  return g;
+}
+
+function merge(list) {
+  if (!list.length) return null;
+  const geo = list.length === 1 ? list[0] : mergeGeometries(list);
+  if (!geo) throw new Error('fleet merge failed');
+  if (list.length > 1) for (const g of list) g.dispose();
+  geo.userData.shared = true;
+  geo.computeBoundingSphere();
+  return geo;
+}
+
+function extent(geos) {
+  const e = { x0: Infinity, y0: Infinity, z0: Infinity, x1: -Infinity, y1: -Infinity, z1: -Infinity };
+  for (const g of geos) {
+    const p = g.attributes.position.array;
+    for (let i = 0; i < p.length; i += 3) {
+      e.x0 = Math.min(e.x0, p[i]); e.x1 = Math.max(e.x1, p[i]);
+      e.y0 = Math.min(e.y0, p[i + 1]); e.y1 = Math.max(e.y1, p[i + 1]);
+      e.z0 = Math.min(e.z0, p[i + 2]); e.z1 = Math.max(e.z1, p[i + 2]);
+    }
+  }
+  return e;
+}
+
+function fitIntoBay(geos) {
+  const e = extent(geos);
+  const hl0 = (e.z1 - e.z0) / 2, hw0 = (e.x1 - e.x0) / 2;
+  const s = Math.min(1, BAY_HL / hl0, BAY_HW / hw0);
+  const cx = (e.x0 + e.x1) / 2, cz = (e.z0 + e.z1) / 2;
+  for (const g of geos) {
+    const p = g.attributes.position.array;
+    for (let i = 0; i < p.length; i += 3) {
+      p[i] = (p[i] - cx) * s;
+      p[i + 1] = (p[i + 1] - e.y0) * s;
+      p[i + 2] = (p[i + 2] - cz) * s;
+    }
+    g.attributes.position.needsUpdate = true;
+    g.computeBoundingSphere();
+  }
+  return { hl: hl0 * s, hw: hw0 * s };
+}
+
+function splitGlass(geo) {
+  const pos = geo.attributes.position.array;
+  const nor = geo.attributes.normal.array;
+  const tris = [];
+  for (let i = 0; i + 8 < pos.length; i += 9) {
+    const cx = (pos[i] + pos[i + 3] + pos[i + 6]) / 3;
+    const cz = (pos[i + 2] + pos[i + 5] + pos[i + 8]) / 3;
+    tris.push({ i, cx, cz, nx: nor[i] + nor[i + 3] + nor[i + 6], nz: nor[i + 2] + nor[i + 5] + nor[i + 8] });
+  }
+  if (!tris.length) return {};
+  const zs = tris.map((t) => t.cz);
+  const midZ = (Math.min(...zs) + Math.max(...zs)) / 2;
+  const side = tris.filter((t) => Math.abs(t.nx) > Math.abs(t.nz) * 1.2).map((t) => t.cz);
+  const sideMidZ = side.length ? (Math.min(...side) + Math.max(...side)) / 2 : midZ;
+  const groups = {};
+  for (const t of tris) {
+    const name = paneOf(t.cx, t.cz, t.nx, t.nz, midZ, sideMidZ);
+    (groups[name] || (groups[name] = [])).push(t.i);
+  }
+  const panes = {};
+  for (const [name, starts] of Object.entries(groups)) {
+    const p = new Float32Array(starts.length * 9);
+    const n = new Float32Array(starts.length * 9);
+    let w = 0;
+    for (const s of starts) {
+      p.set(pos.subarray(s, s + 9), w);
+      n.set(nor.subarray(s, s + 9), w);
+      w += 9;
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(p, 3));
+    g.setAttribute('normal', new THREE.BufferAttribute(n, 3));
+    g.userData.shared = true;
+    g.computeBoundingSphere();
+    panes[name] = g;
+  }
+  return panes;
+}
+
+function boxOf(array) {
+  const b = { x0: Infinity, y0: Infinity, z0: Infinity, x1: -Infinity, y1: -Infinity, z1: -Infinity };
+  for (let i = 0; i < array.length; i += 3) {
+    b.x0 = Math.min(b.x0, array[i]); b.x1 = Math.max(b.x1, array[i]);
+    b.y0 = Math.min(b.y0, array[i + 1]); b.y1 = Math.max(b.y1, array[i + 1]);
+    b.z0 = Math.min(b.z0, array[i + 2]); b.z1 = Math.max(b.z1, array[i + 2]);
+  }
+  b.x0 -= 0.03; b.x1 += 0.03; b.y0 -= 0.03; b.y1 += 0.03; b.z0 -= 0.03; b.z1 += 0.03;
+  return b;
+}
+
+function metalOf(paneBoxes, hl, hw) {
+  const sides = ['leftF', 'rightF', 'leftR', 'rightR'].map((k) => paneBoxes[k]).filter(Boolean);
+  const sill = sides.length ? Math.min(...sides.map((b) => b.y0)) : 0.9;
+  const top = Math.max(...Object.values(paneBoxes).map((b) => b.y1));
+  return [
+    { x0: -hw, x1: hw, y0: 0.12, y1: sill, z0: -hl, z1: hl },
+    { x0: -hw * 0.85, x1: hw * 0.85, y0: top - 0.04, y1: top + 0.05, z0: -hl * 0.35, z1: hl * 0.3 },
+  ];
+}
+
+function prepare(root) {
+  // Blender faces +X; the game faces +Z, and the wheel (negative Z in the file) is the left side.
+  root.rotation.y = -Math.PI / 2;
+  root.position.set(0, 0, 0);
+  root.scale.set(1, 1, 1);
+  root.updateMatrixWorld(true);
+  const buckets = { paint: [], glass: [], tyre: [], metal: [], trim: [], head: [], tail: [] };
+  root.traverse((o) => {
+    if (!o.isMesh) return;
+    // Root position was zeroed, so this frame is the car's, turned to face +Z.
+    const g = strip(o.geometry.clone());
+    g.applyMatrix4(o.matrixWorld);
+    buckets[kind(o.material?.name || '')].push(g);
+  });
+  const all = Object.values(buckets).flat();
+  const { hl, hw } = fitIntoBay(all);
+  const group = new THREE.Group();
+  group.name = root.name;
+  for (const key of ['paint', 'trim', 'metal', 'tyre', 'head', 'tail']) {
+    const geo = merge(buckets[key]);
+    if (!geo) continue;
+    const mesh = new THREE.Mesh(geo, MATERIALS[key]);
+    mesh.name = key;
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    group.add(mesh);
+  }
+  const glassGeo = merge(buckets.glass);
+  const paneGeos = glassGeo ? splitGlass(glassGeo) : {};
+  glassGeo?.dispose();
+  const paneBoxes = {};
+  for (const [name, geo] of Object.entries(paneGeos)) {
+    const mesh = new THREE.Mesh(geo, glass);
+    mesh.name = `pane-${name}`;
+    mesh.castShadow = false;
+    mesh.receiveShadow = true;
+    group.add(mesh);
+    paneBoxes[name] = boxOf(geo.attributes.position.array);
+  }
+  return { name: root.name, group, hl, hw, paneBoxes, metalBoxes: metalOf(paneBoxes, hl, hw) };
+}
+
+/** Styles from an already-parsed scene (the bake test uses this). */
+export function buildTemplates(scene) {
+  templates = scene.children.filter((c) => c.name.startsWith('Car')).map(prepare);
+  return templates;
+}
+
+export async function loadFleet() {
+  const res = await fetch(`${BASE}assets/cars/fleet.glb`);
+  if (!res.ok) throw new Error(`fleet.glb missing (${res.status})`);
+  const gltf = await new GLTFLoader().parseAsync(await res.arrayBuffer(), '');
+  return buildTemplates(gltf.scene);
+}
+
+/** One mesh group per spot. Geometry stays shared across spots of the same style. */
+export function placeFleet(spots) {
+  return spots.map((spot, i) => {
+    const tpl = templates[fleetVariant(i, templates.length)];
+    const mesh = tpl.group.clone(true);
+    const panes = {};
+    mesh.traverse((o) => { if (o.name.startsWith('pane-')) panes[o.name.slice(5)] = o; });
+    return {
+      x: spot.x, z: spot.z, y: spot.y, yaw: spot.yaw,
+      hl: tpl.hl, hw: tpl.hw, mesh, panes, paneBoxes: tpl.paneBoxes, metalBoxes: tpl.metalBoxes,
+    };
+  });
+}

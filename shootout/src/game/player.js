@@ -118,6 +118,20 @@ export class Player {
   }
 
   update(dt, input, follow = null) {
+    if (this.vehicle && !this.fighter?.alive) {
+      // The corpse stays in the seat while the car rolls. Spectating only moves the camera.
+      const driving = this.updateInCar(dt, input);
+      if (!follow) return driving;
+      const look = spectateLook(follow);
+      this.camYaw = look.yaw;
+      this.camPitch = THREE.MathUtils.clamp(look.pitch, -1.25, 0.95);
+      this.scoped = false;
+      this.scopeT = 0;
+      this.holdingBreath = false;
+      const spd = follow.speed ?? 0;
+      this.updateCamera(dt, look.aiming, spd > 4.5 && !look.aiming, spd, follow);
+      return driving;
+    }
     if (this.vehicle && !follow) return this.updateInCar(dt, input);
     const { terrain } = this.world;
     const weapon = this.fighter?.loadout.current;

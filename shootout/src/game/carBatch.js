@@ -25,9 +25,12 @@ export class CarBatch {
     }
     for (const [material, list] of byMat) {
       let verts = 0, index = 0;
+      const seen = new Set();
       for (const { mesh } of list) {
         const g = mesh.geometry;
         if (!g.index) g.setIndex(Array.from({ length: g.attributes.position.count }, (_, i) => i));
+        if (seen.has(g)) continue; // one copy of a fleet style, many parked instances
+        seen.add(g);
         verts += g.attributes.position.count;
         index += g.index.count;
       }
@@ -36,8 +39,13 @@ export class CarBatch {
       batch.castShadow = list.some((p) => p.mesh.castShadow);
       batch.receiveShadow = true;
       batch.sortObjects = !!material.transparent;
+      const geoId = new Map();
       for (const { car, mesh } of list) {
-        const gid = batch.addGeometry(mesh.geometry);
+        let gid = geoId.get(mesh.geometry);
+        if (gid === undefined) {
+          gid = batch.addGeometry(mesh.geometry);
+          geoId.set(mesh.geometry, gid);
+        }
         const id = batch.addInstance(gid);
         const part = { car, mesh, batch, id, gid };
         this.parts.push(part);
@@ -53,15 +61,32 @@ export class CarBatch {
       for (const [name, mesh] of Object.entries(car.panes)) {
         const part = car.batched.find((p) => p.mesh === mesh);
         if (!part) continue;
+        part.want = true;
         car.panes[name] = {
           geometry: mesh.geometry,
-          get visible() { return part.batch.getVisibleAt(part.id); },
-          set visible(v) { part.batch.setVisibleAt(part.id, !!v); },
+          get visible() { return part.want; },
+          set visible(v) {
+            part.want = !!v;
+            part.batch.setVisibleAt(part.id, part.want && part.near !== false);
+          },
         };
       }
     }
     this.sync(true);
     return this;
+  }
+
+  /** Drops cars past `dist` metres. The view reaches kilometres, and each style is a few thousand triangles. */
+  cull(x, z, dist = 120) {
+    const d2 = dist * dist;
+    for (const p of this.parts) {
+      if (p.own) continue;
+      const dx = p.car.x - x, dz = p.car.z - z;
+      const near = dx * dx + dz * dz < d2;
+      if (p.near === near) continue;
+      p.near = near;
+      p.batch.setVisibleAt(p.id, near && p.want !== false);
+    }
   }
 
   /** Copies the transforms of the cars that moved (car.dirty) into their instances. */

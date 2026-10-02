@@ -141,9 +141,9 @@ export const MAPS = {
   },
   telaviv: {
     id: 'telaviv',
-    cityFolder: 'tel-aviv', // stitched from three exports, see src/world/cityParts.js
+    cityFolder: 'tel-aviv', // stitched districts, see src/world/cityParts.js
     label: 'Tel Aviv',
-    subtitle: "Dizengoff Square and Center, HaNevi'im, Masaryk and Sderot Hen in one city",
+    subtitle: "Dizengoff Square and Center, HaNevi'im, Masaryk, Sderot Hen and Habima in one city",
     loadLabel: 'Raising Tel Aviv',
     plantLabel: 'Loading the city',
     textures: {

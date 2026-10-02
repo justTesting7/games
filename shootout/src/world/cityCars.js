@@ -72,7 +72,8 @@ const boxOf = (pos, pad = 0.03) => {
   return b;
 };
 
-export function extractCityCars(root, cars) {
+
+export function extractCityCars(root, cars, { build = true } = {}) {
   const grid = new Map();
   const key = (i, j) => `${i},${j}`;
   cars.forEach((c, n) => {
@@ -87,6 +88,7 @@ export function extractCityCars(root, cars) {
   });
   const trig = cars.map((c) => ({ s: Math.sin(c.yaw), c: Math.cos(c.yaw) }));
   const parts = cars.map(() => new Map());
+  const hits = new Uint32Array(cars.length);
 
   const va = new THREE.Vector3(), vb = new THREE.Vector3(), vc = new THREE.Vector3();
   root.updateMatrixWorld(true);
@@ -118,6 +120,9 @@ export function extractCityCars(root, cars) {
         }
       }
       if (hit < 0) { keep.push(a, b, c); continue; }
+      hits[hit]++;
+      // Tel Aviv swaps in the simplified fleet: drop the baked triangles, skip the mesh.
+      if (!build) continue;
       const car = cars[hit], { s, c: co } = trig[hit];
       let p = parts[hit].get(o);
       if (!p) { p = { pos: [], nor: [], uv: [], col: [], colSize: col?.itemSize || 0 }; parts[hit].set(o, p); }
@@ -135,6 +140,15 @@ export function extractCityCars(root, cars) {
     }
     g.setIndex(new THREE.BufferAttribute(new Uint32Array(keep), 1));
   });
+
+  if (!build) {
+    // Only the drivable spots become fleet cars. The other parked shells stay in the
+    // city meshes: they are a few hundred triangles each, and a fleet copy of every
+    // one of them was most of the frame.
+    return cars.flatMap((car, n) => (hits[n]
+      ? [{ x: car.x, z: car.z, yaw: car.yaw, y: car.y, hl: car.hl, hw: car.hw }]
+      : []));
+  }
 
   const out = [];
   cars.forEach((car, n) => {

@@ -11,7 +11,7 @@ import { City } from './world/city.js';
 import { Arena } from './world/arena.js';
 import { arenaHeightAt, standSpawn } from './world/arenaLayout.js';
 import { studioRivalSpots, blockedAt } from './world/glbMap.js';
-import { loadDizengoff } from './world/dizengoff.js';
+import { dealPlazas, loadDizengoff } from './world/dizengoff.js';
 import { buildLab, LAB } from './world/lab.js';
 import { NightLights } from './world/nightLights.js';
 import { Weather } from './world/weather.js';
@@ -454,8 +454,13 @@ async function init() {
     const t0 = performance.now();
     const ch = studio.chunk();
     console.info(`city: ${ch?.split} meshes into ${ch?.pieces} cells, ${ch?.cells?.length ?? 0} batched, ${Math.round(performance.now() - t0)} ms`);
-    // the far shadow cascade draws only the buildings (small things are near-only anyway)
-    pipeline.beforeFarShadow = (on) => studio.hideDetails?.(on);
+    // the far shadow cascade draws only the buildings (small things are near-only anyway).
+    // Parked cars are one batch for the whole city, so leaving them in that map shades every one.
+    pipeline.beforeFarShadow = (on) => {
+      studio.hideDetails?.(on);
+      const batches = cars.batch?.batches;
+      if (batches) for (const b of batches) b.visible = !on;
+    };
     // the batched city is culled by the game itself: for the view, and for each shadow map's
     // light before it is drawn (details only near the camera, how near follows the quality)
     if (studio.cull) {
@@ -641,6 +646,13 @@ async function init() {
       });
       return;
     }
+    if (studio?.plazas?.length && mode === 'solo') {
+      const spots = dealPlazas(studio.plazas, rivals.length + 1);
+      player.spawn(spots[0].x, spots[0].z, spots[0].yaw);
+      player.vel.set(0, 0, 0);
+      rivals.forEach((r, i) => r.spawn(spots[i + 1].x, spots[i + 1].z, spots[i + 1].yaw));
+      return;
+    }
     if (studio) {
       const spots = studio.rivalSpots?.(spawn, rivals.length)
         || studioRivalSpots(spawn, rivals.length, (x, z) => blockedAt(veg.colliders, x, z));
@@ -750,6 +762,8 @@ async function init() {
       const s = standSpawn(0);
       player.spawn(s.x, s.z, s.yaw);
       player.vel.set(0, 0, 0);
+    } else if (studio?.plazas?.length && mode === 'solo') {
+      // spawnRivals deals Dizengoff Square, Dizengoff Center and Masaryk, including the player
     } else if (studio) {
       player.spawn(spawn.x, spawn.z, facing);
       player.vel.set(0, 0, 0);
@@ -838,7 +852,7 @@ async function init() {
     const by = attacker === victim ? '' : attacker ? tagName(attacker) : '';
     feed(`${by} <span class="gun">▸ ${how} ▸</span> ${tagName(victim)}`);
     if (victim === player.fighter) {
-      if (player.vehicle) cars.leave(player);
+      // A driver stays in the seat. The car keeps rolling; the body goes with it.
       weapons.drone.clear();
       hurt = 1;
       audio.hurt(true);

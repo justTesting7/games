@@ -318,10 +318,30 @@ if (cars.length > MAX_CARS) {
   cars.push(...keep);
 }
 console.log('drivable cars', cars.length);
-const inCar = (x, z) => cars.some((c) => {
-  const dx = x - c.x, dz = z - c.z, s = Math.sin(c.yaw), co = Math.cos(c.yaw);
-  return Math.abs(dx * s + dz * co) < c.hl + 0.3 && Math.abs(dx * co - dz * s) < c.hw + 0.3;
-});
+// The solid pass samples every facade triangle. A car only covers its own few metres,
+// so each sample checks the cars in that cell instead of all of them.
+const carGrid = new Map();
+const CAR_CELL = 8;
+for (const c of cars) {
+  c._s = Math.sin(c.yaw); c._co = Math.cos(c.yaw);
+  const r = Math.hypot(c.hl, c.hw) + 0.3;
+  for (let i = Math.floor((c.x - r) / CAR_CELL); i <= Math.floor((c.x + r) / CAR_CELL); i++) {
+    for (let j = Math.floor((c.z - r) / CAR_CELL); j <= Math.floor((c.z + r) / CAR_CELL); j++) {
+      const k = `${i},${j}`;
+      const list = carGrid.get(k);
+      if (list) list.push(c); else carGrid.set(k, [c]);
+    }
+  }
+}
+const inCar = (x, z) => {
+  const list = carGrid.get(`${Math.floor(x / CAR_CELL)},${Math.floor(z / CAR_CELL)}`);
+  if (!list) return false;
+  for (const c of list) {
+    const dx = x - c.x, dz = z - c.z;
+    if (Math.abs(dx * c._s + dz * c._co) < c.hl + 0.3 && Math.abs(dx * c._co - dz * c._s) < c.hw + 0.3) return true;
+  }
+  return false;
+};
 
 // scooters: each parked scooter has one handlebar mast piece (~1.2 m tall) beside a deck piece.
 // Find the masts, aim each scooter from its deck to its mast, and note the original parts to

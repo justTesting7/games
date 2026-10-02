@@ -19,6 +19,7 @@ export const CITY_PARTS = {
       { folder: 'haneviim', offset: [334.04, 7.12, 222.35], half: 200 },
       { folder: 'masrik', offset: [419.12, 7.13, -57.9], half: 220 },
       { folder: 'sderot-hen', offset: [567.03, 8.88, 238.47], half: 300, files: ['set.glb', 'set-2.glb'] },
+      { folder: 'habima', offset: [516.44, 12.30, 527.47], half: 200 },
     ],
     spill: 35, // buildings reach this far past the tile edge
   },

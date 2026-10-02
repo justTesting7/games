@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { loadCity } from './loadCity.js';
 import { extractCityCars, removeInBoxes } from './cityCars.js';
+import { loadFleet, placeFleet } from './fleetCars.js';
 import { buildStadium, stadiumSlotSpawns, STADIUM } from './stadium.js';
 import { buildShotMesh } from './shotMesh.js';
 import { chunkMeshes, cullDetails, hideDetails, CityCuller } from './chunkMeshes.js';
@@ -9,6 +10,47 @@ import { buildPitchProps } from './pitchProps.js';
 import { pickRivalSpots, slotSpawns } from './rivalSpots.js';
 
 const BASE = import.meta.env?.BASE_URL || '/shootout/';
+
+// Tel Aviv fight starts. Each district's own nav spawn, moved into the stitched city
+// (see cityParts.js). Masaryk has no separate nav; the spot is the open ground at the square.
+const TEL_AVIV_PLAZAS = [
+  { x: 38.25, z: -2.75, yaw: 5.301 }, // Dizengoff Square
+  { x: 106.25, z: 274.47, yaw: 3.731 }, // Dizengoff Center
+  { x: 418.3, z: -52.8, yaw: 2.42 }, // Masaryk Square
+];
+
+/** The same plaza for a multiplayer slot on every client. Later slots stand to the side. */
+export function plazaAt(plazas, slot) {
+  const p = plazas[Math.abs(slot) % plazas.length];
+  const lap = Math.floor(Math.abs(slot) / plazas.length);
+  const side = (slot % 2 === 0 ? 1 : -1) * lap * 5;
+  return {
+    x: p.x + Math.cos(p.yaw) * side,
+    z: p.z - Math.sin(p.yaw) * side,
+    yaw: p.yaw,
+  };
+}
+
+/** Shuffle the plazas and hand them out. Past the first pass, stand a few metres to the side. */
+export function dealPlazas(plazas, count, rand = Math.random) {
+  const order = plazas.slice();
+  for (let i = order.length - 1; i > 0; i--) {
+    const j = Math.floor(rand() * (i + 1));
+    [order[i], order[j]] = [order[j], order[i]];
+  }
+  const out = [];
+  for (let n = 0; n < count; n++) {
+    const p = order[n % order.length];
+    const lap = Math.floor(n / order.length);
+    const side = (n % 2 === 0 ? 1 : -1) * lap * 5;
+    out.push({
+      x: p.x + Math.cos(p.yaw) * side,
+      z: p.z - Math.sin(p.yaw) * side,
+      yaw: p.yaw,
+    });
+  }
+  return out;
+}
 export const navUrl = (folder) => `${BASE}assets/maps/${folder}/nav.json`;
 const FAR_DISTANCE = 9000; // far.glb spans 8 km
 const NO_CAST = /^(asphalt|pavement|ground|lm_grass|kerb|marking|road_marks.*|lamp_glow|house_numbers|name_plates|lm_glass|glass|carglass)$/;
@@ -65,9 +107,10 @@ export function addNavColliders(nav, colliders, heightAt, noRay = false) {
 export async function loadDizengoff(renderer, folder = 'dizengoff-center', { stadiumStart = false } = {}) {
   const group = new THREE.Group();
   group.name = `city-${folder}`;
-  const [nav, city] = await Promise.all([
+  const [nav, city, fleet] = await Promise.all([
     fetch(navUrl(folder)).then((r) => { if (!r.ok) throw new Error('nav.json missing'); return r.json(); }),
     loadCity(group, renderer, folder),
+    folder === 'tel-aviv' ? loadFleet() : null,
   ]);
   // Streets, kerbs, markings and grass are flat: they receive shadows but casting only
   // adds draw calls to the shadow pass. Glow cards and decals don't cast either.
@@ -85,7 +128,8 @@ export async function loadDizengoff(renderer, folder = 'dizengoff-center', { sta
   const lamps = findLamps(city.set);
   // Stadium maps: everyone starts inside, one player per stand; the local player takes the first
   const stands = stadiumStart && nav.stadium ? stadiumSlotSpawns(nav.stadium) : null;
-  const spawn = stands ? { ...stands[0] } : { ...nav.spawn };
+  const plazas = folder === 'tel-aviv' ? TEL_AVIV_PLAZAS : null;
+  const spawn = stands ? { ...stands[0] } : plazas ? { ...plazas[0] } : { ...nav.spawn };
   spawn.y = heightAt(spawn.x, spawn.z);
   let details = null; // the small-detail pieces left as meshes, culled by distance (see chunk)
   let culler = null; // the batched city cells (see chunk)
@@ -93,6 +137,8 @@ export async function loadDizengoff(renderer, folder = 'dizengoff-center', { sta
     group,
     root: city.set,
     spawn,
+    /** Tel Aviv: Dizengoff Square, Dizengoff Center, Masaryk Square. Solo deals these at random. */
+    plazas,
     outdoor: true,
     stadium: nav.stadium || null,
     /** Open ground the pigeons can have: the same places fighters may start from. */
@@ -102,6 +148,7 @@ export async function loadDizengoff(renderer, folder = 'dizengoff-center', { sta
       : pickRivalSpots(nav.spots || [], origin, count)),
     /** Where player `slot` starts in a multiplayer room (identical on every client). */
     slotSpawn: (slot) => {
+      if (plazas) return plazaAt(plazas, slot);
       const all = stadiumStart && nav.stadium ? stadiumSlotSpawns(nav.stadium) : slotSpawns(nav.spots || [], 16);
       return all.length ? all[slot % all.length] : null;
     },
@@ -117,7 +164,10 @@ export async function loadDizengoff(renderer, folder = 'dizengoff-center', { sta
       doors: stadium?.doors || [], doorMesh: STADIUM.glassMesh,
     }),
     /** Cuts the parked cars out of the map meshes, once, as movable groups. */
-    takeCars: () => extractCityCars(city.set, nav.cars || []),
+    takeCars: () => {
+      const spots = extractCityCars(city.set, nav.cars || [], { build: !fleet });
+      return fleet ? placeFleet(spots) : spots;
+    },
     /** Replaces the parked scooters with rideable ones: removes the originals and returns their spots. */
     takeScooters: () => {
       if (!nav.scooters?.length) return [];

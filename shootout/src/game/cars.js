@@ -909,8 +909,10 @@ export class Cars {
       this.group.add(car.mesh);
       this.list.push(car);
     });
-    // city cars draw as one batch per material (see carBatch.js)
-    if (this.list.length) this.batch = new CarBatch(this.group).build(this.list);
+    // Replace the car batch. The first one was built before the scooters existed;
+    // leaving it in the scene draws every car twice, and the spare stays put when you drive off.
+    this.batch?.dispose();
+    this.batch = this.list.length ? new CarBatch(this.group).build(this.list) : null;
     return this.list;
   }
 
@@ -1207,7 +1209,7 @@ export class Cars {
   }
 
   updatePrompt(player) {
-    if (!player || this.list.length === 0) {
+    if (!player || this.list.length === 0 || !player.fighter?.alive) {
       this.prompt = null;
       return null;
     }
@@ -1254,11 +1256,30 @@ export class Cars {
     }
 
     for (const car of this.list) {
-      if (car.ai && car.driver && !car.driver.isPlayer && !car.remote) {
+      const living = car.driver?.alive;
+      if (car.ai && living && !car.driver.isPlayer && !car.remote) {
         // a rival at the wheel: same grip physics as the player's car
         const stepped = stepGrip(car, { throttle: car.ai.throttle, steer: car.ai.steer, handbrake: car.ai.handbrake, dt, spec: specOf(car), wet: this.world.weather?.amount || 0 });
         Object.assign(car, { speed: stepped.speed, lat: stepped.lat, yawRate: stepped.yawRate, slip: stepped.slip, yaw: stepped.yaw });
         car.steer = car.ai.steer;
+        car.x += stepped.vx * dt;
+        car.z += stepped.vz * dt;
+        car.vel.set(stepped.vx, 0, stepped.vz);
+        this.groundCar(car);
+        this.bumpWorld(car);
+        this.bumpCars(car);
+        this.refreshSeat(car);
+        this.placeMesh(car);
+      } else if (car.driver?.isPlayer && living) {
+        // stepped above, while the local driver is alive
+      } else if (!car.remote && !living && Math.abs(car.speed) > 0.05) {
+        // Dead driver, or nobody at the wheel: keep the momentum and roll to a stop.
+        // A body left in the seat rides along (the driver is not cleared on death).
+        const stepped = stepGrip(car, {
+          throttle: 0, steer: 0, handbrake: false, dt, spec: specOf(car), wet: this.world.weather?.amount || 0,
+        });
+        Object.assign(car, { speed: stepped.speed, lat: stepped.lat, yawRate: stepped.yawRate, slip: stepped.slip, yaw: stepped.yaw });
+        car.steer = 0;
         car.x += stepped.vx * dt;
         car.z += stepped.vz * dt;
         car.vel.set(stepped.vx, 0, stepped.vz);
@@ -1306,6 +1327,7 @@ export class Cars {
       car.tails.emissiveIntensity = car.speed < -0.4 || (car.driver?.isPlayer && input?.back) ? 1.2 : 0.4;
     }
 
+    if (player && this.batch) this.batch.cull(player.pos.x, player.pos.z);
     this.batch?.sync();
     if (player) this.updatePrompt(player);
     this.engineSounds(local, input);

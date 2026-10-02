@@ -1482,10 +1482,12 @@ export class Rival {
     const ch = this.character;
     if (this.drive?.phase === 'drive') {
       if (this.fighter.alive && active) { this.updateDriving(dt); this.weapons.tick(this.fighter, dt); return; }
-      if (!this.fighter.alive) { const car = this.drive.car; car.ai = null; if (car.driver === this.fighter) car.driver = null; this.drive = null; }
+      if (!this.fighter.alive) {
+        if (this.drive.car) this.drive.car.ai = null; // roll on; the body stays in the seat
+        this.drive = null;
+      }
     }
-    if (this.seatedIn && this.fighter.alive && !this.drive) { this.updateSeated(dt); return; }
-    if (this.seatedIn && !this.drive) this.standUp(); // shot in the seat: the body stays where it fell
+    if (this.seatedIn && !this.drive) { this.updateSeated(dt); return; }
     if (!this.fighter.alive) {
       ch.root.position.copy(this.pos);
       ch.update(dt, {});

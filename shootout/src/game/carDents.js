@@ -152,8 +152,9 @@ export function dentCar(car, at, dir, depth, radius = 0.7) {
     if (bs.center.distanceTo(_p) > bs.radius + r) continue;
     // cut the body up finely enough around this dent (only there: it's quick)
     const before = mesh.geometry;
+    const shared = !!before.userData.shared; // fleet styles: every parked copy uses this buffer
     mesh.geometry = tessellate(before, EDGE / scale, { center: _p, radius: r * 1.1 });
-    before.dispose();
+    if (!shared) before.dispose();
     if (!part.own) {
       part.own = true;
       mesh.visible = true;
