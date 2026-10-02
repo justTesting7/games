@@ -897,6 +897,12 @@ export class Character {
   // Called by the controller every frame with the movement state.
   update(dt, s) {
     if (this.dead) { this.updateDead(dt); return; }
+    if (this.detail === 0) { // far off (see detail): animated every other frame (a jump's start is never skipped)
+      this.skipDt = (this.skipDt || 0) + dt;
+      if ((this.skipped = !this.skipped && !s.jumpStarted)) return;
+      dt = this.skipDt;
+      this.skipDt = 0;
+    }
     const motion = this.updateMotion(dt);
     const target = {};
     const locomotion = () => {

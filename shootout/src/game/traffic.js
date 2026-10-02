@@ -105,6 +105,7 @@ export class Traffic {
       this.release(a);
       return false;
     });
+    this.viewer = player.pos;
     const grid = world.cars.driveGrid || (world.cars.driveGrid = new DriveGrid(world));
     const now = performance.now();
     for (const a of this.agents) {
@@ -168,6 +169,8 @@ export class Traffic {
     ch.root.position.copy(car.seat);
     ch.root.rotation.set(0, car.yaw, 0);
     ch.steer = car.steer || 0;
+    // drivers away from the player are animated at half rate, without the fine detail
+    ch.detail = this.viewer && Math.hypot(car.x - this.viewer.x, car.z - this.viewer.z) > 35 ? 0 : 1;
     const fwd = this._fwd || (this._fwd = new THREE.Vector3());
     fwd.set(Math.sin(car.yaw), 0, Math.cos(car.yaw));
     const look = this._look || (this._look = new THREE.Vector3());
@@ -182,6 +185,11 @@ export class Traffic {
   avoid(car) {
     const cols = this.world.veg?.colliders, cars = this.world.cars?.list || [];
     const reach = 6 + Math.min(Math.abs(car.speed), 20) * 0.45;
+    // only the cars that could be within reach (the probes test them ~30 times)
+    const near = this._near || (this._near = []);
+    near.length = 0;
+    const span = reach + 3;
+    for (const o of cars) if (Math.abs(o.x - car.x) < span && Math.abs(o.z - car.z) < span) near.push(o);
     const hitAt = (x, z) => {
       if (cols) {
         for (const c of cols.query(x, z, 1.4, this.tmp)) {
@@ -189,7 +197,7 @@ export class Traffic {
           if (c.box ? x > c.x0 - 0.9 && x < c.x1 + 0.9 && z > c.z0 - 0.9 && z < c.z1 + 0.9 : Math.hypot(x - c.x, z - c.z) < (c.r || 0) + 0.9) return true;
         }
       }
-      for (const o of cars) if (o !== car && Math.abs(o.x - x) < 2.4 && Math.abs(o.z - z) < 2.4 && Math.hypot(o.x - x, o.z - z) < 2.2) return true;
+      for (const o of near) if (o !== car && Math.abs(o.x - x) < 2.4 && Math.abs(o.z - z) < 2.4 && Math.hypot(o.x - x, o.z - z) < 2.2) return true;
       return false;
     };
     const look = (ang) => {
