@@ -164,7 +164,10 @@ Measured in Tel Aviv at 2000x1300: CPU ~17-21 ms a frame just issuing draws (~11
 - [x] 89. Profiler (F3 / ?perf): GPU time per pass (timer queries), the near shadow map timed on
       its own, CPU for the frame and for the render call. The hidden dev pane renders far slower
       than a real GPU, so real numbers come from the player's browser.
-- [ ] 88. Near shadow casters trimmed (clutter out of the shadow map, a tighter frustum).
+- [x] 88. Shadow cache: the city's near shadow map is drawn only when the view crosses an 8 m
+      cell or the sun turns; characters, cars and debris go into their own small map (±30 m,
+      1024) every frame, combined in the shader. Steady frame 1075 -> 777 draw calls. Ultra
+      loses MSAA x2 and 1.25x supersampling (TAA covers it); Low gets a small far cascade.
 
 ## Log
 - Tel Aviv load (local, cached): ready in ~8 s; main-thread stages: decode 1.6 s, seam clip 1.0,

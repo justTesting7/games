@@ -446,6 +446,8 @@ async function init() {
     studio.chunk();
     // the far shadow cascade draws only the buildings (small things are near-only anyway)
     pipeline.beforeFarShadow = (on) => studio.hideDetails?.(on);
+    // the city doesn't move: its near shadow map is cached, only moving things redrawn each frame
+    if (studio.group) pipeline.staticRoots = [studio.group];
   }
   const weather = new Weather(pipeline.scene);
   world.weather = weather;

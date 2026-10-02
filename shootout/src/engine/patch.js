@@ -23,7 +23,12 @@ export function patchShaderChunks() {
 			float far = smoothstep( 0.82, 0.98, edge );
 			float sNear = far < 1.0 ? getShadow( directionalShadowMap[ i ], directionalLightShadow.shadowMapSize, directionalLightShadow.shadowIntensity, directionalLightShadow.shadowBias, directionalLightShadow.shadowRadius, nc ) : 1.0;
 			float sFar = far > 0.0 ? getShadow( directionalShadowMap[ 1 ], directionalLightShadows[ 1 ].shadowMapSize, directionalLightShadows[ 1 ].shadowIntensity, directionalLightShadows[ 1 ].shadowBias, directionalLightShadows[ 1 ].shadowRadius, vDirectionalShadowCoord[ 1 ] ) : 1.0;
-			directLight.color *= mix( sNear, sFar, far );
+			float sh = mix( sNear, sFar, far );
+#if NUM_DIR_LIGHT_SHADOWS > 2
+			// the moving things, drawn every frame into their own small map (Pipeline.dynSun)
+			sh = min( sh, getShadow( directionalShadowMap[ 2 ], directionalLightShadows[ 2 ].shadowMapSize, directionalLightShadows[ 2 ].shadowIntensity, directionalLightShadows[ 2 ].shadowBias, directionalLightShadows[ 2 ].shadowRadius, vDirectionalShadowCoord[ 2 ] ) );
+#endif
+			directLight.color *= sh;
 		}
 #else
 		${line}

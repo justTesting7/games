@@ -98,10 +98,11 @@ function fsMaterial(frag, uniforms, extra = {}) {
 }
 
 export const QUALITY = {
-  low: { label: 'Low', shadow: 512, shadowDist: 28, ssr: 0, msaa: 0, ao: 0, fxaa: false, pixelRatio: 0.7, grass: 0.3, trees: 0.45 },
+  low: { label: 'Low', shadow: 512, shadowDist: 28, farShadow: 1024, farDist: 160, ssr: 0, msaa: 0, ao: 0, fxaa: false, pixelRatio: 0.7, grass: 0.3, trees: 0.45 },
   medium: { label: 'Medium', shadow: 2048, shadowDist: 64, farShadow: 2048, farDist: 260, ssr: 8, msaa: 0, ao: 8, fxaa: true, taa: true, pixelRatio: 1, grass: 0.55, trees: 0.7 },
   high: { label: 'High', shadow: 4096, shadowDist: 90, farShadow: 2048, farDist: 320, ssr: 16, msaa: 0, ao: 12, fxaa: true, smaa: true, taa: true, pixelRatio: 1, grass: 0.85, trees: 0.9 },
-  ultra: { label: 'Ultra', shadow: 4096, shadowDist: 110, farShadow: 4096, farDist: 400, ssr: 24, msaa: 2, ao: 16, fxaa: true, smaa: true, taa: true, pixelRatio: 1.25, grass: 1.1, trees: 1.05 },
+  // (no MSAA and no supersampling on Ultra: TAA already smooths the edges, and they doubled the cost)
+  ultra: { label: 'Ultra', shadow: 4096, shadowDist: 110, farShadow: 4096, farDist: 400, ssr: 24, msaa: 0, ao: 16, fxaa: true, smaa: true, taa: true, pixelRatio: 1, grass: 1.1, trees: 1.05 },
 };
 
 export class Pipeline {
@@ -166,7 +167,22 @@ export class Pipeline {
       this.farSun.shadow.radius = 1;
       this.farSun.shadow.autoUpdate = false;
       this.scene.add(this.farSun, this.farSun.target);
+      // the moving things' shadows (characters, cars, debris) near the camera, redrawn
+      // every frame while the sun's own map holds the static city, cached (see staticRoots)
+      this.dynSun = new THREE.DirectionalLight(0xffffff, 0);
+      this.dynSun.castShadow = false;
+      this.dynSun.shadow.bias = -0.0004;
+      this.dynSun.shadow.normalBias = 0.03;
+      this.dynSun.shadow.radius = 2;
+      this.dynSun.shadow.autoUpdate = false;
+      this.dynSun.shadow.mapSize.set(1024, 1024);
+      Object.assign(this.dynSun.shadow.camera, { left: -30, right: 30, top: 30, bottom: -30, near: 1, far: 800 });
+      this.dynSun.shadow.camera.updateProjectionMatrix();
+      this.scene.add(this.dynSun, this.dynSun.target);
     }
+    // When the game names the static parts of the world (staticRoots), the sun's near map
+    // is cached: redrawn only when the view has moved a cell or the sun has turned.
+    this.staticRoots = null;
 
     // Muzzle flashes reuse a single light that is always present, so toggling
     // it never changes the light count and never triggers shader recompiles.
@@ -518,11 +534,49 @@ export class Pipeline {
     if (!this.farSun) return;
     const on = this.sun.castShadow && !this.indoor && !!this.quality?.farDist;
     if (this.farSun.castShadow !== on) this.farSun.castShadow = on;
+    const dyn = on && !!this.staticRoots;
+    if (this.dynSun && this.dynSun.castShadow !== dyn) this.dynSun.castShadow = dyn;
+  }
+
+  get shadowCache() { return !!this.staticRoots && !!this.dynSun?.castShadow; }
+
+  // Draws the shadow maps that are due through the null camera, with only `show` visible
+  // among the scene's top-level children (lights always stay).
+  shadowPass(lights, show) {
+    this.nullCamera();
+    const r = this.renderer, kids = this.scene.children, saved = [];
+    for (const k of kids) {
+      if (k.isLight || k === this.sun.target || k === this.farSun?.target || k === this.dynSun?.target) continue;
+      const on = show(k);
+      if (k.visible !== on) { saved.push([k, k.visible]); k.visible = on; }
+    }
+    for (const L of lights) L.shadow.needsUpdate = true;
+    const prev = r.getRenderTarget();
+    r.setRenderTarget(this._farRT);
+    r.render(this.scene, this._farCam);
+    r.setRenderTarget(prev);
+    for (const L of lights) L.shadow.needsUpdate = false;
+    for (const [k, v] of saved) k.visible = v;
   }
 
   updateShadowCamera(center) {
     this.updateFarShadow(center);
     const L = this.lightDir;
+    if (this.shadowCache) {
+      // the static map moves in 8 m steps (and is redrawn then, or when the sun has turned)
+      const S = 8;
+      const gx = Math.round(center.x / S) * S, gz = Math.round(center.z / S) * S;
+      const moved = this._staticAt?.x !== gx || this._staticAt?.z !== gz;
+      const turned = !this._staticDir || this._staticDir.dot(L) < 0.99998;
+      if (moved || turned) {
+        this._staticAt = { x: gx, z: gz };
+        (this._staticDir || (this._staticDir = new THREE.Vector3())).copy(L);
+        this.placeShadow(this.sun, new THREE.Vector3(gx, center.y, gz), 400);
+        this.staticDirty = true;
+      }
+      this.placeShadow(this.dynSun, center, 400);
+      return;
+    }
     const cam = this.sun.shadow.camera;
     // Snap the shadow frustum to whole texels in light space to stop shimmering.
     const up = Math.abs(L.y) > 0.99 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0);
@@ -537,6 +591,21 @@ export class Pipeline {
     this.sun.position.copy(snapped).addScaledVector(L, 400);
     this.sun.target.updateMatrixWorld();
     this.sun.updateMatrixWorld();
+  }
+
+  // Aims a directional light's shadow at center along the light, snapped to its texels.
+  placeShadow(light, center, back) {
+    const L = this.lightDir, cam = light.shadow.camera;
+    const up = Math.abs(L.y) > 0.99 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0);
+    const right = new THREE.Vector3().crossVectors(up, L).normalize();
+    const upL = new THREE.Vector3().crossVectors(L, right);
+    const texel = (cam.right - cam.left) / light.shadow.mapSize.x;
+    const snapped = new THREE.Vector3().addScaledVector(right, Math.round(center.dot(right) / texel) * texel)
+      .addScaledVector(upL, Math.round(center.dot(upL) / texel) * texel).addScaledVector(L, center.dot(L));
+    light.target.position.copy(snapped);
+    light.position.copy(snapped).addScaledVector(L, back);
+    light.target.updateMatrixWorld();
+    light.updateMatrixWorld();
   }
 
   // The far map is re-rendered every 8 frames (or when the camera has moved 20 m), aimed like
@@ -676,6 +745,15 @@ export class Pipeline {
 
     this.updateShadowCamera(opts.shadowCenter || camera.position);
     this.timed('far shadow', () => this.drawFarShadow(camera));
+    if (this.shadowCache) {
+      const isStatic = (k) => this.staticRoots.includes(k);
+      this.sun.shadow.autoUpdate = false;
+      if (this.staticDirty) {
+        this.staticDirty = false;
+        this.timed('static shadow', () => this.shadowPass([this.sun], isStatic));
+      }
+      this.timed('moving shadows', () => this.shadowPass([this.dynSun], (k) => !isStatic(k)));
+    } else this.sun.shadow.autoUpdate = true;
 
     camera.updateMatrixWorld();
     // TAA: this frame is drawn a sub-pixel off along a Halton sequence (undone at the end)
@@ -699,7 +777,7 @@ export class Pipeline {
     r.setClearColor(this.indoor ? 0x0c0d10 : 0x000000, 0);
     r.clear(true, true, false);
     if (!this.indoor) this.timed('sky', () => r.render(this.skyMesh, camera));
-    if (this.prof?.ext && this.sun.castShadow) {
+    if (this.prof?.ext && this.sun.castShadow && !this.shadowCache) {
       // profiling: draw the near shadow map on its own, so it gets its own line
       this.nullCamera();
       const auto = this.sun.shadow.autoUpdate;
