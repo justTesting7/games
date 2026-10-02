@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { MeshoptSimplifier } from 'meshoptimizer';
 import { Tree } from '@dgreenheck/ez-tree';
 import { mulberry32, makeNoise } from './noise.js';
 import { HALF_WORLD, WORLD_SEED } from './constants.js';
@@ -146,14 +147,18 @@ class InstancedSet {
   }
   attach(group) { this.meshes.forEach((parts) => parts.forEach((m) => group.add(m))); }
   get count() { return this.posArr ? this.posArr.length / 3 : this.positions.length / 3; }
-  update(cam, scale) {
+  // dir: the camera's flat view direction. Trees outside a wide cone ahead are left out,
+  // except within NEAR_ALL metres (they cast shadows into view, and are seen turning)
+  update(cam, scale, dir = null) {
     if (!this.posArr.length) return;
     const n = this.posArr.length / 3;
     const counts = this.lods.map(() => 0);
     const lim = this.lods.map((l) => (l.maxDist * scale) ** 2);
+    const near2 = NEAR_ALL * NEAR_ALL;
     for (let i = 0; i < n; i++) {
       const dx = this.posArr[i * 3] - cam.x, dz = this.posArr[i * 3 + 2] - cam.z;
       const d2 = dx * dx + dz * dz;
+      if (dir && d2 > near2 && dx * dir.x + dz * dir.z < VIEW_COS * Math.sqrt(d2)) continue;
       for (let l = 0; l < lim.length; l++) {
         if (d2 < lim[l]) {
           const c = counts[l]++;
@@ -170,6 +175,11 @@ class InstancedSet {
     }));
   }
 }
+
+// view culling of the instanced trees: a cone of about +-70 degrees round the view (a 60
+// degree lens on a wide screen sees +-45, the rest covers turning before the next re-deal)
+const VIEW_COS = Math.cos(70 * Math.PI / 180);
+const NEAR_ALL = 40;
 
 // Uniform grid of vertical cylinders used for player and bullet collisions.
 function rayBox(o, d, c, maxDist) {
@@ -389,6 +399,32 @@ function splitVariants(parts) {
   });
 }
 
+// Far versions of the models: the exports and the tree generator give one mesh (rocks and
+// logs of up to 100k triangles were drawn as they are at 380 m). Simplified at load, by
+// clustering positions (the meshes are often not welded, so edge collapse can't merge them).
+function simplifyGeometry(g, ratio) {
+  const pos = g.attributes.position, n = pos.count;
+  const P = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) { P[i * 3] = pos.getX(i); P[i * 3 + 1] = pos.getY(i); P[i * 3 + 2] = pos.getZ(i); }
+  const index = g.index ? Uint32Array.from(g.index.array) : Uint32Array.from({ length: n }, (_, i) => i);
+  const target = Math.max(3, Math.floor((index.length * ratio) / 3) * 3);
+  const [out] = MeshoptSimplifier.simplifySloppy(index, P, 3, null, target, 0.2);
+  if (!out.length) return g;
+  const geo = new THREE.BufferGeometry();
+  for (const [k, a] of Object.entries(g.attributes)) geo.setAttribute(k, a);
+  geo.setIndex(new THREE.BufferAttribute(out, 1));
+  geo.boundingSphere = g.boundingSphere?.clone() || null;
+  geo.boundingBox = g.boundingBox?.clone() || null;
+  return geo;
+}
+/** parts with at most about `maxTris` triangles in all (the same parts when already under). */
+async function farParts(parts, maxTris) {
+  const tris = parts.reduce((a, p) => a + (p.geometry.index ? p.geometry.index.count : p.geometry.attributes.position.count) / 3, 0);
+  if (tris <= maxTris) return parts;
+  await MeshoptSimplifier.ready;
+  return parts.map(({ geometry, material }) => ({ geometry: simplifyGeometry(geometry, maxTris / tris), material }));
+}
+
 function wholeModel(parts) {
   const box = new THREE.Box3();
   parts.forEach((p) => { p.geometry.computeBoundingBox(); box.union(p.geometry.boundingBox); });
@@ -427,7 +463,9 @@ export class Vegetation {
           trisLow: (gl.branches.index.count + gl.leaves.index.count) / 3,
           lods: [
             { maxDist: 90, castShadow: true, parts: [{ geometry: gh.branches, material: mats.bark }, { geometry: gh.leaves, material: mats.leaves }] },
-            { maxDist: 420, castShadow: false, parts: [{ geometry: gl.branches, material: mats.bark }, { geometry: gl.leaves, material: mats.leaves }] },
+            { maxDist: 200, castShadow: false, parts: [{ geometry: gl.branches, material: mats.bark }, { geometry: gl.leaves, material: mats.leaves }] },
+            // past 200 m: the low tree simplified again (a few hundred triangles)
+            { maxDist: 420, castShadow: false, parts: await farParts([{ geometry: gl.branches, material: mats.bark }, { geometry: gl.leaves, material: mats.leaves }], 600) },
           ],
         });
         await new Promise((r) => setTimeout(r, 0));
@@ -449,6 +487,8 @@ export class Vegetation {
     for (const list of Object.values(this.models)) for (const v of list) for (const p of v.parts) {
       if (p.material.alphaTest > 0) addWind(p.material, 0.02, 'plant-wind');
     }
+    // their far level: simplified to ~1500 triangles (scatter's second LOD)
+    for (const list of Object.values(this.models)) for (const v of list) v.far = await farParts(v.parts, 1500);
   }
 
   scatter(terrain, spawn) {
@@ -461,7 +501,7 @@ export class Vegetation {
     const treeSets = this.trees.map((t) => new InstancedSet(t.lods, this.group));
     const mkSets = (list, near, far, shadow = true) => list.map((v) => new InstancedSet([
       { maxDist: near, castShadow: shadow, parts: v.parts },
-      ...(far ? [{ maxDist: far, castShadow: false, parts: v.parts }] : []),
+      ...(far ? [{ maxDist: far, castShadow: false, parts: v.far || v.parts }] : []),
     ], this.group));
     const rockSets = mkSets(this.models.rocks, 70, 220);
     const boulderSets = mkSets(this.models.boulders, 80, 380);
@@ -554,11 +594,20 @@ export class Vegetation {
     this.sets.forEach((set) => { set.finalize(); set.attach(this.group); });
   }
 
-  update(time, camPos, force = false) {
+  /** camDir (optional): where the camera looks; trees behind it are dropped (see InstancedSet.update). */
+  update(time, camPos, force = false, camDir = null) {
     windUniforms.uTime.value = time;
     const dx = camPos.x - this.lastUpdate.x, dz = camPos.z - this.lastUpdate.z;
-    if (!force && dx * dx + dz * dz < 36) return;
+    let dir = null;
+    if (camDir) {
+      const l = Math.hypot(camDir.x, camDir.z);
+      if (l > 1e-3) dir = { x: camDir.x / l, z: camDir.z / l };
+    }
+    // re-dealt every 6 m moved, or 15 degrees turned
+    const turned = dir && (!this.lastDir || dir.x * this.lastDir.x + dir.z * this.lastDir.z < 0.966);
+    if (!force && dx * dx + dz * dz < 36 && !turned) return;
     this.lastUpdate.copy(camPos);
-    for (const s of this.sets) s.update(camPos, this.scale);
+    if (dir) this.lastDir = dir;
+    for (const s of this.sets) s.update(camPos, this.scale, dir);
   }
 }

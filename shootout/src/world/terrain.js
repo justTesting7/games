@@ -79,13 +79,22 @@ ${heightSampleGLSL}
 
 const displaceVertex = /* glsl */ `
 #include <begin_vertex>
-vec3 tWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;
+#ifdef USE_INSTANCING
+#define TERRAIN_M (modelMatrix * instanceMatrix)
+#else
+#define TERRAIN_M modelMatrix
+#endif
+vec3 tWorld = (TERRAIN_M * vec4(transformed, 1.0)).xyz;
 transformed.y = sampleHeight(tHeight, tWorld.xz, uWorldSize) - aSkirt * 4.0;
 vWPos = vec3(tWorld.x, transformed.y, tWorld.z);
 `;
 
 const normalVertex = /* glsl */ `
+#ifdef USE_INSTANCING
+vec2 tXZ = (modelMatrix * instanceMatrix * vec4(position, 1.0)).xz;
+#else
 vec2 tXZ = (modelMatrix * vec4(position, 1.0)).xz;
+#endif
 vec3 objectNormal = textureLod(tTerrainNormal, terrainUV(tXZ, uWorldSize, float(textureSize(tHeight, 0).x)), 0.0).xyz * 2.0 - 1.0;
 #ifdef USE_TANGENT
 vec3 objectTangent = vec3(1.0, 0.0, 0.0);
@@ -321,40 +330,55 @@ export class Terrain {
     };
     this.depthMaterial.customProgramCacheKey = () => 'terrain-depth';
 
-    const levels = [[64, 0], [32, 120], [16, 280], [8, 600]];
-    const baseGeos = levels.map(([seg]) => chunkGeometry(seg));
+    // The chunks at each level of detail are one instanced draw: a chunk is a flat grid
+    // shifted into place and shaped by the height texture in the vertex shader, so every
+    // chunk of a level shares one geometry. (As a THREE.LOD per chunk the ground was a few
+    // hundred draws a frame, and again in the shadow pass.) updateLOD deals the chunks
+    // out to the levels by their distance from the camera.
+    this.levels = [[64, 0], [32, 120], [16, 280], [8, 600]];
+    this.chunks = [];
     for (let cz = 0; cz < CHUNKS; cz++) {
       for (let cx = 0; cx < CHUNKS; cx++) {
         const x0 = -HALF_WORLD + cx * CHUNK_SIZE, z0 = -HALF_WORLD + cz * CHUNK_SIZE;
-        let minH = Infinity, maxH = -Infinity;
-        const i0 = Math.round((x0 + HALF_WORLD) / GRID_SPACING), j0 = Math.round((z0 + HALF_WORLD) / GRID_SPACING);
-        const span = CHUNK_SIZE / GRID_SPACING;
-        for (let j = j0; j <= j0 + span; j++) for (let i = i0; i <= i0 + span; i++) {
-          const h = this.heights[j * N + i];
-          if (h < minH) minH = h;
-          if (h > maxH) maxH = h;
-        }
-        minH -= 4;
-        const lod = new THREE.LOD();
-        lod.position.set(x0 + CHUNK_SIZE / 2, 0, z0 + CHUNK_SIZE / 2);
-        const sphere = new THREE.Sphere(new THREE.Vector3(0, (minH + maxH) / 2, 0),
-          Math.hypot(CHUNK_SIZE / 2, CHUNK_SIZE / 2, (maxH - minH) / 2));
-        levels.forEach(([, d], li) => {
-          const base = baseGeos[li];
-          const g = new THREE.BufferGeometry();
-          for (const k in base.attributes) g.setAttribute(k, base.attributes[k]);
-          g.setIndex(base.index);
-          g.boundingSphere = sphere;
-          g.boundingBox = new THREE.Box3(new THREE.Vector3(-CHUNK_SIZE / 2, minH, -CHUNK_SIZE / 2), new THREE.Vector3(CHUNK_SIZE / 2, maxH, CHUNK_SIZE / 2));
-          const m = new THREE.Mesh(g, this.material);
-          m.customDepthMaterial = this.depthMaterial;
-          m.receiveShadow = true;
-          m.castShadow = li < 2 && !arena;
-          lod.addLevel(m, d);
-        });
-        this.group.add(lod);
+        this.chunks.push({ x: x0 + CHUNK_SIZE / 2, z: z0 + CHUNK_SIZE / 2, level: -1 });
       }
     }
+    let minH = Infinity, maxH = -Infinity;
+    for (const h of this.heights) { if (h < minH) minH = h; if (h > maxH) maxH = h; }
+    this.lodMeshes = this.levels.map(([seg], li) => {
+      const m = new THREE.InstancedMesh(chunkGeometry(seg), this.material, this.chunks.length);
+      m.count = 0;
+      m.frustumCulled = false; // a few hundred thousand triangles in all: cheaper than culling chunks
+      m.customDepthMaterial = this.depthMaterial;
+      m.receiveShadow = true;
+      m.castShadow = li < 2 && !arena;
+      m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      m.geometry.boundingBox = new THREE.Box3(new THREE.Vector3(-HALF_WORLD, minH - 4, -HALF_WORLD), new THREE.Vector3(HALF_WORLD, maxH, HALF_WORLD));
+      m.geometry.boundingSphere = m.geometry.boundingBox.getBoundingSphere(new THREE.Sphere());
+      this.group.add(m);
+      return m;
+    });
+    this._lodAt = null;
+    this.updateLOD(new THREE.Vector3(0, 0, 0));
+  }
+
+  /** Each chunk takes the level its distance from `at` (the camera) calls for. */
+  updateLOD(at) {
+    if (this._lodAt && Math.abs(this._lodAt.x - at.x) + Math.abs(this._lodAt.z - at.z) + Math.abs(this._lodAt.y - at.y) < 2) return;
+    this._lodAt = { x: at.x, y: at.y, z: at.z };
+    const m = this._m || (this._m = new THREE.Matrix4());
+    const counts = this.levels.map(() => 0);
+    for (const c of this.chunks) {
+      const d = Math.hypot(c.x - at.x, at.y, c.z - at.z);
+      let li = 0;
+      for (let k = this.levels.length - 1; k > 0; k--) if (d >= this.levels[k][1]) { li = k; break; }
+      const mesh = this.lodMeshes[li];
+      mesh.setMatrixAt(counts[li]++, m.makeTranslation(c.x, 0, c.z));
+    }
+    this.lodMeshes.forEach((mesh, li) => {
+      mesh.count = counts[li];
+      mesh.instanceMatrix.needsUpdate = true;
+    });
   }
 
   inBounds(x, z) {

@@ -100,9 +100,13 @@ class Body {
       this.ang.multiplyScalar(Math.exp(-dt * 2));
       this.vel.y += 12 * dt * Math.min(1, -this.pos.y);
     }
-    if (this.vel.lengthSq() < 0.02 && this.ang.lengthSq() < 0.05 && maxPen > 0) {
+    // at rest on the ground: still, or creeping (a box on a slope crept at a few cm a step
+    // for ever, never asleep); holding there a moment, static friction takes it
+    const slow = this.vel.lengthSq() < 0.02 && this.ang.lengthSq() < 0.05;
+    const creep = this.vel.lengthSq() < 0.16 && this.ang.lengthSq() < 0.8;
+    if (maxPen > 0 && (slow || creep)) {
       this.sleep += dt;
-      if (this.sleep > 0.6) { this.awake = false; this.vel.set(0, 0, 0); this.ang.set(0, 0, 0); }
+      if (this.sleep > (slow ? 0.6 : 0.8)) { this.awake = false; this.vel.set(0, 0, 0); this.ang.set(0, 0, 0); }
     } else this.sleep = 0;
   }
 
@@ -319,6 +323,8 @@ export class Props {
   update(dt) {
     const steps = 3;
     for (let s = 0; s < steps; s++) for (const b of this.bodies) b.step(dt / steps, this.terrain);
+    // something moving (a crate knocked over, a target falling): its cached shadow is stale
+    this.moving = this.bodies.some((b) => b.awake) || this.targets.some((tg) => tg.down > 0 || tg.angle < 0);
     for (const tg of this.targets) {
       if (tg.down > 0) {
         tg.down -= dt;

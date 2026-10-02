@@ -88,6 +88,8 @@ const progress = new Progress((p) => {
 });
 
 const world = {};
+const vegDir = new THREE.Vector3();
+let propShadowT = 0;
 const surfaceAt = (x, z, y) => {
   if (hasSea() && y !== undefined && y < 0.02 && world.terrain.heightAt(x, z) < 0) return 'water';
   const b = world.terrain.biomeAt(x, z);
@@ -474,6 +476,12 @@ async function init() {
     }
     // the city doesn't move: its near shadow map is cached, only moving things redrawn each frame
     if (studio.group) pipeline.staticRoots = [studio.group];
+  } else if (!studio) {
+    // the island the same way: its ground and its forest (the trees sway, their shadows
+    // hold still until the map is redrawn, every 8 m moved)
+    // the crates, barrels and targets too: they only move when hit (then the map is redrawn
+    // each frame they move, see props.moving)
+    pipeline.staticRoots = [terrain.group, mapDef.vegetation ? veg.group : null, props.group].filter((g) => g?.parent);
   }
   const weather = new Weather(pipeline.scene);
   world.weather = weather;
@@ -1146,12 +1154,16 @@ async function init() {
     else if (traffic?.agents.length) traffic.reset();
     combat.update(dt);
     props.update(dt);
+    // (at most 4 times a second: in a fight crates are knocked about all the time)
+    propShadowT -= dt;
+    if (props.moving && propShadowT <= 0 && pipeline.staticRoots?.includes(props.group)) { pipeline.staticDirty = true; propShadowT = 0.25; }
     fx.update(dt);
     if (draw) {
       terrain.update(elapsed);
+      if (terrain.group.visible) terrain.updateLOD(camera.position);
       const viewPos = spec?.pos || player.pos;
       if (grass) grass.update(elapsed, camera.position, viewPos);
-      if (mapDef.vegetation) veg.update(elapsed, camera.position);
+      if (mapDef.vegetation) veg.update(elapsed, camera.position, false, camera.getWorldDirection(vegDir));
       if (city) city.update(dt, fx, camera);
       if (arena) arena.update(dt, fx, camera);
       if (fish) fish.update(dt, camera);

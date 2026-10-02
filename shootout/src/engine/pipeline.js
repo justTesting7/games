@@ -568,10 +568,7 @@ export class Pipeline {
       if (k.visible !== on) { saved.push([k, k.visible]); k.visible = on; }
     }
     for (const L of lights) L.shadow.needsUpdate = true;
-    const prev = r.getRenderTarget();
-    r.setRenderTarget(this._farRT);
-    r.render(this.scene, this._farCam);
-    r.setRenderTarget(prev);
+    this.nullRender();
     for (const L of lights) L.shadow.needsUpdate = false;
     for (const [k, v] of saved) k.visible = v;
   }
@@ -649,6 +646,40 @@ export class Pipeline {
 
   // A camera that sees nothing and a 1x1 target: rendering the scene through them draws
   // only the shadow maps that are due (the colour pass culls everything).
+  // The shadow maps are drawn by rendering the scene through a camera that sees nothing,
+  // into a 1x1 target. Things marked frustumCulled = false (instanced trees and grass,
+  // skinned bodies, pools) would still be drawn into it in full, the whole forest a second
+  // time: for that render they are culled, against bounds made sure of here (an instanced
+  // set's are recomputed when it's small or have been computed once; a body gets a
+  // generous sphere), so the colour pass skips them and the shadow pass tests the light's view.
+  nullRender() {
+    const flipped = this._flipped || (this._flipped = []), hidden = this._nullHidden || (this._nullHidden = []);
+    flipped.length = 0; hidden.length = 0;
+    this.scene.traverseVisible((o) => {
+      if (!(o.isMesh || o.isLine || o.isPoints) || o.frustumCulled) return;
+      if (!o.castShadow) { hidden.push(o); return; } // in no shadow: simply out of this render
+      if (o.isSkinnedMesh) {
+        if (!o.userData.shadowSphere) {
+          o.computeBoundingSphere();
+          o.userData.shadowSphere = true;
+          o.boundingSphere.radius = Math.max(o.boundingSphere.radius * 1.6, 1.5);
+        }
+      } else if (o.isInstancedMesh) {
+        if (!o.boundingSphere || o.count < 512) o.computeBoundingSphere();
+      } else if (!o.geometry?.boundingSphere) o.geometry?.computeBoundingSphere();
+      o.frustumCulled = true;
+      flipped.push(o);
+    });
+    for (const o of hidden) o.visible = false;
+    const r = this.renderer;
+    const prev = r.getRenderTarget();
+    r.setRenderTarget(this._farRT);
+    r.render(this.scene, this._farCam);
+    r.setRenderTarget(prev);
+    for (const o of flipped) o.frustumCulled = false;
+    for (const o of hidden) o.visible = true;
+  }
+
   nullCamera() {
     if (!this._farCam) {
       this._farCam = new THREE.PerspectiveCamera(1, 1, 0.1, 0.2);
@@ -722,12 +753,9 @@ export class Pipeline {
     this.beforeFarShadow?.(true);
     this.cullForShadow(F, 'far');
     F.shadow.needsUpdate = true;
-    const prev = r.getRenderTarget();
     const sky = this.skyMesh.visible;
     this.skyMesh.visible = false;
-    r.setRenderTarget(this._farRT);
-    r.render(this.scene, this._farCam);
-    r.setRenderTarget(prev);
+    this.nullRender();
     this.skyMesh.visible = sky;
     F.shadow.needsUpdate = false;
     this.beforeFarShadow?.(false);
@@ -836,7 +864,7 @@ export class Pipeline {
       const auto = this.sun.shadow.autoUpdate;
       this.sun.shadow.autoUpdate = false;
       this.sun.shadow.needsUpdate = true;
-      this.timed('shadows', () => { const sky = this.skyMesh.visible; this.skyMesh.visible = false; r.setRenderTarget(this._farRT); r.render(this.scene, this._farCam); this.skyMesh.visible = sky; });
+      this.timed('shadows', () => { const sky = this.skyMesh.visible; this.skyMesh.visible = false; this.nullRender(); this.skyMesh.visible = sky; });
       this.sun.shadow.needsUpdate = false;
       r.setRenderTarget(this.sceneRT);
       this.timed('scene', () => r.render(this.scene, camera));
