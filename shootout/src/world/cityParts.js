@@ -22,6 +22,13 @@ export const CITY_PARTS = {
       { folder: 'habima', offset: [516.44, 12.30, 527.47], half: 200 },
     ],
     spill: 35, // buildings reach this far past the tile edge
+    // where rounds start (solo deals one at random; multiplayer slots go round them).
+    // The nav bake keeps the three parked cars nearest each one drivable.
+    plazas: [
+      { x: 38.25, z: -2.75, yaw: 5.301 }, // Dizengoff Square
+      { x: 106.25, z: 274.47, yaw: 3.731 }, // Dizengoff Center
+      { x: 418.3, z: -52.8, yaw: 2.42 }, // Masaryk Square
+    ],
   },
 };
 

@@ -168,6 +168,14 @@ if (seatTris.length) {
 
 // cars: cluster the paint triangles into vehicles, one drivable car each
 const cars = [];
+// what of the car paint isn't one of them (a car on a deck or a roof, a van or a bus out of
+// the size range, a stray fragment): boxes [x0, y0, z0, x1, y1, z1] cut out of the map too
+const junk = [];
+const junkBox = (tris, pad = 0.15) => {
+  const b = [1e9, 1e9, 1e9, -1e9, -1e9, -1e9];
+  for (const t of tris) for (const q of t) for (let k = 0; k < 3; k++) { b[k] = Math.min(b[k], q[k]); b[k + 3] = Math.max(b[k + 3], q[k]); }
+  junk.push([b[0] - pad, b[1] - 0.5, b[2] - pad, b[3] + pad, b[4] + 0.3, b[5] + pad].map((v) => +v.toFixed(2)));
+};
 {
   const key = (q) => `${Math.round(q[0] * 50)},${Math.round(q[1] * 50)},${Math.round(q[2] * 50)}`;
   const par = new Map();
@@ -181,7 +189,7 @@ const cars = [];
   carParts.carpaint.forEach((t, i) => { const r = find(key(t[0])); if (!comps.has(r)) comps.set(r, []); comps.get(r).push(i); });
   let parts = [];
   for (const ix of comps.values()) {
-    if (ix.length < 20) continue; // lights, mirrors, badges
+    if (ix.length < 20) continue; // lights, mirrors, badges (cut out below with any other loose paint)
     const mn = [1e9, 1e9, 1e9], mx = [-1e9, -1e9, -1e9];
     for (const i of ix) for (const q of carParts.carpaint[i]) for (let k = 0; k < 3; k++) { mn[k] = Math.min(mn[k], q[k]); mx[k] = Math.max(mx[k], q[k]); }
     parts.push({ ix, mn, mx, group: parts.length });
@@ -285,14 +293,14 @@ const cars = [];
     for (const verts of splitRow(all)) {
     let { mx_, mz_, minY, ax, az, lo, hi, lw, hw_ } = measure(verts);
     const len = hi - lo, wid = hw_ - lw;
-    if (len < 3 || len > 6.8 || wid < 1.4 || wid > 3.1) continue;
+    if (len < 3 || len > 6.8 || wid < 1.4 || wid > 3.1) { junkBox(verts); continue; }
     // centre on the body's extent, not the vertex mean
     const ca = (hi + lo) / 2, cw = (hw_ + lw) / 2;
     const cx = mx_ + ax * ca + az * cw, cz = mz_ + az * ca - ax * cw;
     const k = cellOf(cx, cz);
-    if (k < 0 || ground[k] < -1e8) continue;
+    if (k < 0 || ground[k] < -1e8) { junkBox(verts); continue; }
     const off = minY - ground[k];
-    if (off < -0.4 || off > 1.7) continue; // parked on a deck or a roof, not on the street
+    if (off < -0.4 || off > 1.7) { junkBox(verts); continue; } // parked on a deck or a roof, not on the street
     // the windows sit behind the middle of the car: the nose points away from them
     let gs = 0, gn = 0;
     for (const t of carParts.carglass) {
@@ -308,16 +316,10 @@ const cars = [];
     }
   }
 }
-// every drivable car is its own set of meshes: past a couple of hundred the draw calls
-// add up. The rest stay parked in the shared meshes (and solid, see pass 2).
-const MAX_CARS = 200;
-if (cars.length > MAX_CARS) {
-  const step = cars.length / MAX_CARS;
-  const keep = Array.from({ length: MAX_CARS }, (_, i) => cars[Math.floor(i * step)]);
-  cars.length = 0;
-  cars.push(...keep);
-}
-console.log('drivable cars', cars.length);
+// Every parked car found. A couple of hundred of them are drivable (chosen at the end, see
+// pickDrivable); the rest are cut out of the map at load, so none is left as a shell that
+// can't be driven, and none blocks walking (pass 2 lets every car through).
+console.log('parked cars', cars.length);
 // The solid pass samples every facade triangle. A car only covers its own few metres,
 // so each sample checks the cars in that cell instead of all of them.
 const carGrid = new Map();
@@ -402,6 +404,40 @@ const scooters = [];
 
 const inScooter = (x, y, z) => scooterRemove.some((b) => x > b[0] - 0.1 && x < b[3] + 0.1 && y > b[1] - 0.1 && y < b[4] + 0.1 && z > b[2] - 0.1 && z < b[5] + 0.1);
 
+// Whatever car paint isn't inside a car found (fragments too small to measure, rows that
+// split into short bits, vans, cars on decks): grouped by neighbouring 2 m cells, each
+// group boxed and cut out of the map with the rest, so no car is left that can't be driven.
+{
+  const loose = carParts.carpaint.filter((t) => !inCar((t[0][0] + t[1][0] + t[2][0]) / 3, (t[0][2] + t[1][2] + t[2][2]) / 3));
+  const C = 2, cellKey = (x, z) => `${Math.floor(x / C)},${Math.floor(z / C)}`;
+  const byCell = new Map();
+  for (const t of loose) {
+    const k = cellKey((t[0][0] + t[1][0] + t[2][0]) / 3, (t[0][2] + t[1][2] + t[2][2]) / 3);
+    (byCell.get(k) || byCell.set(k, []).get(k)).push(t);
+  }
+  const seen = new Set();
+  for (const k0 of byCell.keys()) {
+    if (seen.has(k0)) continue;
+    const group = [], stack = [k0];
+    seen.add(k0);
+    while (stack.length) {
+      const k = stack.pop();
+      group.push(...byCell.get(k));
+      const [i, j] = k.split(',').map(Number);
+      for (let di = -1; di <= 1; di++) for (let dj = -1; dj <= 1; dj++) {
+        const n = `${i + di},${j + dj}`;
+        if (byCell.has(n) && !seen.has(n)) { seen.add(n); stack.push(n); }
+      }
+    }
+    junkBox(group, 0.35);
+  }
+  console.log('loose car paint', loose.length, 'triangles in', junk.length, 'boxes');
+}
+const junkGrid = new Map();
+for (const b of junk) for (let i = Math.floor(b[0] / 8); i <= Math.floor(b[3] / 8); i++) for (let j = Math.floor(b[2] / 8); j <= Math.floor(b[5] / 8); j++) {
+  const k = `${i},${j}`; (junkGrid.get(k) || junkGrid.set(k, []).get(k)).push(b);
+}
+const inJunk = (x, y, z) => (junkGrid.get(`${Math.floor(x / 8)},${Math.floor(z / 8)}`) || []).some((b) => x > b[0] && x < b[3] && y > b[1] && y < b[4] && z > b[2] && z < b[5]);
 // pass 2: things standing on it (car bodies too: inCar() lets the drivable ones through)
 tris.solid.push(...carParts.carpaint);
 const low = new Uint8Array(W * H), tall = new Uint8Array(W * H);
@@ -412,7 +448,8 @@ for (const tri of tris.solid) {
     const k = cellOf(x, z);
     if (k < 0 || ground[k] < -1e8) return;
     const d = y - ground[k];
-    if (d < 2.4 && inCar(x, z)) return; // part of a drivable car
+    if (d < 2.4 && inCar(x, z)) return; // part of a car (every car is drivable or cut out)
+    if (inJunk(x, y, z)) return; // car paint cut out of the map
     if (inScooter(x, y, z)) return; // replaced by a rideable scooter
     if (d < 4.5 && stadiumDoor(x, z)) return; // a gate cut through the stadium's glass wall
     if (d > BODY_LO && d < BODY_HI) low[k] = 1;
@@ -557,13 +594,34 @@ for (let a = 0; a < 32; a++) {
   for (; d < 200; d += CELL) { const k = cellOf(sx + Math.sin(ang) * d, sz + Math.cos(ang) * d); if (k < 0 || !isOpen(k)) break; }
   if (d > far) { far = d; yaw = ang; }
 }
+// The drivable ones: the three nearest every place a round starts (the stitched map's
+// plazas, else the spawn), then an even spread of the rest, up to MAX_CARS.
+const MAX_CARS = 200;
+const starts = partsDef?.plazas || [{ x: sx, z: sz }];
+const chosen = new Set();
+for (const st of starts) {
+  const near = cars.map((c) => [c, Math.hypot(c.x - st.x, c.z - st.z)]).sort((a, b) => a[1] - b[1]).slice(0, 3);
+  for (const [c] of near) chosen.add(c);
+  console.log(`start ${st.x.toFixed(0)},${st.z.toFixed(0)}: nearest cars at ${near.map((n) => n[1].toFixed(0)).join(', ')} m`);
+}
+const rest = cars.filter((c) => !chosen.has(c));
+const room = Math.max(0, MAX_CARS - chosen.size);
+if (rest.length <= room) for (const c of rest) chosen.add(c);
+else for (let i = 0, step = rest.length / room; i < room; i++) chosen.add(rest[Math.floor(i * step)]);
+const carRec = (c) => ({ x: c.x, z: c.z, y: c.y, yaw: c.yaw, hl: c.hl, hw: c.hw });
+const drivable = cars.filter((c) => chosen.has(c)).map(carRec);
+const shells = cars.filter((c) => !chosen.has(c)).map(carRec);
+console.log('drivable cars', drivable.length, 'removed shells', shells.length);
+
 const b64 = (arr) => Buffer.from(arr.buffer, arr.byteOffset, arr.byteLength).toString('base64');
 const out = {
   cell: CELL, x0: X0, z0: Z0, w: W, h: H,
   hcell: HC, hw, hh, heights: b64(hs),
   boxes,
   spawn: { x: +sx.toFixed(2), z: +sz.toFixed(2), y: +(ground[best]).toFixed(2), yaw: +yaw.toFixed(3) },
-  cars,
+  cars: drivable,
+  shells,
+  carJunk: junk,
   scooters,
   scooterRemove,
   spots,

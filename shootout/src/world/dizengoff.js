@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { loadCity } from './loadCity.js';
 import { extractCityCars, removeInBoxes } from './cityCars.js';
+import { cityPartsOf } from './cityParts.js';
 import { loadFleet, placeFleet } from './fleetCars.js';
 import { buildStadium, stadiumSlotSpawns, STADIUM } from './stadium.js';
 import { buildShotMesh } from './shotMesh.js';
@@ -13,11 +14,6 @@ const BASE = import.meta.env?.BASE_URL || '/shootout/';
 
 // Tel Aviv fight starts. Each district's own nav spawn, moved into the stitched city
 // (see cityParts.js). Masaryk has no separate nav; the spot is the open ground at the square.
-const TEL_AVIV_PLAZAS = [
-  { x: 38.25, z: -2.75, yaw: 5.301 }, // Dizengoff Square
-  { x: 106.25, z: 274.47, yaw: 3.731 }, // Dizengoff Center
-  { x: 418.3, z: -52.8, yaw: 2.42 }, // Masaryk Square
-];
 
 /** The same plaza for a multiplayer slot on every client. Later slots stand to the side. */
 export function plazaAt(plazas, slot) {
@@ -128,7 +124,7 @@ export async function loadDizengoff(renderer, folder = 'dizengoff-center', { sta
   const lamps = findLamps(city.set);
   // Stadium maps: everyone starts inside, one player per stand; the local player takes the first
   const stands = stadiumStart && nav.stadium ? stadiumSlotSpawns(nav.stadium) : null;
-  const plazas = folder === 'tel-aviv' ? TEL_AVIV_PLAZAS : null;
+  const plazas = cityPartsOf(folder)?.plazas || null;
   const spawn = stands ? { ...stands[0] } : plazas ? { ...plazas[0] } : { ...nav.spawn };
   spawn.y = heightAt(spawn.x, spawn.z);
   let details = null; // the small-detail pieces left as meshes, culled by distance (see chunk)
@@ -166,6 +162,10 @@ export async function loadDizengoff(renderer, folder = 'dizengoff-center', { sta
     /** Cuts the parked cars out of the map meshes, once, as movable groups. */
     takeCars: () => {
       const spots = extractCityCars(city.set, nav.cars || [], { build: !fleet });
+      // the parked cars that aren't drivable go (nav.shells): no shell that can't be driven
+      if (nav.shells?.length) extractCityCars(city.set, nav.shells, { build: false });
+      // and every other bit of car paint (cars on decks and roofs, vans, stray parts)
+      if (nav.carJunk?.length) removeInBoxes(city.set, nav.carJunk);
       return fleet ? placeFleet(spots) : spots;
     },
     /** Replaces the parked scooters with rideable ones: removes the originals and returns their spots. */
