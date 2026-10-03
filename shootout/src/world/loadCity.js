@@ -167,6 +167,8 @@ export function upgradeCityMaterials(root) {
   });
 }
 
+const DATA_MAPS = ['normalMap', 'roughnessMap', 'metalnessMap', 'aoMap', 'bumpMap', 'alphaMap', 'displacementMap'];
+
 export async function loadCity(scene, renderer, folder = 'dizengoff-center') {
   useArraysFor(renderer);
   const ktx2 = new KTX2Loader().setTranscoderPath(`${BASE}assets/basis/`).detectSupport(renderer);
@@ -215,6 +217,10 @@ export async function loadCity(scene, renderer, folder = 'dizengoff-center') {
     if (FOLIAGE.test(m.name || '')) addWind(m);
     if (WALLS.test(m.name || '')) addWeathering(m);
     for (const k of ['map','normalMap','emissiveMap']) if (m[k]) m[k].anisotropy = Math.min(8, max);
+    // the KTX2 files all say sRGB, and the loader only sets the colour slots: data maps
+    // (normals, roughness, metalness) read through an sRGB decode bent the normals and
+    // made surfaces glossier than they are
+    for (const k of DATA_MAPS) if (m[k] && m[k].colorSpace !== THREE.NoColorSpace) m[k].colorSpace = THREE.NoColorSpace;
     if (u.night_emissive) nightMats.push(m);
     if (u.hours) shutters.push({mesh: o, hours: u.hours, show: u.show}); // hours = [startMin, endMin] wraps midnight
   });
