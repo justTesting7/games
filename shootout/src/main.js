@@ -317,32 +317,53 @@ const applyQuality = (name) => {
 };
 // Auto quality: a level down after ~3 s under 40 fps, up after ~8 s over 50. A level that
 // had to be left is retried only after a wait that doubles each time (30 s, 60 s, ... 4 min),
-// so a level the machine just misses doesn't flip back and forth. Picking one in the menu
-// starts from there.
+// so a level the machine just misses doesn't flip back and forth. A step down that doesn't
+// raise the frame rate means the browser itself holds it (Chrome's energy saver and macOS
+// Low Power Mode cap pages at 30 fps): the level goes back and stays until the cap lifts.
+// Picking one in the menu starts from there.
 const TIERS = ['low', 'medium', 'high', 'ultra'];
-const autoQ = { bad: 0, good: 0, hold: 0, retryAt: {}, wait: {} };
+// No browser tells a page it's in a power saving mode; Chrome does say whether it's on battery,
+// and a cap found on battery is almost surely the energy saver / Low Power Mode
+let onBattery = false;
+navigator.getBattery?.().then((b) => { const f = () => { onBattery = !b.charging; }; f(); b.addEventListener('chargingchange', f); }).catch(() => {});
+const autoQ = { bad: 0, badSum: 0, good: 0, hold: 0, retryAt: {}, wait: {}, trial: null, capped: false };
 const autoQuality = (fps, dt, hitch, now) => {
-  if (hitch || now < autoQ.hold) { autoQ.bad = autoQ.good = 0; return; }
-  if (fps < 40) { autoQ.bad += dt; autoQ.good = 0; } else if (fps > 50) { autoQ.good += dt; autoQ.bad = 0; } else autoQ.bad = autoQ.good = 0;
+  if (hitch || now < autoQ.hold) { autoQ.bad = autoQ.badSum = autoQ.good = 0; return; }
+  const T = autoQ.trial;
+  if (T) { // the seconds after a step down: did it help?
+    T.sum += fps * dt; T.t += dt;
+    if (T.t < 4) return;
+    autoQ.trial = null;
+    if (T.sum / T.t < T.before * 1.12 + 2) {
+      applyQuality(T.from);
+      delete autoQ.retryAt[T.from]; delete autoQ.wait[T.from];
+      autoQ.capped = true;
+      autoQ.hold = now + 2;
+      return;
+    }
+  }
+  if (autoQ.capped && fps > 45) autoQ.capped = false;
+  if (fps < 40) { autoQ.bad += dt; autoQ.badSum += fps * dt; autoQ.good = 0; } else if (fps > 50) { autoQ.good += dt; autoQ.bad = autoQ.badSum = 0; } else autoQ.bad = autoQ.badSum = autoQ.good = 0;
   const i = TIERS.indexOf(pipeline.qualityName);
   let to = null;
-  if (autoQ.bad > 3 && i > 0) {
+  if (autoQ.bad > 3 && i > 0 && !autoQ.capped) {
     const cur = TIERS[i];
     autoQ.wait[cur] = Math.min(240, (autoQ.wait[cur] || 15) * 2);
     autoQ.retryAt[cur] = now + autoQ.wait[cur];
+    autoQ.trial = { from: cur, before: autoQ.badSum / autoQ.bad, sum: 0, t: 0 };
     to = TIERS[i - 1];
   } else if (autoQ.good > 8 && i >= 0 && i < TIERS.length - 1 && now >= (autoQ.retryAt[TIERS[i + 1]] || 0) && (pipeline.renderScale || 1) > 0.99) {
     to = TIERS[i + 1];
   }
   if (!to) return;
   applyQuality(to);
-  autoQ.bad = autoQ.good = 0;
+  autoQ.bad = autoQ.badSum = autoQ.good = 0;
   autoQ.hold = now + 2; // the switch itself hitches (targets, shaders)
 };
 $('quality').onchange = (e) => {
   applyQuality(e.target.value);
   localStorage.setItem('relic-quality', e.target.value);
-  Object.assign(autoQ, { bad: 0, good: 0, hold: performance.now() / 1000 + 2, retryAt: {}, wait: {} });
+  Object.assign(autoQ, { bad: 0, badSum: 0, good: 0, hold: performance.now() / 1000 + 2, retryAt: {}, wait: {}, trial: null, capped: false });
 };
 const selection = loadSelection();
 const rosterMenu = setupRosterMenu(selection, $('roster'), () => {
@@ -1369,7 +1390,7 @@ async function init() {
         const fpsEl = $('fps');
         const sc = pipeline.renderScale || 1;
         setText($('fpsn'), sc < 0.99 ? `${fps.toFixed(0)} fps · ${Math.round(sc * 100)}%` : `${fps.toFixed(0)} fps`);
-        setText($('fpsq'), pipeline.qualityName === 'medium' ? 'med' : pipeline.qualityName);
+        setText($('fpsq'), `${pipeline.qualityName === 'medium' ? 'med' : pipeline.qualityName}${autoQ.capped ? (onBattery ? ' · power saver' : ' · browser cap') : ''}`);
         fpsEl.className = fps < 30 ? 'low' : fps < 45 ? 'dip' : '';
         if (!$('debug').classList.contains('hidden')) {
           const info = renderer.info.render;

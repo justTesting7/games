@@ -407,6 +407,12 @@ export class Pipeline {
     const d = q.shadowDist;
     Object.assign(sh.camera, { left: -d, right: d, top: d, bottom: -d, near: 1, far: 800 });
     sh.camera.updateProjectionMatrix();
+    // the cached static map (see shadowCache) is only redrawn when the view has moved 8 m:
+    // a new size or reach must redraw it now (a dropped map left unredrawn fails every draw
+    // that samples it: nothing but the sky until the player walked on)
+    this.staticDirty = true;
+    this._staticAt = null;
+    this.farDirty = true;
     if (this.farSun) {
       const fs = this.farSun.shadow, fd = q.farDist || 0;
       if (fs.mapSize.x !== (q.farShadow || 1024)) { fs.mapSize.set(q.farShadow || 1024, q.farShadow || 1024); fs.map?.dispose(); fs.map = null; }
@@ -640,14 +646,18 @@ export class Pipeline {
     light.updateMatrixWorld();
   }
 
-  // The far map is re-rendered every 8 frames (or when the camera has moved 20 m), aimed like
-  // the near one and snapped to its texels.
+  // The far map is re-rendered when the camera has moved 20 m or the sun has turned, and
+  // every 2 s for the cars out there (it was every 8 frames: on Ultra a 4096 map of 400 m
+  // of city, a heavy frame on a beat), aimed like the near one and snapped to its texels.
   updateFarShadow(center) {
     const F = this.farSun;
     if (!F?.castShadow) return;
     this._farAt = this._farAt || new THREE.Vector3(1e9, 0, 0);
-    if (this.frame % 8 !== 0 && this._farAt.distanceToSquared(center) < 400) return;
+    const turned = !this._farDir || this._farDir.dot(this.lightDir) < 0.99998;
+    if (!turned && !this.farDirty && this.frame - (this._farFrame || 0) < 120 && this._farAt.distanceToSquared(center) < 400) return;
     this._farAt.copy(center);
+    (this._farDir || (this._farDir = new THREE.Vector3())).copy(this.lightDir);
+    this._farFrame = this.frame;
     const L = this.lightDir, cam = F.shadow.camera;
     const up = Math.abs(L.y) > 0.99 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0);
     const right = new THREE.Vector3().crossVectors(up, L).normalize();
