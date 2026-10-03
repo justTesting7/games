@@ -438,7 +438,9 @@ export class Pipeline {
     // the 3D frame is drawn at renderScale of the canvas and scaled up by the composite
     // (TAA keeps it from looking soft); see setRenderScale
     const k = this.renderScale || 1;
-    const W = Math.max(2, Math.floor(w * pr * k)), H = Math.max(2, Math.floor(h * pr * k));
+    // split screen (the drone): each half is drawn into half-width targets, not a whole
+    // frame of which half is shown
+    const W = Math.max(2, Math.floor(w * pr * k * (this.split ? 0.5 : 1))), H = Math.max(2, Math.floor(h * pr * k));
     this.size.set(W, H);
     if (!this.sceneRT) {
       this.sceneRT = hdrTarget(W, H, this.hdrType, { depthBuffer: true, samples: this.quality.msaa });
@@ -821,6 +823,7 @@ export class Pipeline {
   }
 
   render(camera, dt, opts = {}) {
+    if (!opts.outViewport) this.setSplit(false);
     const r = this.renderer;
     const W = this.size.x, H = this.size.y;
     this.frame++;
@@ -1102,7 +1105,14 @@ export class Pipeline {
     }
   }
 
+  setSplit(on) {
+    if (!!this.split === on) return;
+    this.split = on;
+    if (this.cssSize) this.resize(this.cssSize[0], this.cssSize[1]);
+  }
+
   renderSplit(leftCam, rightCam, dt, opts = {}) {
+    this.setSplit(true);
     const [w, h] = this.cssSize || [this.renderer.domElement.clientWidth, this.renderer.domElement.clientHeight];
     const hw = Math.max(1, Math.floor(w / 2));
     this.render(leftCam, dt, { ...opts, outViewport: [0, 0, hw, h] });
