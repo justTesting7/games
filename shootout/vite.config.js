@@ -1,9 +1,11 @@
 import { fileURLToPath } from 'node:url';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { buildManifest } from './scripts/asset-manifest.mjs';
 import { defineConfig, loadEnv } from 'vite';
 
 const shootout = fileURLToPath(new URL('.', import.meta.url));
 const hub = fileURLToPath(new URL('../index.html', import.meta.url));
+const assetsDir = fileURLToPath(new URL('./public/assets', import.meta.url));
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, fileURLToPath(new URL('..', import.meta.url)), '');
@@ -44,6 +46,21 @@ export default defineConfig(({ mode }) => {
           }
           next();
         });
+      },
+    }, {
+      // the assets' fingerprints (see scripts/asset-manifest.mjs): live in dev, a file in the build
+      name: 'asset-manifest',
+      configureServer(server) {
+        server.middlewares.use((req, res, next) => {
+          if (req.url?.split('?')[0] !== '/shootout/assets/manifest.json') return next();
+          res.setHeader('Content-Type', 'application/json');
+          res.setHeader('Cache-Control', 'no-store');
+          res.end(JSON.stringify(buildManifest(assetsDir)));
+        });
+      },
+      writeBundle(options) {
+        mkdirSync(`${options.dir}/assets`, { recursive: true });
+        writeFileSync(`${options.dir}/assets/manifest.json`, JSON.stringify(buildManifest(assetsDir)));
       },
     }],
   };

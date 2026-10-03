@@ -1,3 +1,4 @@
+import './engine/assetCache.js'; // first: the game's files come from the browser's cache when they can
 import * as THREE from 'three';
 import { Pipeline } from './engine/pipeline.js';
 import { startClock } from './engine/clock.js';

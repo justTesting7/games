@@ -26,13 +26,16 @@ export class Progress {
 }
 
 export function loadImage(url) {
-  return new Promise((resolve, reject) => {
+  // the game's own images come through fetch, so they're taken from the asset cache (assetCache.js)
+  const own = typeof location !== 'undefined' && new URL(url, location.href).origin === location.origin;
+  const src = own ? fetch(url).then((r) => { if (!r.ok) throw new Error(`Failed to load ${url}`); return r.blob(); }).then((b) => URL.createObjectURL(b)) : Promise.resolve(url);
+  return src.then((s) => new Promise((resolve, reject) => {
     const img = new Image();
     img.crossOrigin = 'anonymous';
-    img.onload = () => resolve(img);
+    img.onload = () => { if (s !== url) URL.revokeObjectURL(s); resolve(img); };
     img.onerror = () => reject(new Error(`Failed to load ${url}`));
-    img.src = url;
-  });
+    img.src = s;
+  }));
 }
 
 // Packs several same-sized images into a single mipmapped 2D array texture.
