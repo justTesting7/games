@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
 import {KTX2Loader} from 'three/addons/loaders/KTX2Loader.js';
 import {MeshoptDecoder} from 'three/addons/libs/meshopt_decoder.module.js';
+import { useArraysFor } from './textureArrays.js';
 import { cityPartsOf, ownerOf, underSets, GROUND_MESH, setDrop } from './cityParts.js';
 
 const BASE = import.meta.env?.BASE_URL || '/shootout/';
@@ -167,7 +168,14 @@ export function upgradeCityMaterials(root) {
 }
 
 export async function loadCity(scene, renderer, folder = 'dizengoff-center') {
-  loader.setKTX2Loader(new KTX2Loader().setTranscoderPath(`${BASE}assets/basis/`).detectSupport(renderer));
+  useArraysFor(renderer);
+  const ktx2 = new KTX2Loader().setTranscoderPath(`${BASE}assets/basis/`).detectSupport(renderer);
+  // Where the GPU takes BC (desktops), the textures are transcoded to BC1/BC3, the desktop
+  // GPUs' own formats, rather than ETC (which a desktop driver may expand to full RGBA).
+  // Not BC7: twice the size of BC1, and the ETC1S sources gain nothing from it.
+  const wc = ktx2.workerConfig;
+  if (wc.dxtSupported) wc.etc1Supported = wc.etc2Supported = wc.bptcSupported = false;
+  loader.setKTX2Loader(ktx2);
   // a stitched map loads every set at its offset and the skyline of one of them
   const def = cityPartsOf(folder);
   const sets = def ? def.sets : [{ folder, offset: [0, 0, 0] }];

@@ -23,12 +23,26 @@ function texSig(t) {
     t.repeat.x, t.repeat.y, t.offset.x, t.offset.y, t.rotation, t.center.x, t.center.y, t.flipY, t.channel].join(':');
 }
 
+// Off on Apple GPUs (Chrome and Safari draw WebGL through ANGLE over Metal): there, drawing
+// from big compressed texture arrays is pathologically slow, and while the GPU falls behind
+// its memory piles up (Tel Aviv from above: tens of gigabytes, a few frames a second).
+let enabled = true;
+/** Whether the city may stack its textures into arrays on this GPU (call before chunking). */
+export function useArraysFor(renderer) {
+  const gl = renderer.getContext();
+  const info = gl.getExtension('WEBGL_debug_renderer_info');
+  const name = String(gl.getParameter(info ? info.UNMASKED_RENDERER_WEBGL : gl.RENDERER) || '');
+  enabled = !/Apple|Metal/i.test(name);
+  return enabled;
+}
+
 /**
  * What lets a mesh's material share an array draw with others: null when it can't (no
  * stackable textures, see-through, alpha-tested, bump-mapped). Rain and night change these
  * materials' values at run time, so which of those apply is part of the key.
  */
 export function arrayKey(o) {
+  if (!enabled) return null;
   const m = o.material;
   if (!m?.isMeshStandardMaterial || m.transparent || m.alphaMap || m.bumpMap || m.lightMap || m.envMap) return null;
   const sigs = ARRAY_MAPS.map((k) => texSig(m[k]));
