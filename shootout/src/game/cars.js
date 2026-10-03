@@ -1358,8 +1358,7 @@ export class Cars {
     player.vehicle = null;
     player._carYaw = undefined;
     if (player.character?.root) player.character.root.visible = true;
-    const side = 1;
-    const at = exitOf(car, side);
+    const at = this.exitSpot(car);
     const y = this.world.terrain.heightAt(at.x, at.z);
     player.exitFrom = player.pos.clone(); // the seat: the body slides out to the door
     player.exitT = 0;
@@ -1367,6 +1366,45 @@ export class Cars {
     player.vel.set(0, 0, 0);
     player.yaw = car.yaw;
     this.refreshSeat(car);
+  }
+
+  // Where the driver gets out: the driver's door, else the other, behind, in front, a
+  // step further out each round. A spot is taken when a walker stands there free (no wall,
+  // tree or other car pushes it), on ground near the car's, and nothing solid lies between
+  // it and the seat (a car parked against a wall would put you in or through it).
+  exitSpot(car) {
+    const w = this.world, cols = w.veg?.colliders, y0 = w.terrain.heightAt(car.x, car.z);
+    const s = sizeOf(car), o = localOffset(car.x, car.z, car);
+    const p = new THREE.Vector3(), from = new THREE.Vector3(car.x, y0 + 1.1, car.z), dir = new THREE.Vector3();
+    const free = (x, z) => {
+      const y = w.terrain.heightAt(x, z);
+      if (!Number.isFinite(y) || Math.abs(y - y0) > 0.9) return null;
+      // a post or a tree may nudge the spot aside; still pushed after that, it's inside something
+      p.set(x, y, z);
+      cols?.resolveXZ(p, 0.32, y, y + 1.7);
+      this.collideWalker(p, 0.32, null);
+      if (Math.hypot(p.x - x, p.z - z) > 0.6) return null;
+      x = p.x; z = p.z;
+      cols?.resolveXZ(p, 0.32, y, y + 1.7);
+      this.collideWalker(p, 0.32, null);
+      if (Math.hypot(p.x - x, p.z - z) > 0.03) return null;
+      dir.set(x - car.x, 0, z - car.z);
+      const dist = dir.length();
+      dir.divideScalar(dist || 1);
+      // the city's own triangles and solid colliders (not cars or people)
+      if (w.shots?.raycast(from, dir, dist + 0.3) || cols?.raycast(from, dir, dist + 0.3)) return null;
+      return { x, z };
+    };
+    for (const out of [0.85, 1.4, 2.2]) {
+      const lat = s.halfW + out, lon = s.halfL + out;
+      const seat = specOf(car).seatZ;
+      for (const [r, f] of [[lat, seat], [-lat, seat], [0, -lon], [0, lon]]) {
+        const x = car.x + o.rightX * r + o.fwdX * f, z = car.z + o.rightZ * r + o.fwdZ * f;
+        const at = free(x, z);
+        if (at) return at;
+      }
+    }
+    return exitOf(car, 1);
   }
 
   applySnap(id, snap, driver) {
