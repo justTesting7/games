@@ -32,7 +32,8 @@ export function useArraysFor(renderer) {
   const gl = renderer.getContext();
   const info = gl.getExtension('WEBGL_debug_renderer_info');
   const name = String(gl.getParameter(info ? info.UNMASKED_RENDERER_WEBGL : gl.RENDERER) || '');
-  enabled = !/Apple|Metal/i.test(name);
+  const q = typeof location !== 'undefined' ? new URLSearchParams(location.search) : null;
+  enabled = q?.has('arrays') ? q.get('arrays') !== '0' : !/Apple|Metal/i.test(name); // ?arrays / ?arrays=0 to compare
   return enabled;
 }
 
