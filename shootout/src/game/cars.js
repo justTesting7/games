@@ -1815,10 +1815,12 @@ export class Cars {
         });
       }
     });
-    // the tyres complain
-    if ((sliding || braking) && car.driver?.isPlayer) {
-      this.squealT = (this.squealT || 0) - dt;
-      if (this.squealT <= 0) { this.squealT = 0.16; this.world.audio?.squeal?.(Math.min(1, (car.slip || 3) / 6)); }
+    // the brakes and tyres of the car you drive, as one continuous voice
+    if (car.driver?.isPlayer) {
+      const v = Math.abs(car.speed);
+      const brake = car.speed > 0.5 ? Math.max(0, -throttle) : car.speed < -0.5 ? Math.max(0, throttle) : 0;
+      const skid = sliding ? Math.min(1, Math.max(0, ((car.slip || 0) - 1.2) / 4) + (car.handbrake ? 0.45 : 0)) : 0;
+      this.world.audio?.brakes?.({ on: true, speed: v, brake: Math.min(1, brake), skid, small: !!car.spec });
     }
   }
 
@@ -1858,6 +1860,7 @@ export class Cars {
       const f = (input?.forward ? 1 : 0) - (input?.back ? 1 : 0) + (input?.moveY || 0);
       audio.engine(0, { on: true, speed: local.speed, max: S.maxSpeed, throttle: f * Math.sign(local.speed || 1), scooter: !!local.spec, moped: local.ride === 'moped', dist: 0 });
     } else audio.engine(0, { on: false });
+    if (!local || local.wrecked) audio.brakes?.({ on: false });
     const cam = this.world.player?.camera;
     let near = null, nd = 60;
     for (const car of this.list) {

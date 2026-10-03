@@ -339,6 +339,89 @@ export class Audio {
     return this._cycleWave;
   }
 
+  // The brakes and tyres of the car you drive, one continuous voice. s = { on, speed (m/s),
+  // brake 0..1 (the pedal), skid 0..1 (sliding, the handbrake), small (a two-wheeler) }.
+  //  - the screech of rubber sliding: a stick-slip squeal (a buzzing tone whose pitch
+  //    wanders, through two resonances of the tyre) over a rough hiss, pitched down as the
+  //    car slows; hard braking at speed short of a lock chatters (the ABS, ~14 Hz)
+  //  - the brakes themselves: pads on the discs and the tyres' load, a low scrub
+  //  - the squeak of the pads in the last metre or two, and a thump as the body settles
+  //    after a hard stop
+  brakes(s) {
+    if (!this.ctx) return;
+    const ctx = this.ctx, now = ctx.currentTime;
+    let e = this.brakeVoice;
+    if (!e) {
+      if (!s.on) return;
+      const out = ctx.createGain(); out.gain.value = 1;
+      out.connect(this.master);
+      const send = ctx.createGain(); send.gain.value = 0.15;
+      out.connect(send).connect(this.reverbSend);
+      // the squeal: a sawtooth whose pitch is shaken by slow noise, through two resonances
+      const sq = ctx.createOscillator(); sq.type = 'sawtooth'; sq.frequency.value = 1100;
+      const jitter = ctx.createBufferSource(); jitter.buffer = this.noise; jitter.loop = true; jitter.playbackRate.value = 0.05;
+      const jlp = ctx.createBiquadFilter(); jlp.type = 'lowpass'; jlp.frequency.value = 30;
+      const jg = ctx.createGain(); jg.gain.value = 220;
+      jitter.connect(jlp).connect(jg).connect(sq.frequency);
+      const r1 = ctx.createBiquadFilter(); r1.type = 'bandpass'; r1.Q.value = 9;
+      const r2 = ctx.createBiquadFilter(); r2.type = 'bandpass'; r2.Q.value = 7;
+      const r2g = ctx.createGain(); r2g.gain.value = 0.6;
+      const sqMix = ctx.createGain(); sqMix.gain.value = 0;
+      sq.connect(r1).connect(sqMix); sq.connect(r2).connect(r2g).connect(sqMix);
+      // the rough hiss of rubber on the road
+      const hiss = ctx.createBufferSource(); hiss.buffer = this.noise; hiss.loop = true;
+      const hbp = ctx.createBiquadFilter(); hbp.type = 'bandpass'; hbp.frequency.value = 1800; hbp.Q.value = 0.8;
+      const hissG = ctx.createGain(); hissG.gain.value = 0;
+      hiss.connect(hbp).connect(hissG);
+      // ABS: the screech and hiss chopped at ~14 Hz
+      const chop = ctx.createGain(); chop.gain.value = 1;
+      const abs = ctx.createOscillator(); abs.type = 'square'; abs.frequency.value = 14;
+      const absDepth = ctx.createGain(); absDepth.gain.value = 0;
+      abs.connect(absDepth).connect(chop.gain);
+      sqMix.connect(chop); hissG.connect(chop); chop.connect(out);
+      // the pads and the tyres' load: a low scrub
+      const scrub = ctx.createBufferSource(); scrub.buffer = this.noise; scrub.loop = true; scrub.playbackRate.value = 0.6;
+      const slp = ctx.createBiquadFilter(); slp.type = 'lowpass'; slp.frequency.value = 380; slp.Q.value = 0.9;
+      const scrubG = ctx.createGain(); scrubG.gain.value = 0;
+      scrub.connect(slp).connect(scrubG).connect(out);
+      // the squeak at the end
+      const squeak = ctx.createOscillator(); squeak.type = 'sine'; squeak.frequency.value = 3900;
+      const sqk = ctx.createGain(); sqk.gain.value = 0;
+      squeak.connect(sqk).connect(out);
+      sq.start(); jitter.start(); hiss.start(); abs.start(); scrub.start(); squeak.start();
+      e = this.brakeVoice = { sq, r1, r2, sqMix, hissG, hbp, absDepth, scrubG, slp, squeak, sqk, peak: 0, last: now };
+    }
+    const T = (param, v, tc) => param.setTargetAtTime(v, now, tc);
+    if (!s.on) {
+      T(e.sqMix.gain, 0, 0.05); T(e.hissG.gain, 0, 0.05); T(e.scrubG.gain, 0, 0.08); T(e.sqk.gain, 0, 0.05); T(e.absDepth.gain, 0, 0.05);
+      e.peak = 0;
+      return;
+    }
+    const v = s.speed, brake = s.brake || 0, skid = s.skid || 0, k = s.small ? 0.45 : 1;
+    // hard on the pedal at speed, not sliding: the ABS works the brakes (a light chatter)
+    const absOn = !skid && brake > 0.85 && v > 9;
+    const screech = Math.max(skid, absOn ? 0.55 : 0) * Math.min(1, v / 6);
+    const pitch = (s.small ? 1500 : 850) + Math.min(v, 30) * 18;
+    T(e.r1.frequency, pitch, 0.08); T(e.r2.frequency, pitch * 2.13, 0.08);
+    T(e.sq.frequency, pitch * 0.5, 0.06);
+    T(e.sqMix.gain, 0.05 * screech * k, 0.04);
+    T(e.hissG.gain, (0.1 * screech + 0.025 * brake * Math.min(1, v / 15)) * k, 0.05);
+    T(e.hbp.frequency, 1200 + Math.min(v, 30) * 40, 0.1);
+    T(e.absDepth.gain, absOn ? 0.85 : 0, 0.03);
+    T(e.scrubG.gain, 0.09 * brake * Math.min(1, v / 12) * k, 0.06);
+    T(e.slp.frequency, 220 + Math.min(v, 30) * 12, 0.1);
+    // the squeak as it comes to rest
+    T(e.sqk.gain, brake > 0.2 && v > 0.3 && v < 2.2 ? 0.006 * k * (1 - v / 2.2) : 0, 0.04);
+    T(e.squeak.frequency, 3600 + v * 250, 0.05);
+    // the body settling after a hard stop: a soft thump once it's still
+    e.peak = Math.max(e.peak * Math.exp(-(now - e.last) / 2), brake * Math.min(1, v / 10));
+    e.last = now;
+    if (v < 0.35 && e.peak > 0.5 && !s.small) {
+      this.noiseBurst({ freq: 90, q: 0.9, type: 'lowpass', gain: 0.35 * e.peak, attack: 0.01, release: 0.25 });
+      e.peak = 0;
+    }
+  }
+
   // Tyres sliding on asphalt: a narrow, pitched hiss; k 0..1 by how hard.
   squeal(k = 1) {
     if (!this.ctx) return;
