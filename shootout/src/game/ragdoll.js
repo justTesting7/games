@@ -24,17 +24,30 @@ const LINKS = [
 ].map(([a, b]) => [J[a], J[b]]);
 // joints may bend but not fold flat: hand to shoulder and foot to hip keep a minimum reach
 const REACH = [['LeftArm', 'LeftHand', 0.45], ['RightArm', 'RightHand', 0.45], ['LeftUpLeg', 'LeftFoot', 0.55],
-  ['RightUpLeg', 'RightFoot', 0.55], ['Spine2', 'LeftForeArm', 0.5], ['Spine2', 'RightForeArm', 0.5]]
+  ['RightUpLeg', 'RightFoot', 0.55], ['Spine2', 'LeftForeArm', 0.5], ['Spine2', 'RightForeArm', 0.5],
+  // a hip bends only so far: the knees and feet keep off the chest (the legs folded up into it)
+  ['Spine2', 'LeftLeg', 0.8], ['Spine2', 'RightLeg', 0.8], ['Spine2', 'LeftFoot', 0.65], ['Spine2', 'RightFoot', 0.65]]
   .map(([a, b, k]) => [J[a], J[b], k]);
 // the limb chains the skeleton is swung along: [bone, joint it points at]
 const SWING = [['LeftArm', 'LeftForeArm'], ['LeftForeArm', 'LeftHand'], ['RightArm', 'RightForeArm'],
   ['RightForeArm', 'RightHand'], ['LeftUpLeg', 'LeftLeg'], ['LeftLeg', 'LeftFoot'], ['RightUpLeg', 'RightLeg'], ['RightLeg', 'RightFoot']];
 
 const RADIUS = 0.07;
+// the trunk: kept close to its shape at death (a spine bends and twists a little, it doesn't
+// corkscrew: braces alone let the hips turn 90 degrees from the chest)
+const TRUNK = ['Hips', 'Spine2', 'Head', 'LeftArm', 'RightArm', 'LeftUpLeg', 'RightUpLeg'].map((n) => J[n]);
+const TRUNK_HOLD = 0.35;
+// how thick the body is round each joint: a head or a chest lying on the ground holds the
+// joint well off it (with one radius for all, a body face down sank into the street)
+const THICK = JOINTS.map((n) => (n === 'Head' ? 0.11 : n === 'Spine2' ? 0.13 : n === 'Hips' ? 0.11
+  : /UpLeg$/.test(n) ? 0.08 : /Arm$/.test(n) ? 0.06 : /Leg$/.test(n) ? 0.06 : 0.045));
 // velocity kept per step: the trunk carries on, the extremities trail
 const LIMP = JOINTS.map((n) => (/Hand$/.test(n) ? 0.94 : /ForeArm$|Foot$/.test(n) ? 0.965 : /Arm$|Leg$/.test(n) ? 0.985 : 0.995));
 // ground grip: limbs drag on the ground more than the trunk slides
-const GRIP = JOINTS.map((n) => (/Hand$|Foot$|ForeArm$/.test(n) ? 0.85 : 0.6));
+const GRIP = JOINTS.map((n) => (/Hand$|ForeArm$/.test(n) ? 0.85 : /Foot$/.test(n) ? 0.6 : /Leg$/.test(n) ? 0.45 : 0.6));
+// a dead body's weight is in its hips: once it's going down they sag to the ground, so legs
+// folded under slide out instead of propping it up kneeling, backside in the air
+const SAG = JOINTS.map((n) => (n === 'Hips' ? 9 : /UpLeg$/.test(n) ? 6 : 0));
 const GRAVITY = 9.8;
 const _a = new THREE.Vector3(), _b = new THREE.Vector3(), _c = new THREE.Vector3();
 const _q = new THREE.Quaternion(), _q2 = new THREE.Quaternion(), _m = new THREE.Matrix4();
@@ -72,17 +85,46 @@ export class Ragdoll {
     const fwd = _a.set(0, 0, 1).applyQuaternion(character.root.quaternion).setY(0);
     if (fwd.lengthSq() < 1e-4) fwd.set(0, 0, 1);
     fwd.normalize();
+    // which way it topples: with the blow if there was one, else forward
+    this.fall = push.clone().setY(0);
+    if (this.fall.lengthSq() < 0.25) this.fall.copy(fwd);
+    this.fall.normalize();
     const drop = (i, down, ahead) => { this.prev[i].y += down * dt; this.prev[i].addScaledVector(fwd, -ahead * dt); };
     drop(J.Hips, 1.6, 0); drop(J.Spine2, 1.2, 0);
-    drop(J.LeftLeg, 0.4, 1.4 + Math.random() * 0.6); drop(J.RightLeg, 0.4, 1.2 + Math.random() * 0.6);
+    drop(J.LeftLeg, 0.4, 0.6 + Math.random() * 0.4); drop(J.RightLeg, 0.4, 0.5 + Math.random() * 0.4);
     drop(J.LeftUpLeg, 1.2, 0.2); drop(J.RightUpLeg, 1.2, 0.2);
     // rest frames of the pelvis and chest, to carry their orientation over from the particles
     this.hips0 = B.Hips.getWorldQuaternion(new THREE.Quaternion());
     this.chest0 = B.Spine2.getWorldQuaternion(new THREE.Quaternion());
     this.hipsF0 = this.hipsFrame(new THREE.Quaternion());
     this.chestF0 = this.chestFrame(new THREE.Quaternion());
+    // the trunk's shape, in its own frame
+    const f0 = this.trunkFrame(new THREE.Quaternion(), this._c0 = new THREE.Vector3());
+    const inv = f0.clone().invert();
+    this.trunkRest = TRUNK.map((i) => this.p[i].clone().sub(this._c0).applyQuaternion(inv));
     this.t = 0;
     this.sleep = 0;
+  }
+
+  /** The trunk's frame (up the spine, across the shoulders and hips) and its centre. */
+  trunkFrame(out, centre) {
+    const p = this.p;
+    centre.set(0, 0, 0);
+    for (const i of TRUNK) centre.add(p[i]);
+    centre.multiplyScalar(1 / TRUNK.length);
+    const up = (this._up || (this._up = new THREE.Vector3())).subVectors(p[J.Spine2], p[J.Hips]);
+    const left = (this._left || (this._left = new THREE.Vector3())).subVectors(p[J.LeftArm], p[J.RightArm]).add(p[J.LeftUpLeg]).sub(p[J.RightUpLeg]);
+    return frame(up, left, out);
+  }
+
+  holdTrunk() {
+    const c = this._c || (this._c = new THREE.Vector3()), q = this.trunkFrame(this._tq || (this._tq = new THREE.Quaternion()), c);
+    const t = _b;
+    for (let k = 0; k < TRUNK.length; k++) {
+      const p = this.p[TRUNK[k]];
+      t.copy(this.trunkRest[k]).applyQuaternion(q).add(c);
+      p.x += (t.x - p.x) * TRUNK_HOLD; p.y += (t.y - p.y) * TRUNK_HOLD; p.z += (t.z - p.z) * TRUNK_HOLD;
+    }
   }
 
   /** A shove at a world point: the joints near it (within ~0.6 m) take most of it. */
@@ -113,6 +155,15 @@ export class Ragdoll {
     const { heightAt, resolve } = this.physics;
     const near = this.physics.near?.(this.p[0]); // what's close enough to touch, once a step
     let motion = 0;
+    const floor = this.floor || (this.floor = new Float32Array(this.p.length));
+    // a body never comes to rest kneeling or sitting up: while the chest stands well above
+    // the hips the upper body is tipped over (it would balance on its knees otherwise)
+    const P = this.p, upright = P[J.Spine2].y - P[J.Hips].y;
+    if (upright > 0.12) {
+      const a = (4 + 6 * Math.min(1, (upright - 0.12) / 0.3)) * h * h;
+      for (const i of [J.Spine2, J.Head, J.LeftArm, J.RightArm]) { P[i].x += this.fall.x * a; P[i].z += this.fall.z * a; }
+      motion += 1; // not asleep while it's still going over
+    }
     for (let i = 0; i < this.p.length; i++) {
       const p = this.p[i], q = this.prev[i];
       // limp limbs: hands and forearms (and feet) lose their swing fast, so a blow doesn't
@@ -120,8 +171,12 @@ export class Ragdoll {
       const keep = LIMP[i];
       const vx = (p.x - q.x) * keep, vy = (p.y - q.y) * keep, vz = (p.z - q.z) * keep;
       q.copy(p);
-      p.x += vx; p.y += vy - GRAVITY * h * h; p.z += vz;
+      p.x += vx; p.y += vy - (GRAVITY + (this.t > 0.25 ? SAG[i] : 0)) * h * h; p.z += vz;
       motion += Math.abs(vx) + Math.abs(vy) + Math.abs(vz);
+      // the ground under the whole width of the joint, not just its centre: a head over the
+      // edge of a kerb rests on the kerb instead of sinking into it
+      const r = THICK[i];
+      floor[i] = Math.max(heightAt(p.x, p.z), heightAt(p.x + r, p.z), heightAt(p.x - r, p.z), heightAt(p.x, p.z + r), heightAt(p.x, p.z - r)) + r;
     }
     for (let it = 0; it < 8; it++) {
       for (let k = 0; k < LINKS.length; k++) {
@@ -132,6 +187,7 @@ export class Ragdoll {
         const [a, b] = REACH[k];
         this.solve(a, b, this.reach[k], 1);
       }
+      this.holdTrunk();
       for (let i = 0; i < this.p.length; i++) {
         const p = this.p[i], q = this.prev[i];
         if (resolve) {
@@ -143,7 +199,7 @@ export class Ragdoll {
           // lifted onto something (a car's roof or bonnet): it grips like the ground does
           if (p.y - by > 1e-4) { q.x += (p.x - q.x) * 0.5; q.z += (p.z - q.z) * 0.5; }
         }
-        const g = heightAt(p.x, p.z) + RADIUS;
+        const g = floor[i];
         if (p.y < g) {
           p.y = g;
           // ground friction: drag the stored motion toward rest along the ground
