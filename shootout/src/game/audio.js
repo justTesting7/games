@@ -102,11 +102,6 @@ export class Audio {
     param.exponentialRampToValueAtTime(0.0001, t + attack + release);
   }
 
-  /**
-   * An engine voice (slot 0: the car you drive; 1: the nearest other car under power).
-   * s = { on, speed, max, throttle, scooter, dist, pan }. RPM climbs through four gears
-   * and drops at each shift; the low-pass opens with the throttle.
-   */
   // A moped's engine: a 125 cc single, four-stroke, on a CVT. Its sound is a train of
   // exhaust pulses at the firing rate (rpm / 120: ~13 Hz at idle, ~70 Hz flat out), each one
   // a burst with many harmonics, shaped by the pipe's resonances, plus the rasp of the
@@ -175,57 +170,173 @@ export class Audio {
     e.p.pan.setTargetAtTime(s.pan || 0, now, 0.1);
   }
 
+  /**
+   * An engine voice (slot 0: the vehicle you ride; 1: the nearest other one under power).
+   * s = { on, speed, max, throttle, scooter, moped, dist, pan }: a car (carEngine), a
+   * moped (mopedEngine) or a kick scooter's electric whine.
+   */
   engine(slot, s) {
     if (!this.ctx) return;
     const ctx = this.ctx, now = ctx.currentTime;
-    // a moped has its own voice (and the car/scooter one in this slot falls silent, and back)
+    // a moped and a car have voices of their own; a kick scooter keeps the simple whine
     if (s.moped) {
       this.engines?.[slot]?.g.gain.setTargetAtTime(0, now, 0.1);
+      this.carEngine(slot, { on: false });
       this.mopedEngine(slot, s);
       return;
     }
     if (this.mopeds?.[slot]) this.mopedEngine(slot, { on: false });
+    if (!s.scooter) {
+      this.engines?.[slot]?.g.gain.setTargetAtTime(0, now, 0.1);
+      this.carEngine(slot, s);
+      return;
+    }
+    this.carEngine(slot, { on: false });
     this.engines = this.engines || [];
     let e = this.engines[slot];
     if (!e) {
       const a = ctx.createOscillator(), b = ctx.createOscillator();
-      a.type = 'sawtooth'; b.type = 'square';
-      const shape = ctx.createWaveShaper();
-      const curve = new Float32Array(256);
-      for (let i = 0; i < 256; i++) { const x = i / 128 - 1; curve[i] = Math.tanh(x * 2.2); }
-      shape.curve = curve;
+      a.type = 'sine'; b.type = 'sine';
       const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.Q.value = 2.5;
       const g = ctx.createGain(); g.gain.value = 0;
       const p = ctx.createStereoPanner();
       const mixB = ctx.createGain(); mixB.gain.value = 0.55;
-      a.connect(shape); b.connect(mixB).connect(shape);
-      shape.connect(f).connect(g).connect(p).connect(this.master);
+      a.connect(f); b.connect(mixB).connect(f);
+      f.connect(g).connect(p).connect(this.master);
       a.start(); b.start();
       e = this.engines[slot] = { a, b, f, g, p };
     }
     if (!s.on) { e.g.gain.setTargetAtTime(0, now, 0.15); return; }
-    const v = Math.abs(s.speed), max = s.max || 24;
-    let freq, cut;
-    if (s.scooter) {
-      freq = 180 + v * 38;
-      cut = 1400 + v * 120;
-      e.a.type = 'sine'; e.b.type = 'sine';
-    } else {
-      const gearSpan = max / 4;
-      const gear = Math.min(3, Math.floor(v / gearSpan));
-      const inGear = (v - gear * gearSpan) / gearSpan;
-      const rpm = v < 0.5 ? 0.15 : 0.22 + 0.7 * inGear + gear * 0.04;
-      freq = 30 + rpm * 100;
-      cut = 280 + (s.throttle > 0 ? s.throttle : 0) * 1300 + rpm * 700;
-      e.a.type = 'sawtooth'; e.b.type = 'square';
-    }
+    const v = Math.abs(s.speed);
     const att = s.dist > 1 ? Math.min(1, 6 / s.dist) : 1;
-    e.a.frequency.setTargetAtTime(freq, now, 0.05);
-    e.b.frequency.setTargetAtTime(freq * 0.5, now, 0.05);
-    e.f.frequency.setTargetAtTime(cut, now, 0.08);
-    const level = s.scooter ? 0.05 : 0.07 + 0.09 * Math.max(0, s.throttle) + 0.02 * Math.min(1, v / max);
-    e.g.gain.setTargetAtTime(level * att, now, 0.08);
+    e.a.frequency.setTargetAtTime(180 + v * 38, now, 0.05);
+    e.b.frequency.setTargetAtTime((180 + v * 38) * 0.5, now, 0.05);
+    e.f.frequency.setTargetAtTime(1400 + v * 120, now, 0.08);
+    e.g.gain.setTargetAtTime(0.05 * att, now, 0.08);
     e.p.pan.setTargetAtTime(s.pan || 0, now, 0.1);
+  }
+
+  // A car: a four-cylinder petrol engine, 1.6 litres or so. One engine cycle (two turns of
+  // the crank) holds four combustion pulses, each cylinder a little different, so the
+  // sound throbs at the cycle rate under its firing note (rpm / 30: ~27 Hz at idle, ~200 Hz
+  // near the red line) instead of buzzing like a pure tone. The exhaust shapes it (a boom
+  // in the body, a pipe resonance, the muffler opening with the throttle); the intake roars
+  // under load, pulsing with the firing; a gearbox whines faintly; the tyres hiss on the
+  // road with speed. Five gears, shifting up under load (the revs drop, then climb again).
+  carEngine(slot, s) {
+    const ctx = this.ctx, now = ctx.currentTime;
+    this.cars = this.cars || [];
+    let e = this.cars[slot];
+    if (!e) {
+      if (!s.on) return;
+      const cycle = this.engineCycleWave();
+      const osc = ctx.createOscillator();
+      osc.setPeriodicWave(cycle);
+      const pre = ctx.createGain(); pre.gain.value = 1;
+      const drive = ctx.createWaveShaper();
+      const curve = new Float32Array(1024);
+      for (let i = 0; i < 1024; i++) { const x = i / 512 - 1; curve[i] = Math.tanh(x * 2.4) / Math.tanh(2.4); }
+      drive.curve = curve;
+      drive.oversample = '2x';
+      const boom = ctx.createBiquadFilter(); boom.type = 'peaking'; boom.frequency.value = 95; boom.Q.value = 1.2; boom.gain.value = 8;
+      const pipe = ctx.createBiquadFilter(); pipe.type = 'peaking'; pipe.frequency.value = 380; pipe.Q.value = 1.8; pipe.gain.value = 5;
+      const muffler = ctx.createBiquadFilter(); muffler.type = 'lowpass'; muffler.Q.value = 0.7;
+      const hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 28;
+      // intake roar: noise through a band, opened and closed at the firing rate
+      const noise = ctx.createBufferSource();
+      noise.buffer = this.noise; noise.loop = true;
+      const roarBand = ctx.createBiquadFilter(); roarBand.type = 'bandpass'; roarBand.frequency.value = 700; roarBand.Q.value = 0.9;
+      const roarGate = ctx.createGain(); roarGate.gain.value = 0.5;
+      const fireLfo = ctx.createOscillator(); fireLfo.type = 'triangle';
+      const lfoDepth = ctx.createGain(); lfoDepth.gain.value = 0.45;
+      fireLfo.connect(lfoDepth).connect(roarGate.gain);
+      const roar = ctx.createGain(); roar.gain.value = 0;
+      noise.connect(roarBand).connect(roarGate).connect(roar);
+      // gearbox whine
+      const whine = ctx.createOscillator(); whine.type = 'triangle';
+      const whineG = ctx.createGain(); whineG.gain.value = 0;
+      whine.connect(whineG);
+      // tyres on the road
+      const road = ctx.createBufferSource();
+      road.buffer = this.noise; road.loop = true;
+      road.playbackRate.value = 0.77;
+      const roadLp = ctx.createBiquadFilter(); roadLp.type = 'lowpass'; roadLp.frequency.value = 650; roadLp.Q.value = 0.5;
+      const roadG = ctx.createGain(); roadG.gain.value = 0;
+      road.connect(roadLp).connect(roadG);
+      // distance: farther cars lose their top (the air, the buildings in between)
+      const air = ctx.createBiquadFilter(); air.type = 'lowpass'; air.frequency.value = 16000; air.Q.value = 0.5;
+      const g = ctx.createGain(); g.gain.value = 0;
+      const p = ctx.createStereoPanner();
+      osc.connect(pre).connect(drive).connect(boom).connect(pipe).connect(muffler).connect(hp).connect(air);
+      roar.connect(air); whineG.connect(air); roadG.connect(air);
+      air.connect(g).connect(p).connect(this.master);
+      const send = ctx.createGain(); send.gain.value = 0.1;
+      g.connect(send).connect(this.reverbSend);
+      osc.start(); noise.start(); fireLfo.start(); whine.start(); road.start();
+      e = this.cars[slot] = { osc, pre, muffler, pipe, roar, roarBand, fireLfo, whine, whineG, roadG, air, g, p, rpm: 800, gear: 1, shift: 0, load: 0 };
+    }
+    if (!s.on) { e.g.gain.setTargetAtTime(0, now, 0.25); return; }
+    const dt = Math.min(0.1, Math.max(0.001, now - (e.last ?? now - 1 / 60)));
+    e.last = now;
+    const v = Math.abs(s.speed), thr = Math.max(0, Math.min(1, s.throttle || 0));
+    e.load += (thr - e.load) * Math.min(1, dt * 8);
+    // the gearbox: wheel turns to engine revs through the gear and the final drive
+    const RATIO = [0, 3.6, 2.1, 1.42, 1.06, 0.85], wheel = (v / (2 * Math.PI * 0.31)) * 60 * 4.1;
+    const upAt = 2600 + 3200 * e.load, downAt = 1350 + 900 * e.load;
+    if (e.shift > 0) e.shift -= dt;
+    else if (e.gear < 5 && wheel * RATIO[e.gear] > upAt) { e.gear++; e.shift = 0.22; }
+    else if (e.gear > 1 && wheel * RATIO[e.gear] < downAt) { e.gear--; e.shift = 0.15; }
+    if (v < 0.3) e.gear = 1;
+    // pulling away the clutch slips: the revs sit above what the wheels give
+    const idle = 820, geared = wheel * RATIO[e.gear], slip = idle + 1400 * e.load;
+    let target = e.gear === 1 && geared < slip ? Math.max(geared, slip * Math.min(1, 0.6 + v * 0.2)) : geared;
+    target = Math.max(idle, Math.min(6600, target));
+    if (e.shift > 0) target *= 0.92; // the throttle lifts through a shift
+    e.rpm += (target - e.rpm) * Math.min(1, dt * (target > e.rpm ? 6 + 6 * e.load : 5));
+    const wob = e.rpm < 1100 ? 1 + 0.03 * Math.sin(now * 7.3) * Math.sin(now * 2.1) : 1; // an idle never quite steady
+    const rpm = e.rpm * wob, cycle = rpm / 120;
+    const load = e.shift > 0 ? e.load * 0.3 : e.load;
+    e.osc.frequency.setTargetAtTime(cycle, now, 0.02);
+    e.fireLfo.frequency.setTargetAtTime(rpm / 30, now, 0.02);
+    e.pre.gain.setTargetAtTime(0.6 + 1.6 * load, now, 0.05);           // pulls hard: the pulses crackle
+    e.muffler.frequency.setTargetAtTime(380 + rpm * 0.18 + load * 1700, now, 0.05);
+    e.pipe.frequency.setTargetAtTime(300 + rpm * 0.025, now, 0.1);
+    e.roarBand.frequency.setTargetAtTime(450 + rpm * 0.16, now, 0.06);
+    e.roar.gain.setTargetAtTime((0.02 + 0.16 * load) * Math.min(1, rpm / 3000), now, 0.06);
+    e.whine.frequency.setTargetAtTime((rpm / 60) * 7.3, now, 0.03);
+    e.whineG.gain.setTargetAtTime(Math.min(0.012, v * 0.0006) * (e.gear <= 2 ? 1 : 0.4), now, 0.1);
+    e.roadG.gain.setTargetAtTime(slot === 0 ? Math.min(0.09, v * v * 0.00012) : 0, now, 0.2);
+    const far = s.dist > 1 ? s.dist : 0;
+    e.air.frequency.setTargetAtTime(far ? Math.max(1200, 16000 - far * 260) : 16000, now, 0.2);
+    const att = far ? Math.min(1, 7 / far) : 1;
+    e.g.gain.setTargetAtTime((0.1 + 0.08 * load + 0.03 * Math.min(1, rpm / 5000)) * att, now, 0.06);
+    e.p.pan.setTargetAtTime(s.pan || 0, now, 0.1);
+  }
+
+  // One cycle of a four-cylinder engine: four combustion pulses (a sharp rise, a decay, a
+  // little rebound), each cylinder's a bit stronger or weaker and a hair early or late.
+  engineCycleWave() {
+    if (this._cycleWave) return this._cycleWave;
+    const N = 2048, x = new Float32Array(N);
+    const amp = [1, 0.86, 0.95, 0.8], late = [0, 0.006, -0.004, 0.009];
+    for (let c = 0; c < 4; c++) {
+      const start = (c / 4 + late[c]) * N;
+      for (let i = 0; i < N; i++) {
+        let u = (i - start) / (N / 4); // in firing intervals
+        if (u < 0) u += 4;
+        x[i] += amp[c] * (Math.exp(-u / 0.13) * (1 - Math.exp(-u / 0.012)) - 0.35 * Math.exp(-u / 0.3) * (1 - Math.exp(-u / 0.08)));
+      }
+    }
+    let mean = 0;
+    for (const v of x) mean += v / N;
+    const H = 160, re = new Float32Array(H), im = new Float32Array(H);
+    for (let k = 1; k < H; k++) {
+      let a = 0, b = 0;
+      for (let i = 0; i < N; i++) { const w = (2 * Math.PI * k * i) / N, v = x[i] - mean; a += v * Math.cos(w); b += v * Math.sin(w); }
+      re[k] = a / N; im[k] = b / N;
+    }
+    this._cycleWave = this.ctx.createPeriodicWave(re, im);
+    return this._cycleWave;
   }
 
   // Tyres sliding on asphalt: a narrow, pitched hiss; k 0..1 by how hard.
