@@ -286,8 +286,20 @@ float waveHeight(vec2 p) {
   return h;
 }
 
-vec3 waterNormal(vec2 p) {
+// far out only the long swells show (the noise ripples are finer than a pixel there)
+float swellHeight(vec2 p) {
+  float t = uTime;
+  return sin(dot(p, vec2(0.8, 0.6)) * 0.35 + t * 0.9) * 0.12
+    + sin(dot(p, vec2(-0.5, 0.86)) * 0.6 + t * 1.25) * 0.07
+    + sin(dot(p, vec2(0.95, -0.3)) * 1.1 + t * 1.7) * 0.035;
+}
+
+vec3 waterNormal(vec2 p, float dist) {
   float e = 0.08;
+  if (dist > 150.0) {
+    float h = swellHeight(p);
+    return normalize(vec3(-(swellHeight(p + vec2(e, 0.0)) - h) / e, 1.0, -(swellHeight(p + vec2(0.0, e)) - h) / e));
+  }
   float h = waveHeight(p);
   float hx = waveHeight(p + vec2(e, 0.0));
   float hz = waveHeight(p + vec2(0.0, e));
@@ -306,14 +318,14 @@ vec2 toScreen(vec3 viewPos) {
   return c.xy / c.w * 0.5 + 0.5;
 }
 
-vec4 traceSSR(vec3 worldPos, vec3 R) {
+vec4 traceSSR(vec3 worldPos, vec3 R, int steps) {
   vec3 vp = (viewMatrix * vec4(worldPos, 1.0)).xyz;
   vec3 vr = normalize((viewMatrix * vec4(R, 0.0)).xyz);
   if (vr.z > 0.3) return vec4(0.0);
   float stepLen = 0.4 + ign(gl_FragCoord.xy) * 0.4;
   vec3 p = vp, prev = vp;
   for (int i = 0; i < 64; i++) {
-    if (i >= uSSRSteps) break;
+    if (i >= steps) break;
     prev = p;
     p += vr * stepLen;
     stepLen *= 1.13;
@@ -330,7 +342,7 @@ vec4 traceSSR(vec3 worldPos, vec3 R) {
       }
       vec2 huv = toScreen(b);
       vec2 edge = smoothstep(vec2(0.0), vec2(0.1), huv) * (1.0 - smoothstep(vec2(0.9), vec2(1.0), huv));
-      float conf = edge.x * edge.y * (1.0 - float(i) / float(uSSRSteps));
+      float conf = edge.x * edge.y * (1.0 - float(i) / float(steps));
       return vec4(texture(uSceneTex, huv).rgb, clamp(conf * 1.5, 0.0, 1.0));
     }
   }
@@ -344,7 +356,7 @@ void main() {
   float viewZ = 1.0 / gl_FragCoord.w;
   bool below = cameraPosition.y < vWorld.y;
 
-  vec3 N = waterNormal(vWorld.xz);
+  vec3 N = waterNormal(vWorld.xz, surfDist);
   float detailFade = 1.0 - smoothstep(40.0, 400.0, surfDist);
   N = normalize(mix(vec3(0.0, 1.0, 0.0), N, 0.3 + 0.7 * detailFade));
   if (below) N = -N;
@@ -371,7 +383,10 @@ void main() {
   vec3 R = reflect(-V, N);
   if (R.y < 0.0 && !below) R.y = -R.y * 0.3;
   vec3 skyR = skyRadiance(R);
-  vec4 ssr = uSSRSteps > 0 ? traceSSR(vWorld, R) : vec4(0.0);
+  // reflections of the scene near by; far out the sky alone (the march would find little
+  // on screen to hit, at full cost per pixel), and half the steps in between
+  int ssrSteps = surfDist < 60.0 ? uSSRSteps : surfDist < 150.0 ? uSSRSteps / 2 : 0;
+  vec4 ssr = ssrSteps > 0 ? traceSSR(vWorld, R, ssrSteps) : vec4(0.0);
   vec3 refl = mix(skyR, ssr.rgb, ssr.a);
 
   vec3 H = normalize(uLightDir + V);

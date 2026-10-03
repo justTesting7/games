@@ -147,36 +147,69 @@ float macro = tNoise(vWPos.xz * 0.013) * 0.55 + tNoise(vWPos.xz * 0.07) * 0.3 + 
 float dist = length(vWPos - cameraPosition);
 
 vec2 uvS = wuv * 0.25, uvG = wuv * 0.34 + vec2(macro * 0.15), uvF = wuv * 0.3;
-vec3 aS = texture(tAlbedo, vec3(uvS, 0.0)).rgb;
-vec3 aG = texture(tAlbedo, vec3(uvG, 1.0)).rgb;
-vec3 aF = texture(tAlbedo, vec3(uvF, 2.0)).rgb;
-vec3 rS = texture(tArm, vec3(uvS, 0.0)).rgb;
-vec3 rG = texture(tArm, vec3(uvG, 1.0)).rgb;
-vec3 rF = texture(tArm, vec3(uvF, 2.0)).rgb;
-vec3 nS = flatNormal(texture(tNormalArr, vec3(uvS, 0.0)).xyz * 2.0 - 1.0, nW, 1.0);
-vec3 nG = flatNormal(texture(tNormalArr, vec3(uvG, 1.0)).xyz * 2.0 - 1.0, nW, 1.0);
-vec3 nF = flatNormal(texture(tNormalArr, vec3(uvF, 2.0)).xyz * 2.0 - 1.0, nW, 1.0);
-// A second, larger scale sample of the grass breaks up visible repetition.
-vec3 aG2 = texture(tAlbedo, vec3(uvG * 0.23 + 0.37, 1.0)).rgb;
-aG = mix(aG, aG2, smoothstep(0.35, 0.65, tNoise(vWPos.xz * 0.05)) * 0.6);
+// Only the layers present here are sampled (most ground is one or two of them, and rock
+// only on cliffs), and the layers' own normal maps only up close; inside the branches the
+// mip level comes from gradients taken outside them.
+vec4 wv = vec4(bio.r, bio.g, bio.a, bio.b);
+bool nearN = dist < 160.0;
+vec2 dSx = dFdx(uvS), dSy = dFdy(uvS), dGx = dFdx(uvG), dGy = dFdy(uvG), dFx = dFdx(uvF), dFy = dFdy(uvF);
+vec3 aS = vec3(0.0), rS = vec3(0.0), nS = nW;
+if (wv.x > 0.004) {
+  aS = textureGrad(tAlbedo, vec3(uvS, 0.0), dSx, dSy).rgb;
+  rS = textureGrad(tArm, vec3(uvS, 0.0), dSx, dSy).rgb;
+  if (nearN) nS = flatNormal(textureGrad(tNormalArr, vec3(uvS, 0.0), dSx, dSy).xyz * 2.0 - 1.0, nW, 1.0);
+}
+vec3 aG = vec3(0.0), rG = vec3(0.0), nG = nW;
+if (wv.y > 0.004) {
+  aG = textureGrad(tAlbedo, vec3(uvG, 1.0), dGx, dGy).rgb;
+  rG = textureGrad(tArm, vec3(uvG, 1.0), dGx, dGy).rgb;
+  if (nearN) nG = flatNormal(textureGrad(tNormalArr, vec3(uvG, 1.0), dGx, dGy).xyz * 2.0 - 1.0, nW, 1.0);
+  // A second, larger scale sample of the grass breaks up visible repetition.
+  vec3 aG2 = textureGrad(tAlbedo, vec3(uvG * 0.23 + 0.37, 1.0), dGx * 0.23, dGy * 0.23).rgb;
+  aG = mix(aG, aG2, smoothstep(0.35, 0.65, tNoise(vWPos.xz * 0.05)) * 0.6);
+}
+vec3 aF = vec3(0.0), rF = vec3(0.0), nF = nW;
+if (wv.z > 0.004) {
+  aF = textureGrad(tAlbedo, vec3(uvF, 2.0), dFx, dFy).rgb;
+  rF = textureGrad(tArm, vec3(uvF, 2.0), dFx, dFy).rgb;
+  if (nearN) nF = flatNormal(textureGrad(tNormalArr, vec3(uvF, 2.0), dFx, dFy).xyz * 2.0 - 1.0, nW, 1.0);
+}
 
 vec3 bw = pow(abs(nW), vec3(4.0));
 bw /= bw.x + bw.y + bw.z;
 vec3 rp = vWPos * 0.16;
-vec3 aRx = texture(tAlbedo, vec3(rp.zy, 3.0)).rgb, aRy = texture(tAlbedo, vec3(rp.xz, 3.0)).rgb, aRz = texture(tAlbedo, vec3(rp.xy, 3.0)).rgb;
-vec3 rRx = texture(tArm, vec3(rp.zy, 3.0)).rgb, rRy = texture(tArm, vec3(rp.xz, 3.0)).rgb, rRz = texture(tArm, vec3(rp.xy, 3.0)).rgb;
-vec3 tnX = texture(tNormalArr, vec3(rp.zy, 3.0)).xyz * 2.0 - 1.0;
-vec3 tnY = texture(tNormalArr, vec3(rp.xz, 3.0)).xyz * 2.0 - 1.0;
-vec3 tnZ = texture(tNormalArr, vec3(rp.xy, 3.0)).xyz * 2.0 - 1.0;
-vec3 wnX = vec3(tnX.xy + nW.zy, abs(nW.x)).zyx; wnX.x *= sign(nW.x);
-vec3 wnY = vec3(tnY.xy + nW.xz, abs(nW.y)).xzy; wnY.y *= sign(nW.y);
-vec3 wnZ = vec3(tnZ.xy + nW.xy, abs(nW.z)); wnZ.z *= sign(nW.z);
-vec3 aR = aRx * bw.x + aRy * bw.y + aRz * bw.z;
-vec3 rR = rRx * bw.x + rRy * bw.y + rRz * bw.z;
-vec3 nR = normalize(wnX * bw.x + wnY * bw.y + wnZ * bw.z);
-aR *= mix(vec3(0.85, 0.82, 0.78), vec3(1.05, 1.0, 0.95), macro);
+vec2 dXx = dFdx(rp.zy), dXy = dFdy(rp.zy), dYx = dFdx(rp.xz), dYy = dFdy(rp.xz), dZx = dFdx(rp.xy), dZy = dFdy(rp.xy);
+vec3 aR = vec3(0.0), rR = vec3(0.0), nR = nW;
+if (wv.w > 0.004) {
+  // triplanar rock, each projection only where it faces enough to show
+  vec3 nAcc = vec3(0.0);
+  float bs = 0.0;
+  if (bw.x > 0.02) {
+    aR += textureGrad(tAlbedo, vec3(rp.zy, 3.0), dXx, dXy).rgb * bw.x;
+    rR += textureGrad(tArm, vec3(rp.zy, 3.0), dXx, dXy).rgb * bw.x;
+    vec3 tnX = nearN ? textureGrad(tNormalArr, vec3(rp.zy, 3.0), dXx, dXy).xyz * 2.0 - 1.0 : vec3(0.0, 0.0, 1.0);
+    vec3 wnX = vec3(tnX.xy + nW.zy, abs(nW.x)).zyx; wnX.x *= sign(nW.x);
+    nAcc += wnX * bw.x; bs += bw.x;
+  }
+  if (bw.y > 0.02) {
+    aR += textureGrad(tAlbedo, vec3(rp.xz, 3.0), dYx, dYy).rgb * bw.y;
+    rR += textureGrad(tArm, vec3(rp.xz, 3.0), dYx, dYy).rgb * bw.y;
+    vec3 tnY = nearN ? textureGrad(tNormalArr, vec3(rp.xz, 3.0), dYx, dYy).xyz * 2.0 - 1.0 : vec3(0.0, 0.0, 1.0);
+    vec3 wnY = vec3(tnY.xy + nW.xz, abs(nW.y)).xzy; wnY.y *= sign(nW.y);
+    nAcc += wnY * bw.y; bs += bw.y;
+  }
+  if (bw.z > 0.02) {
+    aR += textureGrad(tAlbedo, vec3(rp.xy, 3.0), dZx, dZy).rgb * bw.z;
+    rR += textureGrad(tArm, vec3(rp.xy, 3.0), dZx, dZy).rgb * bw.z;
+    vec3 tnZ = nearN ? textureGrad(tNormalArr, vec3(rp.xy, 3.0), dZx, dZy).xyz * 2.0 - 1.0 : vec3(0.0, 0.0, 1.0);
+    vec3 wnZ = vec3(tnZ.xy + nW.xy, abs(nW.z)); wnZ.z *= sign(nW.z);
+    nAcc += wnZ * bw.z; bs += bw.z;
+  }
+  aR /= max(bs, 1e-4); rR /= max(bs, 1e-4);
+  nR = normalize(nAcc);
+  aR *= mix(vec3(0.85, 0.82, 0.78), vec3(1.05, 1.0, 0.95), macro);
+}
 
-vec4 wv = vec4(bio.r, bio.g, bio.a, bio.b);
 vec4 hv = vec4(lum(aS) + rS.r * 0.3, lum(aG) * 1.5 + rG.r * 0.3, lum(aF) + rF.r * 0.3, lum(aR) * 1.2 + rR.r * 0.5);
 vec4 hb = wv * (0.35 + hv);
 float hm = max(max(hb.x, hb.y), max(hb.z, hb.w));
