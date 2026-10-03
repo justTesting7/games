@@ -102,7 +102,8 @@ export const MOPED = {
 const specOf = (car) => car?.spec || CAR;
 const hpMax = (car) => (car?.spec ? 35 : 100);
 // a city car's own footprint (from the bake), else its spec's
-const sizeOf = (car) => (car?.hl ? { halfL: car.hl, halfW: car.hw } : specOf(car));
+// (cached on the car: called for every car many times a frame, it was a new object each time)
+const sizeOf = (car) => (car?.hl ? (car._size?.halfL === car.hl ? car._size : (car._size = { halfL: car.hl, halfW: car.hw })) : specOf(car));
 export { sizeOf };
 
 export const PANES = ['wind', 'rear', 'leftF', 'rightF', 'leftR', 'rightR'];
@@ -1503,7 +1504,7 @@ export class Cars {
 
   collideWalker(pos, radius, ignore) {
     for (const car of this.list) {
-      if (car === ignore) continue;
+      if (car === ignore || Math.abs(car.x - pos.x) > 4 || Math.abs(car.z - pos.z) > 4) continue;
       resolveCarBox(pos, radius, car);
     }
   }
@@ -1705,6 +1706,7 @@ export class Cars {
   bumpCars(car) {
     for (const other of this.list) {
       if (other === car) continue;
+      if (Math.abs(other.x - car.x) > 7 || Math.abs(other.z - car.z) > 7) continue; // nowhere near: no box test
       const hit = carPush(car, other);
       if (!hit) continue;
       car.x += hit.nx * hit.depth;
@@ -1988,6 +1990,7 @@ export class Cars {
     }
     const session = this.world.session;
     for (const car of this.list) {
+      if (Math.abs(car.speed) < 0.5) continue; // standing still runs nobody over
       const hits = runOverHits(car, combat.fighters, now);
       if (!hits.length) continue;
       const atk = car.driver || car.lastDriver;

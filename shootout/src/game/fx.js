@@ -166,7 +166,9 @@ function smokeNoise() {
 }
 
 class ParticlePool {
-  constructor(max, additive, uniforms, defines = {}) {
+  // smoke: drawn into the pipeline's half-resolution smoke target, whose alpha keeps how
+  // much of the scene shows through (each puff takes its share of it)
+  constructor(max, additive, uniforms, defines = {}, { smoke = false } = {}) {
     this.max = max;
     this.n = 0;
     const g = new THREE.InstancedBufferGeometry();
@@ -197,7 +199,7 @@ class ParticlePool {
       blendSrc: additive ? THREE.OneFactor : THREE.SrcAlphaFactor,
       blendDst: additive ? THREE.OneFactor : THREE.OneMinusSrcAlphaFactor,
       blendSrcAlpha: THREE.ZeroFactor,
-      blendDstAlpha: THREE.OneFactor,
+      blendDstAlpha: smoke ? THREE.OneMinusSrcAlphaFactor : THREE.OneFactor,
     });
     this.mesh = new THREE.Mesh(g, mat);
     this.mesh.frustumCulled = false;
@@ -293,9 +295,11 @@ export class Effects {
     const uniforms = { uLight: { value: pipeline.lightColor }, uAmbient: { value: new THREE.Vector3(0.3, 0.33, 0.38) }, tNoise: { value: smokeNoise() }, ...pipeline.fxUniforms };
     this.uniforms = uniforms;
     this.add = new ParticlePool(800, true, uniforms);
-    this.alpha = new ParticlePool(1200, false, uniforms);
+    const halfRes = !!pipeline.smokeScene;
+    this.alpha = new ParticlePool(1200, false, uniforms, {}, { smoke: halfRes });
     this.blood = new ParticlePool(1500, false, uniforms, { BLOOD: 1 });
-    pipeline.fxScene.add(this.add.mesh, this.alpha.mesh, this.blood.mesh);
+    pipeline.fxScene.add(this.add.mesh, this.blood.mesh);
+    (halfRes ? pipeline.smokeScene : pipeline.fxScene).add(this.alpha.mesh);
     this.decals = new BloodDecals(pipeline.scene, terrain);
     this.holes = new BulletHoles(pipeline.scene);
     this.panels = new Panels(pipeline.scene, (x, z) => terrain.heightAt(x, z));

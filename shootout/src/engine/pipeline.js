@@ -138,6 +138,22 @@ export class Pipeline {
     this.fxUniforms = { tDepth: { value: null }, uRes: { value: new THREE.Vector2(1, 1) }, uSunView: { value: new THREE.Vector3(0, 1, 0) }, uTime: { value: 0 } };
     this.waves = new Shockwaves(this.waterScene);
     this.fxScene = new THREE.Scene();
+    // Smoke and dust (the alpha particle pool) are drawn at half resolution into their own
+    // target and laid over the scene: in a fight, puffs near the camera stack many layers
+    // deep over the whole screen, and each layer at full resolution was the frame's cost.
+    // The target gathers the smoke's colour, and in alpha how much of the scene still
+    // shows through; it needs no depth (the particles fade against the scene's depth
+    // themselves).
+    this.smokeScene = new THREE.Scene();
+    this.smokeCompose = new THREE.ShaderMaterial({
+      vertexShader: S.fullscreenVert,
+      fragmentShader: 'varying vec2 vUv; uniform sampler2D tSmoke; void main() { gl_FragColor = texture2D(tSmoke, vUv); }',
+      uniforms: { tSmoke: { value: null } },
+      depthTest: false, depthWrite: false, transparent: true,
+      blending: THREE.CustomBlending, blendEquation: THREE.AddEquation,
+      blendSrc: THREE.OneFactor, blendDst: THREE.SrcAlphaFactor, // scene * see-through + smoke
+      blendSrcAlpha: THREE.ZeroFactor, blendDstAlpha: THREE.OneFactor, // (alpha keeps the depth)
+    });
 
     this.sunDir = new THREE.Vector3();
     this.moonDir = new THREE.Vector3();
@@ -424,6 +440,8 @@ export class Pipeline {
     if (!this.copyRT) this.copyRT = hdrTarget(W, H, this.hdrType); else this.copyRT.setSize(W, H);
     if (!this.fogRT) this.fogRT = hdrTarget(W, H, this.hdrType); else this.fogRT.setSize(W, H);
     if (!this.motionRT) this.motionRT = hdrTarget(W, H, this.hdrType); else this.motionRT.setSize(W, H);
+    const sw = Math.max(1, W >> 1), sh = Math.max(1, H >> 1);
+    if (!this.smokeRT) this.smokeRT = hdrTarget(sw, sh, this.hdrType); else this.smokeRT.setSize(sw, sh);
     if (!this.windRT) this.windRT = hdrTarget(W, H, this.hdrType); else this.windRT.setSize(W, H);
     if (!this.dofRT) this.dofRT = hdrTarget(W, H, this.hdrType); else this.dofRT.setSize(W, H);
     if (!this.taaRT) this.taaRT = [0, 1].map(() => hdrTarget(W, H, this.hdrType, { minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter }));
@@ -798,6 +816,7 @@ export class Pipeline {
     this.frame++;
     this.hideEmptyPools(this.scene);
     this.hideEmptyPools(this.fxScene);
+    this.hideEmptyPools(this.smokeScene);
     r.autoClear = false;
 
     if (this.firstFrame || this.frame % 6 === 1) {
@@ -901,6 +920,18 @@ export class Pipeline {
     xu.uTime.value = this.u.uTime.value;
     xu.uSunView.value.copy(this.lightDir).transformDirection(camera.matrixWorldInverse);
     this.timed('effects', () => r.render(this.fxScene, camera));
+    if (this.smokeScene.children.some((o) => o.visible) && this.smokeRT) {
+      this.timed('smoke', () => {
+        xu.uRes.value.set(this.smokeRT.width, this.smokeRT.height); // (the particles read the depth by fragment position)
+        r.setRenderTarget(this.smokeRT);
+        r.setClearColor(0x000000, 1);
+        r.clear(true, false, false);
+        r.render(this.smokeScene, camera);
+        xu.uRes.value.set(W, H);
+        this.smokeCompose.uniforms.tSmoke.value = this.smokeRT.texture;
+        this.quad.render(r, this.smokeCompose, this.sceneRT);
+      });
+    }
 
     const fu = this.fogMaterial.uniforms;
     fu.tScene.value = this.sceneRT.texture;
