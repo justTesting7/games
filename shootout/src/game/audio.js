@@ -107,9 +107,84 @@ export class Audio {
    * s = { on, speed, max, throttle, scooter, dist, pan }. RPM climbs through four gears
    * and drops at each shift; the low-pass opens with the throttle.
    */
+  // A moped's engine: a 125 cc single, four-stroke, on a CVT. Its sound is a train of
+  // exhaust pulses at the firing rate (rpm / 120: ~13 Hz at idle, ~70 Hz flat out), each one
+  // a burst with many harmonics, shaped by the pipe's resonances, plus the rasp of the
+  // intake and valve gear chopped at the same rate. The belt drive holds the revs nearly
+  // constant once moving: they jump with the throttle, then rise slowly with the speed.
+  mopedEngine(slot, s) {
+    const ctx = this.ctx, now = ctx.currentTime;
+    this.mopeds = this.mopeds || [];
+    let e = this.mopeds[slot];
+    if (!e) {
+      // the pulse: harmonics falling off gently, fixed random phases (a real pulse, not a tone)
+      const n = 48, re = new Float32Array(n), im = new Float32Array(n);
+      let seed = 7;
+      for (let k = 1; k < n; k++) {
+        seed = (seed * 16807) % 2147483647;
+        const ph = (seed / 2147483647) * Math.PI * 2, a = 1 / Math.pow(k, 0.85);
+        re[k] = a * Math.cos(ph); im[k] = a * Math.sin(ph);
+      }
+      const osc = ctx.createOscillator();
+      osc.setPeriodicWave(ctx.createPeriodicWave(re, im));
+      const drive = ctx.createWaveShaper();
+      const curve = new Float32Array(512);
+      for (let i = 0; i < 512; i++) { const x = i / 256 - 1; curve[i] = Math.tanh(x * 3.2) * 0.9; }
+      drive.curve = curve;
+      // rasp: noise opened and closed by a square wave at the firing rate
+      const noise = ctx.createBufferSource();
+      noise.buffer = this.noise; noise.loop = true;
+      const nbp = ctx.createBiquadFilter(); nbp.type = 'bandpass'; nbp.frequency.value = 2200; nbp.Q.value = 0.7;
+      const ngate = ctx.createGain(); ngate.gain.value = 0;
+      const am = ctx.createOscillator(); am.type = 'square';
+      const amDepth = ctx.createGain(); amDepth.gain.value = 0.5;
+      am.connect(amDepth).connect(ngate.gain);
+      const nLevel = ctx.createGain(); nLevel.gain.value = 0.22;
+      noise.connect(nbp).connect(ngate).connect(nLevel);
+      // the exhaust: a body resonance and a pipe one, then a lowpass that opens with the throttle
+      const body = ctx.createBiquadFilter(); body.type = 'peaking'; body.frequency.value = 160; body.Q.value = 1.1; body.gain.value = 9;
+      const pipe = ctx.createBiquadFilter(); pipe.type = 'peaking'; pipe.frequency.value = 540; pipe.Q.value = 2.2; pipe.gain.value = 7;
+      const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.Q.value = 0.9;
+      const hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 45;
+      const g = ctx.createGain(); g.gain.value = 0;
+      const p = ctx.createStereoPanner();
+      osc.connect(drive).connect(body);
+      nLevel.connect(body);
+      body.connect(pipe).connect(lp).connect(hp).connect(g).connect(p).connect(this.master);
+      // and a little of it into the room (the buildings throw it back)
+      const send = ctx.createGain(); send.gain.value = 0.12;
+      g.connect(send).connect(this.reverbSend);
+      osc.start(); noise.start(); am.start();
+      e = this.mopeds[slot] = { osc, am, lp, pipe, g, p, rpm: 1600, nLevel };
+    }
+    if (!s.on) { e.g.gain.setTargetAtTime(0, now, 0.2); return; }
+    const v = Math.abs(s.speed), max = s.max || 24, thr = Math.max(0, s.throttle || 0);
+    // the CVT: idle until the clutch takes, then revs set by throttle and a little by speed
+    const target = v < 0.5 && thr < 0.05 ? 1600 : 4600 + 2600 * Math.min(1, v / max) + thr * 900;
+    e.rpm += (target - e.rpm) * Math.min(1, (target > e.rpm ? 0.09 : 0.05));
+    const wobble = 1 + (Math.random() - 0.5) * (e.rpm < 2200 ? 0.06 : 0.015); // an idle never quite steady
+    const fire = (e.rpm / 120) * wobble;
+    e.osc.frequency.setTargetAtTime(fire, now, 0.03);
+    e.am.frequency.setTargetAtTime(fire, now, 0.03);
+    e.lp.frequency.setTargetAtTime(600 + thr * 2600 + (e.rpm / 8000) * 1400, now, 0.06);
+    e.pipe.frequency.setTargetAtTime(480 + (e.rpm / 8000) * 260, now, 0.1);
+    e.nLevel.gain.setTargetAtTime(0.12 + thr * 0.25, now, 0.08);
+    const att = s.dist > 1 ? Math.min(1, 7 / s.dist) : 1;
+    const level = (0.05 + 0.08 * thr + 0.03 * Math.min(1, v / max)) * att;
+    e.g.gain.setTargetAtTime(level, now, 0.06);
+    e.p.pan.setTargetAtTime(s.pan || 0, now, 0.1);
+  }
+
   engine(slot, s) {
     if (!this.ctx) return;
     const ctx = this.ctx, now = ctx.currentTime;
+    // a moped has its own voice (and the car/scooter one in this slot falls silent, and back)
+    if (s.moped) {
+      this.engines?.[slot]?.g.gain.setTargetAtTime(0, now, 0.1);
+      this.mopedEngine(slot, s);
+      return;
+    }
+    if (this.mopeds?.[slot]) this.mopedEngine(slot, { on: false });
     this.engines = this.engines || [];
     let e = this.engines[slot];
     if (!e) {

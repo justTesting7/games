@@ -3,6 +3,7 @@ import { CITY, cityCell } from '../world/cityLayout.js';
 import { HALF_WORLD } from '../world/constants.js';
 import { LAB } from '../world/lab.js';
 import { CarBatch } from './carBatch.js';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { dentCar } from './carDents.js';
 
 export const CAR = {
@@ -90,7 +91,7 @@ export const MOPED = {
   wheelR: 0.24,
   accel: 14,
   steer: 2.3,
-  astride: { hip: 0.74, thigh: 1.25, knee: -1.15, barZ: 0.7, barY: 1.02 },
+  astride: { hip: 0.86, thigh: 1.3, knee: -1.25, barZ: 0.62, barY: 1.01 },
   metalBoxes: [
     { x0: -0.3, x1: 0.3, y0: 0.08, y1: 0.75, z0: -1.0, z1: 1.0 },
     { x0: -0.25, x1: 0.25, y0: 0.75, y1: 1.1, z0: 0.55, z1: 0.8 },
@@ -875,34 +876,118 @@ function makeBikeMesh(color) {
   return { group: g, wheels, handle: fork };
 }
 
-// A moped: a deck and floorboard, a front shield, a long seat over the engine, small wheels.
+// A moped: a Vespa-style city scooter. The rear cowl over the engine is a rounded side
+// profile extruded across, the leg shield curves round the rider's shins, the headset
+// carries a round lamp and the mirrors, and the front wheel sits in the steering fork
+// under its mudguard; chrome exhaust down the right, a tail lamp and a plate behind.
+// The geometry is made once and shared by every moped (the car batch keeps one copy).
+const mopedGeo = new Map();
+function mGeo(key, make) {
+  if (!mopedGeo.has(key)) { const g = make(); g.userData.shared = true; mopedGeo.set(key, g); }
+  return mopedGeo.get(key);
+}
+function sideProfile(points, width, bevel) {
+  // points: [z, y] round the outline (smoothed), extruded across x and centred
+  const sh = new THREE.Shape();
+  const curve = new THREE.SplineCurve(points.map(([z, y]) => new THREE.Vector2(z, y)));
+  const pts = curve.getPoints(48);
+  sh.moveTo(pts[0].x, pts[0].y);
+  for (const p of pts.slice(1)) sh.lineTo(p.x, p.y);
+  sh.closePath();
+  const g = new THREE.ExtrudeGeometry(sh, { depth: width - bevel * 2, bevelEnabled: true, bevelThickness: bevel, bevelSize: bevel, bevelSegments: 4, curveSegments: 12 });
+  g.rotateY(-Math.PI / 2); // shape x -> world z, extruded along -x
+  g.translate((width - bevel * 2) / 2, 0, 0);
+  g.computeVertexNormals();
+  return g;
+}
 function makeMopedMesh(color) {
   const g = new THREE.Group();
   g.name = 'moped';
-  const paint = ridePaint(color, 0.45, 0.35);
-  const dark = rideMat('moped-dark', () => new THREE.MeshStandardMaterial({ color: 0x121214, metalness: 0.2, roughness: 0.8 }));
-  const steel = rideMat('ride-steel', () => new THREE.MeshStandardMaterial({ color: 0xb8bcc2, metalness: 0.9, roughness: 0.3 }));
-  const add = (mesh, parent = g) => { mesh.castShadow = mesh.receiveShadow = true; parent.add(mesh); return mesh; };
-  const R = 0.24;
+  const c = new THREE.Color(color);
+  const q = (v) => Math.round(v * 7) / 7;
+  c.setRGB(q(c.r), q(c.g), q(c.b));
+  const paint = rideMat(`moped-paint-${c.getHexString()}`, () => new THREE.MeshPhysicalMaterial({ color: c, metalness: 0.2, roughness: 0.32, clearcoat: 1, clearcoatRoughness: 0.08 }));
+  const leather = rideMat('moped-seat', () => new THREE.MeshStandardMaterial({ color: 0x1a1613, roughness: 0.62, metalness: 0 }));
+  const rubber = rideMat('moped-tyre', () => new THREE.MeshStandardMaterial({ color: 0x0d0d0e, roughness: 0.9, metalness: 0 }));
+  const chrome = rideMat('moped-chrome', () => new THREE.MeshStandardMaterial({ color: 0xd8dde2, roughness: 0.12, metalness: 1 }));
+  const alloy = rideMat('moped-alloy', () => new THREE.MeshStandardMaterial({ color: 0x8a8f95, roughness: 0.35, metalness: 0.9 }));
+  const black = rideMat('moped-black', () => new THREE.MeshStandardMaterial({ color: 0x141416, roughness: 0.5, metalness: 0.3 }));
+  const lens = rideMat('moped-lens', () => new THREE.MeshStandardMaterial({ color: 0xf4f4ee, roughness: 0.05, metalness: 0, emissive: 0xfff3d6, emissiveIntensity: 0.5 }));
+  const red = rideMat('moped-tail', () => new THREE.MeshStandardMaterial({ color: 0x7a0c0c, roughness: 0.2, emissive: 0xff2010, emissiveIntensity: 0.5 }));
+  const plate = rideMat('moped-plate', () => new THREE.MeshStandardMaterial({ color: 0xe8c21e, roughness: 0.5 }));
+  const add = (geo, mat, parent = g) => { const m = new THREE.Mesh(geo, mat); m.castShadow = m.receiveShadow = true; parent.add(m); return m; };
+  const R = 0.2; // 12" wheels with their tyres
+
+  // the rear cowl over the engine and the back wheel
+  add(mGeo('cowl', () => sideProfile([[-0.98, 0.42], [-0.9, 0.66], [-0.6, 0.74], [-0.2, 0.7], [0.02, 0.6], [0.06, 0.4], [-0.12, 0.3], [-0.42, 0.34], [-0.62, 0.42], [-0.82, 0.36]], 0.5, 0.07)), paint);
+  // floorboard and the tunnel to the leg shield
+  add(mGeo('floor', () => new RoundedBoxGeometry(0.38, 0.06, 0.62, 3, 0.025)), black).position.set(0, 0.3, 0.28);
+  add(mGeo('floorskirt', () => new RoundedBoxGeometry(0.42, 0.1, 0.66, 3, 0.04)), paint).position.set(0, 0.24, 0.27);
+  // the leg shield: a front-view outline, curved by its bevel, leaning back
+  const shield = add(mGeo('shield', () => {
+    const sh = new THREE.Shape();
+    sh.moveTo(-0.24, 0); sh.lineTo(0.24, 0);
+    sh.quadraticCurveTo(0.27, 0.32, 0.17, 0.56);
+    sh.quadraticCurveTo(0, 0.66, -0.17, 0.56);
+    sh.quadraticCurveTo(-0.27, 0.32, -0.24, 0);
+    const geo = new THREE.ExtrudeGeometry(sh, { depth: 0.03, bevelEnabled: true, bevelThickness: 0.025, bevelSize: 0.03, bevelSegments: 4, curveSegments: 16 });
+    geo.computeVertexNormals();
+    return geo;
+  }), paint);
+  shield.position.set(0, 0.3, 0.56);
+  shield.rotation.x = -0.22;
+  // seat: a long padded saddle with a chrome grab rail behind
+  add(mGeo('seat', () => new RoundedBoxGeometry(0.32, 0.11, 0.72, 4, 0.05)), leather).position.set(0, 0.79, -0.4);
+  add(mGeo('rail', () => new THREE.TorusGeometry(0.12, 0.012, 6, 16, Math.PI).rotateX(-Math.PI / 2)), chrome).position.set(0, 0.8, -0.78);
+  // engine case and exhaust down the right
+  add(mGeo('engine', () => new RoundedBoxGeometry(0.16, 0.2, 0.5, 3, 0.04)), alloy).position.set(-0.16, 0.25, -0.5);
+  const tube = (a, b, r) => {
+    const A = new THREE.Vector3(...a), B = new THREE.Vector3(...b);
+    const geo = new THREE.CylinderGeometry(r, r, A.distanceTo(B), 12);
+    geo.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), B.clone().sub(A).normalize()));
+    geo.translate((A.x + B.x) / 2, (A.y + B.y) / 2, (A.z + B.z) / 2);
+    return geo;
+  };
+  add(mGeo('pipe', () => tube([0.12, 0.2, -0.15], [0.2, 0.26, -0.55], 0.022)), chrome);
+  add(mGeo('muffler', () => tube([0.21, 0.27, -0.5], [0.22, 0.33, -0.9], 0.055)), chrome);
+  add(mGeo('mufflerEnd', () => new THREE.CylinderGeometry(0.03, 0.03, 0.03, 12).rotateX(Math.PI / 2 + 0.15)), black).position.set(0.22, 0.335, -0.92);
+  // tail lamp and plate
+  add(mGeo('tail', () => new RoundedBoxGeometry(0.16, 0.06, 0.05, 2, 0.02)), red).position.set(0, 0.64, -1.0);
+  add(mGeo('plate', () => new THREE.BoxGeometry(0.2, 0.12, 0.01)), plate).position.set(0, 0.5, -1.02);
+  // kickstand
+  add(mGeo('stand', () => tube([0.05, 0.22, -0.2], [0.18, 0.02, -0.32], 0.012)), black);
+
   const wheels = [];
-  for (const z of [-0.66, 0.68]) {
-    const w = add(new THREE.Mesh(new THREE.CylinderGeometry(R, R, 0.13, 20).rotateZ(Math.PI / 2), dark));
+  const wheel = (parent, z, front) => {
+    const w = new THREE.Group();
     w.position.set(0, R, z);
-    add(new THREE.Mesh(new THREE.CylinderGeometry(R * 0.55, R * 0.55, 0.14, 14).rotateZ(Math.PI / 2), steel), w);
+    parent.add(w);
+    add(mGeo('tyre', () => new THREE.TorusGeometry(R - 0.05, 0.05, 12, 32).rotateY(Math.PI / 2)), rubber, w);
+    add(mGeo('rim', () => new THREE.CylinderGeometry(R - 0.07, R - 0.07, 0.07, 24).rotateZ(Math.PI / 2)), alloy, w);
+    add(mGeo('hub', () => new THREE.CylinderGeometry(0.05, 0.05, 0.12, 14).rotateZ(Math.PI / 2)), chrome, w);
+    if (front) add(mGeo('disc', () => new THREE.CylinderGeometry(0.1, 0.1, 0.008, 24).rotateZ(Math.PI / 2)), chrome, w).position.x = 0.05;
     wheels.push(w);
-  }
-  add(new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.12, 0.62), paint)).position.set(0, 0.3, 0.12); // floorboard
-  add(new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.38, 0.72), paint)).position.set(0, 0.48, -0.5); // engine cover
-  add(new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.1, 0.7), dark)).position.set(0, 0.72, -0.42); // seat
-  add(new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.62, 0.12), paint)).position.set(0, 0.62, 0.48); // front shield
+    return w;
+  };
+  wheel(g, -0.62, false);
+
+  // the steering: fork, front wheel and its mudguard, the headset with lamp and mirrors
   const fork = new THREE.Group();
-  fork.position.set(0, 0, 0.56);
+  fork.position.set(0, 0, 0.62);
   g.add(fork);
-  add(new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.5, 0.12), paint), fork).position.set(0, 0.55, 0.12);
-  add(new THREE.Mesh(new THREE.BoxGeometry(0.56, 0.08, 0.1), paint), fork).position.set(0, 1.02, 0.02);
-  for (const sx of [-1, 1]) add(new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.1, 10).rotateZ(Math.PI / 2), dark), fork).position.set(sx * 0.32, 1.02, 0.02);
-  const lamp = add(new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.1, 0.06), rideMat('moped-lamp', () => new THREE.MeshStandardMaterial({ color: 0xeeeeea, emissive: 0xfff2d0, emissiveIntensity: 0.3 }))), fork);
-  lamp.position.set(0, 0.92, 0.1);
+  wheel(fork, 0.08, true);
+  add(mGeo('guard', () => new THREE.TorusGeometry(R + 0.03, 0.045, 8, 24, Math.PI * 0.9).rotateY(Math.PI / 2).rotateX(Math.PI * 0.05)), paint, fork).position.set(0, R, 0.08);
+  add(mGeo('forkLeg', () => tube([0, 0.25, 0.06], [0, 0.95, -0.12], 0.03)), black, fork);
+  add(mGeo('headset', () => new RoundedBoxGeometry(0.5, 0.12, 0.2, 4, 0.05)), paint, fork).position.set(0, 1.0, -0.12);
+  add(mGeo('lamp', () => new THREE.CylinderGeometry(0.075, 0.08, 0.06, 20).rotateX(Math.PI / 2)), chrome, fork).position.set(0, 1.0, -0.01);
+  add(mGeo('lens', () => new THREE.CircleGeometry(0.065, 20)), lens, fork).position.set(0, 1.0, 0.022);
+  add(mGeo('bars', () => new THREE.CylinderGeometry(0.014, 0.014, 0.66, 8).rotateZ(Math.PI / 2)), chrome, fork).position.set(0, 1.01, -0.16);
+  for (const sx of [-1, 1]) {
+    add(mGeo('grip', () => new THREE.CylinderGeometry(0.02, 0.02, 0.11, 10).rotateZ(Math.PI / 2)), rubber, fork).position.set(sx * 0.3, 1.01, -0.16);
+    add(mGeo('mirrorStalk', () => tube([0, 0, 0], [0.04, 0.2, 0.02], 0.007)), chrome, fork).position.set(sx * 0.2, 1.05, -0.16).x = sx * 0.2;
+    const mirror = add(mGeo('mirror', () => new THREE.CylinderGeometry(0.05, 0.05, 0.015, 16).rotateX(Math.PI / 2)), chrome, fork);
+    mirror.position.set(sx * 0.24, 1.25, -0.14);
+  }
   return { group: g, wheels, handle: fork };
 }
 
@@ -1706,7 +1791,7 @@ export class Cars {
     if (local && !local.wrecked && local.ride !== 'bike') { // (a bicycle makes no engine noise)
       const S = specOf(local);
       const f = (input?.forward ? 1 : 0) - (input?.back ? 1 : 0) + (input?.moveY || 0);
-      audio.engine(0, { on: true, speed: local.speed, max: S.maxSpeed, throttle: f * Math.sign(local.speed || 1), scooter: !!local.spec, dist: 0 });
+      audio.engine(0, { on: true, speed: local.speed, max: S.maxSpeed, throttle: f * Math.sign(local.speed || 1), scooter: !!local.spec, moped: local.ride === 'moped', dist: 0 });
     } else audio.engine(0, { on: false });
     const cam = this.world.player?.camera;
     let near = null, nd = 60;
@@ -1718,7 +1803,7 @@ export class Cars {
     if (near) {
       const right = new THREE.Vector3().setFromMatrixColumn(cam.matrixWorld, 0);
       const to = new THREE.Vector3(near.x - cam.position.x, 0, near.z - cam.position.z).normalize();
-      audio.engine(1, { on: true, speed: near.speed, max: specOf(near).maxSpeed, throttle: near.ai?.throttle ?? 0.6, scooter: !!near.spec, dist: nd, pan: to.dot(right) * 0.8 });
+      audio.engine(1, { on: true, speed: near.speed, max: specOf(near).maxSpeed, throttle: near.ai?.throttle ?? 0.6, scooter: !!near.spec, moped: near.ride === 'moped', dist: nd, pan: to.dot(right) * 0.8 });
     } else audio.engine(1, { on: false });
   }
 
