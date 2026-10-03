@@ -4,11 +4,12 @@ import { HALF_WORLD } from '../world/constants.js';
 import { LAB } from '../world/lab.js';
 import { CarBatch } from './carBatch.js';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { mergeStaticParts } from './mergeParts.js';
 import { dentCar } from './carDents.js';
 
 export const CAR = {
   count: 8,
-  fleetMax: 512,
+  fleetMax: 1024,
   halfL: 2.25,
   halfW: 1.02,
   height: 1.18,
@@ -991,6 +992,30 @@ function makeMopedMesh(color) {
   return { group: g, wheels, handle: fork };
 }
 
+// A two-wheeler of a kind and colour: built once, its fixed parts merged into a mesh per
+// material (the wheels spin and the fork steers, so they stay apart), then cloned for each
+// one parked (the clones share the geometry). Each part is an instance in the car batch:
+// a moped of 32 loose parts was 32 instances, hundreds of them across the city.
+const rideTemplates = new Map();
+function rideMesh(kind, color) {
+  const c = new THREE.Color(color);
+  const q = (v) => Math.round(v * 7) / 7;
+  const key = `${kind}-${q(c.r)}-${q(c.g)}-${q(c.b)}`;
+  if (!rideTemplates.has(key)) {
+    const t = kind === 'bike' ? makeBikeMesh(color) : kind === 'moped' ? makeMopedMesh(color) : makeScooterMesh(color);
+    t.handle.name = 'ride-fork';
+    t.wheels.forEach((w, i) => { w.name = `ride-wheel-${i}`; if (!w.isMesh) mergeStaticParts(w, []); }); // (a kick scooter's wheel is a mesh itself: left as it is)
+    mergeStaticParts(t.handle, t.wheels.filter((w) => w.parent === t.handle).map((w) => w.name));
+    mergeStaticParts(t.group, ['ride-fork', ...t.wheels.filter((w) => w.parent === t.group).map((w) => w.name)]);
+    t.group.traverse((o) => { if (o.isMesh) { o.geometry.userData.shared = true; o.castShadow = o.receiveShadow = true; } });
+    rideTemplates.set(key, { group: t.group, wheels: t.wheels.length });
+  }
+  const tpl = rideTemplates.get(key);
+  const group = tpl.group.clone(true);
+  const wheels = Array.from({ length: tpl.wheels }, (_, i) => group.getObjectByName(`ride-wheel-${i}`));
+  return { group, wheels, handle: group.getObjectByName('ride-fork') };
+}
+
 export class Cars {
   constructor(world, scene) {
     this.world = world;
@@ -1104,7 +1129,7 @@ export class Cars {
     spots.forEach((s, n) => {
       const y = terrain.heightAt(s.x, s.z);
       const paint = s.color ? new THREE.Color(s.color[0] / 255, s.color[1] / 255, s.color[2] / 255) : SCOOTER_COLORS[n % SCOOTER_COLORS.length];
-      const built = s.kind === 'bike' ? makeBikeMesh(paint) : s.kind === 'moped' ? makeMopedMesh(paint) : makeScooterMesh(paint);
+      const built = rideMesh(s.kind || 'kick', paint);
       const car = {
         id: this.list.length,
         kind: 'scooter', // two wheels: ridden in the open (see spec.ride for which)

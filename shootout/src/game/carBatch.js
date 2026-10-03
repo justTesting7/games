@@ -38,10 +38,16 @@ export class CarBatch {
       batch.name = `cars-${material.name || 'part'}`;
       batch.castShadow = list.some((p) => p.mesh.castShadow);
       batch.receiveShadow = true;
-      batch.sortObjects = !!material.transparent;
+      // (not even the glass: sorting a thousand panes back to front every pass cost ~2 ms,
+      // and tinted glass of different cars seldom overlaps)
+      batch.sortObjects = false;
       // culled per car (three's per-instance test), never as a whole: the batch's bounds are
       // where its cars were parked, and one driven off would take the batch with it
       batch.frustumCulled = false;
+      // and no per-instance test either: with every bike and scooter that's ~10k spheres in
+      // JavaScript a pass. cull() already drops the far ones; the near few off screen cost
+      // the GPU far less
+      batch.perObjectFrustumCulled = false;
       const geoId = new Map();
       for (const { car, mesh } of list) {
         let gid = geoId.get(mesh.geometry);
