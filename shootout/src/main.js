@@ -310,10 +310,39 @@ const applyHostUi = (host) => {
   $('minrow').classList.toggle('locked', lock);
   paintMode();
 };
-$('quality').onchange = (e) => {
-  pipeline.setQuality(e.target.value);
-  localStorage.setItem('relic-quality', e.target.value);
+const applyQuality = (name) => {
+  pipeline.setQuality(name);
+  $('quality').value = name;
   if (world.veg && world.mapDef?.vegetation) { world.veg.scale = pipeline.quality.trees; world.veg.update(0, camera.position, true); }
+};
+// Auto quality: a level down after ~3 s under 40 fps, up after ~8 s over 50. A level that
+// had to be left is retried only after a wait that doubles each time (30 s, 60 s, ... 4 min),
+// so a level the machine just misses doesn't flip back and forth. Picking one in the menu
+// starts from there.
+const TIERS = ['low', 'medium', 'high', 'ultra'];
+const autoQ = { bad: 0, good: 0, hold: 0, retryAt: {}, wait: {} };
+const autoQuality = (fps, dt, hitch, now) => {
+  if (hitch || now < autoQ.hold) { autoQ.bad = autoQ.good = 0; return; }
+  if (fps < 40) { autoQ.bad += dt; autoQ.good = 0; } else if (fps > 50) { autoQ.good += dt; autoQ.bad = 0; } else autoQ.bad = autoQ.good = 0;
+  const i = TIERS.indexOf(pipeline.qualityName);
+  let to = null;
+  if (autoQ.bad > 3 && i > 0) {
+    const cur = TIERS[i];
+    autoQ.wait[cur] = Math.min(240, (autoQ.wait[cur] || 15) * 2);
+    autoQ.retryAt[cur] = now + autoQ.wait[cur];
+    to = TIERS[i - 1];
+  } else if (autoQ.good > 8 && i >= 0 && i < TIERS.length - 1 && now >= (autoQ.retryAt[TIERS[i + 1]] || 0) && (pipeline.renderScale || 1) > 0.99) {
+    to = TIERS[i + 1];
+  }
+  if (!to) return;
+  applyQuality(to);
+  autoQ.bad = autoQ.good = 0;
+  autoQ.hold = now + 2; // the switch itself hitches (targets, shaders)
+};
+$('quality').onchange = (e) => {
+  applyQuality(e.target.value);
+  localStorage.setItem('relic-quality', e.target.value);
+  Object.assign(autoQ, { bad: 0, good: 0, hold: performance.now() / 1000 + 2, retryAt: {}, wait: {} });
 };
 const selection = loadSelection();
 const rosterMenu = setupRosterMenu(selection, $('roster'), () => {
@@ -1046,7 +1075,7 @@ async function init() {
   });
 
   let elapsed = 0;
-  let fpsT = 0, frames = 0, fps = 0, fpsLast = 0;
+  let fpsT = 0, frames = 0, fps = 0, fpsLast = 0, fpsMax = 0;
   let stepCpu = 0, renderCpu = 0; // ms, smoothed: a whole frame's work, and the render call alone
   // F3 or ?perf: where the frame goes (GPU per pass, CPU)
   const setPerf = (on) => { pipeline.setProfiling(on); $('perf').classList.toggle('hidden', !on); };
@@ -1317,6 +1346,7 @@ async function init() {
       const frameMs = nowMs - (fpsLast || nowMs);
       fpsT += frameMs / 1000;
       fpsLast = nowMs;
+      fpsMax = Math.max(fpsMax, frameMs);
       // Dynamic resolution: hold ~60 fps by drawing the 3D frame smaller when frames run
       // long, and back up when there's headroom. Steps of 10%, decided on a couple of
       // seconds of frames, so it doesn't hunt.
@@ -1329,14 +1359,17 @@ async function init() {
       }
       if (fpsT > 0.5) {
         fps = frames / fpsT;
+        if (inPlay) autoQuality(fps, fpsT, fpsMax > 250, nowMs / 1000);
         frames = 0;
         fpsT = 0;
+        fpsMax = 0;
         if (pipeline.prof) {
           setText($('perf'), `cpu: frame ${stepCpu.toFixed(1)} · draw ${renderCpu.toFixed(1)} ms\n${pipeline.prof.report}`);
         }
         const fpsEl = $('fps');
         const sc = pipeline.renderScale || 1;
-        setText(fpsEl, sc < 0.99 ? `${fps.toFixed(0)} fps · ${Math.round(sc * 100)}%` : `${fps.toFixed(0)} fps`);
+        setText($('fpsn'), sc < 0.99 ? `${fps.toFixed(0)} fps · ${Math.round(sc * 100)}%` : `${fps.toFixed(0)} fps`);
+        setText($('fpsq'), pipeline.qualityName === 'medium' ? 'med' : pipeline.qualityName);
         fpsEl.className = fps < 30 ? 'low' : fps < 45 ? 'dip' : '';
         if (!$('debug').classList.contains('hidden')) {
           const info = renderer.info.render;
