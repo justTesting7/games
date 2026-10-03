@@ -676,8 +676,187 @@ export class Audio {
     };
     this.wind = loop(400, 'lowpass', 0.8);
     this.surf = loop(700, 'lowpass', 0.5);
-    this.rainLoop = loop(3200, 'bandpass', 0.35); // the hiss of rain
+    this.startRain();
     this.ambT = 0;
+  }
+
+  // Rain, built the way it sounds rather than as a hiss: a soft wash (pink noise: the far
+  // rain blurred together, swelling with the gusts); a bed of thousands of small drops, each
+  // a tiny bubble chirping upward in a puddle or a tick on stone, rendered once into two
+  // stereo loops of different lengths so the pattern never seems to repeat; and the near
+  // drops one by one, placed live around the listener (plips, ticks, now and then a fat drip
+  // off an edge). From inside a car the roof drums and the street goes dull; under a roof
+  // it all does.
+  startRain() {
+    const ctx = this.ctx, sr = ctx.sampleRate;
+    const out = ctx.createGain();
+    out.gain.value = 0;
+    const tone = ctx.createBiquadFilter();
+    tone.type = 'lowpass';
+    tone.frequency.value = 12000;
+    tone.Q.value = 0.5;
+    out.connect(tone).connect(this.master);
+    const layer = (buffer, ...filters) => {
+      const src = ctx.createBufferSource();
+      src.buffer = buffer;
+      src.loop = true;
+      const g = ctx.createGain();
+      g.gain.value = 0;
+      let node = src;
+      for (const f of filters) node = node.connect(f);
+      node.connect(g).connect(out);
+      src.start(0, Math.random() * buffer.duration);
+      return g;
+    };
+    const filter = (type, freq, q = 0.7, gain = 0) => {
+      const f = ctx.createBiquadFilter();
+      f.type = type; f.frequency.value = freq; f.Q.value = q; f.gain.value = gain;
+      return f;
+    };
+    const wash = layer(this.pinkBuffer(6), filter('highpass', 180), filter('peaking', 1900, 0.8, 4), filter('lowpass', 7500));
+    const beds = [5.3, 7.7].map((len, i) => layer(this.dropBed(len, 230), filter('highpass', 400)));
+    const roof = layer(this.roofBed(4.1), filter('lowpass', 1400));
+    // single drops for the near ones: plips, ticks, splats and fat drips
+    const bank = Array.from({ length: 28 }, (_, i) => this.oneDrop(i % 4));
+    this.rain = { out, tone, wash, beds, roof, bank, acc: 0, t: 0 };
+  }
+
+  // Paul Kellet's pink noise filter, a channel each
+  pinkBuffer(seconds) {
+    const ctx = this.ctx, n = Math.floor(ctx.sampleRate * seconds);
+    const b = ctx.createBuffer(2, n, ctx.sampleRate);
+    for (let c = 0; c < 2; c++) {
+      const d = b.getChannelData(c);
+      let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;
+      for (let i = 0; i < n; i++) {
+        const w = Math.random() * 2 - 1;
+        b0 = 0.99886 * b0 + w * 0.0555179; b1 = 0.99332 * b1 + w * 0.0750759; b2 = 0.969 * b2 + w * 0.153852;
+        b3 = 0.8665 * b3 + w * 0.3104856; b4 = 0.55 * b4 + w * 0.5329522; b5 = -0.7616 * b5 - w * 0.016898;
+        d[i] = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + w * 0.5362) * 0.11;
+        b6 = w * 0.115926;
+      }
+      // fade the seam: the last 50 ms crossfade into the first
+      const f = Math.floor(ctx.sampleRate * 0.05);
+      for (let i = 0; i < f; i++) { const k = i / f; d[n - f + i] = d[n - f + i] * (1 - k) + d[i] * k; }
+    }
+    return b;
+  }
+
+  // One drop into L/R at `at` (wrapping round the buffer, so a loop has no seam).
+  // kind 0: a bubble (a sine that chirps upward as it rings down, the sound of a drop
+  // in water), 1: a tick on a hard surface (a few ms of bright noise), 2: a splat (both),
+  // 3: a fat drip (a slow, low bubble).
+  static addDrop(L, R, at, sr, amp, pan, kind) {
+    const n = L.length;
+    const gl = amp * Math.cos((pan + 1) * Math.PI / 4), gr = amp * Math.sin((pan + 1) * Math.PI / 4);
+    if (kind === 0 || kind === 2 || kind === 3) {
+      const f0 = kind === 3 ? 380 + Math.random() * 600 : 1000 + Math.random() ** 1.6 * 3600;
+      const tau = kind === 3 ? 0.012 + Math.random() * 0.02 : 0.003 + Math.random() * 0.008;
+      const rise = 0.5 + Math.random() * 1.5;
+      const len = Math.floor(tau * 6 * sr);
+      let ph = Math.random() * 6.28;
+      const a = kind === 2 ? 0.6 : 1;
+      for (let i = 0; i < len; i++) {
+        const t = i / sr;
+        ph += (2 * Math.PI * f0 * (1 + rise * Math.min(1, t / (tau * 3)))) / sr;
+        const s = Math.sin(ph) * Math.exp(-t / tau) * Math.min(1, i / (sr * 0.0005)) * a;
+        const j = (at + i) % n;
+        L[j] += s * gl; R[j] += s * gr;
+      }
+    }
+    if (kind === 1 || kind === 2) {
+      const len = Math.floor(sr * (0.0015 + Math.random() * 0.004));
+      const bright = 0.6 + Math.random() * 0.35;
+      let prev = 0;
+      for (let i = 0; i < len; i++) {
+        const w = Math.random() * 2 - 1;
+        const s = (w - prev * bright) * Math.exp(-i / (len * 0.3)) * 0.7;
+        prev = w;
+        const j = (at + i) % n;
+        L[j] += s * gl; R[j] += s * gr;
+      }
+    }
+  }
+
+  static normalise(b, rms) {
+    let sum = 0, cnt = 0;
+    for (let c = 0; c < b.numberOfChannels; c++) { const d = b.getChannelData(c); for (let i = 0; i < d.length; i += 4) { sum += d[i] * d[i]; cnt++; } }
+    const k = rms / Math.max(1e-6, Math.sqrt(sum / cnt));
+    for (let c = 0; c < b.numberOfChannels; c++) { const d = b.getChannelData(c); for (let i = 0; i < d.length; i++) d[i] *= k; }
+    return b;
+  }
+
+  // Many drops a second all round: mostly faint, a few loud (the near ones in the mix)
+  dropBed(seconds, perSecond) {
+    const ctx = this.ctx, sr = ctx.sampleRate, n = Math.floor(sr * seconds);
+    const b = ctx.createBuffer(2, n, sr), L = b.getChannelData(0), R = b.getChannelData(1);
+    const count = Math.floor(seconds * perSecond);
+    for (let k = 0; k < count; k++) {
+      const r = Math.random();
+      Audio.addDrop(L, R, Math.floor(Math.random() * n), sr, 0.03 + 0.6 * Math.random() ** 5, Math.random() * 2 - 1, r < 0.3 ? 0 : r < 0.9 ? 1 : 2);
+    }
+    return Audio.normalise(b, 0.22);
+  }
+
+  // Rain on a car roof: thick, low thuds of the sheet metal, close together
+  roofBed(seconds) {
+    const ctx = this.ctx, sr = ctx.sampleRate, n = Math.floor(sr * seconds);
+    const b = ctx.createBuffer(2, n, sr), L = b.getChannelData(0), R = b.getChannelData(1);
+    for (let k = 0; k < seconds * 170; k++) {
+      const at = Math.floor(Math.random() * n), amp = 0.1 + 0.9 * Math.random() ** 3, pan = Math.random() * 1.6 - 0.8;
+      const f0 = 140 + Math.random() * 360, tau = 0.012 + Math.random() * 0.03;
+      const gl = amp * Math.cos((pan + 1) * Math.PI / 4), gr = amp * Math.sin((pan + 1) * Math.PI / 4);
+      let ph = 0;
+      for (let i = 0; i < tau * 5 * sr; i++) {
+        const t = i / sr;
+        ph += (2 * Math.PI * f0) / sr;
+        const s = (Math.sin(ph) + (i < sr * 0.002 ? (Math.random() * 2 - 1) * 0.5 : 0)) * Math.exp(-t / tau);
+        const j = (at + i) % n;
+        L[j] += s * gl; R[j] += s * gr;
+      }
+    }
+    return Audio.normalise(b, 0.25);
+  }
+
+  oneDrop(kind) {
+    const ctx = this.ctx, sr = ctx.sampleRate, n = Math.floor(sr * (kind === 3 ? 0.2 : 0.07));
+    const b = ctx.createBuffer(1, n, sr), d = b.getChannelData(0);
+    Audio.addDrop(d, new Float32Array(n), 0, sr, 1.41, 1, kind); // pan 1: everything in the first channel
+    let peak = 0;
+    for (let i = 0; i < n; i++) peak = Math.max(peak, Math.abs(d[i]));
+    for (let i = 0; i < n; i++) d[i] /= peak || 1;
+    return b;
+  }
+
+  /** rain 0..1; inCar: in a closed car's seat; cover: under a roof. */
+  updateRain(dt, rain, { underwater = false, inCar = false, cover = false } = {}) {
+    const R = this.rain;
+    if (!R) return;
+    const ctx = this.ctx, now = ctx.currentTime;
+    R.t += dt;
+    const gust = 0.5 + 0.5 * Math.sin(R.t * 0.31) * Math.sin(R.t * 0.17 + 2);
+    const on = underwater ? 0 : rain;
+    R.out.gain.setTargetAtTime(on > 0.001 ? 1 : 0, now, 0.4);
+    R.wash.gain.setTargetAtTime(on * (0.05 + 0.03 * gust) * (inCar ? 0.6 : 1), now, 0.6);
+    R.beds.forEach((g, i) => g.gain.setTargetAtTime(on * (0.11 + (i ? 0.03 : -0.02) * gust) * (inCar ? 0.35 : 1), now, 0.6));
+    R.roof.gain.setTargetAtTime(inCar ? on * 0.16 : 0, now, 0.25);
+    R.tone.frequency.setTargetAtTime(cover ? 900 : inCar ? 2600 : 12000, now, 0.3);
+    if (on < 0.02 || inCar || cover) return;
+    // the near drops, one by one
+    R.acc += dt * on * (10 + 14 * gust);
+    while (R.acc >= 1) {
+      R.acc -= 1;
+      const src = ctx.createBufferSource();
+      const r = Math.random();
+      src.buffer = R.bank[Math.floor(Math.random() * R.bank.length)];
+      src.playbackRate.value = 0.8 + Math.random() * 0.45;
+      const g = ctx.createGain();
+      g.gain.value = (r < 0.08 ? 0.09 : 0.025 + 0.05 * Math.random() ** 2) * Math.min(1, on * 1.5);
+      const p = ctx.createStereoPanner();
+      p.pan.value = Math.random() * 1.8 - 0.9;
+      src.connect(g).connect(p).connect(R.out);
+      src.start(now + Math.random() * Math.max(dt, 0.016));
+    }
   }
 
   // Chrome throttles timers in a hidden tab unless it thinks audio is
@@ -699,9 +878,9 @@ export class Audio {
     this._hold = { o, g };
   }
 
-  updateAmbience(dt, { altitude, coast, underwater, rain = 0 }) {
+  updateAmbience(dt, { altitude, coast, underwater, rain = 0, inCar = false, cover = false }) {
     if (!this.ctx || !this.wind) return;
-    this.rainLoop?.g.gain.setTargetAtTime(underwater ? 0 : 0.11 * rain, this.ctx.currentTime, 0.5);
+    this.updateRain(dt, rain, { underwater, inCar, cover });
     this.ambT += dt;
     const t = this.ambT;
     const gust = 0.5 + 0.5 * Math.sin(t * 0.21) * Math.sin(t * 0.13 + 1);

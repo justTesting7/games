@@ -1225,7 +1225,8 @@ async function init() {
       if (arena) arena.update(dt, fx, camera);
       if (fish) fish.update(dt, camera);
       const coast = THREE.MathUtils.clamp(1 - (terrain.heightAt(viewPos.x, viewPos.z) - 1) / 25, 0, 1);
-      audio.updateAmbience(dt, { altitude: player.pos.y, coast, underwater: player.underwater, rain: world.weather?.amount || 0 });
+      audio.updateAmbience(dt, { altitude: player.pos.y, coast, underwater: player.underwater, rain: world.weather?.amount || 0,
+        inCar: !!(player.inCockpit && player.vehicle && !player.vehicle.spec), cover: !!pipeline.indoor });
     }
 
     if (hitTimer > 0) { hitTimer -= dt; if (hitTimer <= 0) $('hitmarker').classList.remove('show'); }
