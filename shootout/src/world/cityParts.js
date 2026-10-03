@@ -20,6 +20,9 @@ export const CITY_PARTS = {
       { folder: 'masrik', offset: [419.12, 7.13, -57.9], half: 220 },
       { folder: 'sderot-hen', offset: [567.03, 8.88, 238.47], half: 300, files: ['set.glb', 'set-2.glb'] },
       { folder: 'habima', offset: [516.44, 12.30, 527.47], half: 200 },
+      // Frishman: the hole between Dizengoff Square and Masaryk. The overlap is the same
+      // streets the other sets already own; this one keeps the part they never exported.
+      { folder: 'frishman', offset: [182.09, 1.82, -64.95], half: 200, drop: 0.02 },
     ],
     spill: 35, // buildings reach this far past the tile edge
     // where rounds start (solo deals one at random; multiplayer slots go round them).
@@ -48,11 +51,16 @@ export function ownerOf(def, x, z) {
   return best;
 }
 
-/** True when a skyline point lies over one of the detailed sets (it would double it). */
+/** True when a skyline point lies over the detailed set that owns it (it would double it). */
 export function underSets(def, x, z) {
-  return def.sets.some(({ folder, offset: [ox, , oz], half }) => folder !== def.far
-    && Math.abs(x - ox) < half + def.spill && Math.abs(z - oz) < half + def.spill);
+  const owner = def.sets[ownerOf(def, x, z)];
+  if (!owner || owner.folder === def.far) return false;
+  const [ox, , oz] = owner.offset;
+  return Math.abs(x - ox) < owner.half + def.spill && Math.abs(z - oz) < owner.half + def.spill;
 }
+
+/** How far a set's streets sit below the one before it, so overlaps don't z-fight. */
+export const setDrop = (set, i) => set.drop ?? groundDrop(i);
 
 // Street surfaces are big triangles (whole road strips): cut by centre they would leave
 // holes along a seam. Every set keeps all of its own; each later set sits a little

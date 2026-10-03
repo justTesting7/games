@@ -50,6 +50,7 @@ export class CarBatch {
           geoId.set(mesh.geometry, gid);
         }
         const id = batch.addInstance(gid);
+        if (mesh.userData.fleetColor) batch.setColorAt(id, mesh.userData.fleetColor);
         const part = { car, mesh, batch, id, gid };
         this.parts.push(part);
         (car.batched || (car.batched = [])).push(part);

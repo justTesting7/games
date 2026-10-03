@@ -161,6 +161,13 @@ export function dentCar(car, at, dir, depth, radius = 0.7) {
       part.own = true;
       mesh.visible = true;
       if (part.batch) part.batch.setVisibleAt(part.id, false);
+      // The batch was tinting this body. On its own it needs that colour on a copy of the paint.
+      const c = mesh.userData.fleetColor;
+      if (c && !part.baseMat) {
+        part.baseMat = mesh.material;
+        mesh.material = mesh.material.clone();
+        mesh.material.color.copy(c);
+      }
     }
     const g = mesh.geometry, pos = g.attributes.position;
     _d.copy(dir).transformDirection(_inv);

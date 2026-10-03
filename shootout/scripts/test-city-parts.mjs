@@ -1,4 +1,4 @@
-// Tel Aviv is stitched from six exports: every point belongs to exactly one set,
+// Tel Aviv is stitched from seven exports: every point belongs to exactly one set,
 // always one whose ground tile covers it, and the seams sit well inside both tiles.
 import { CITY_PARTS, ownerOf, underSets } from '../src/world/cityParts.js';
 import { getMap } from '../src/world/maps.js';

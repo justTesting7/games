@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
 import {KTX2Loader} from 'three/addons/loaders/KTX2Loader.js';
 import {MeshoptDecoder} from 'three/addons/libs/meshopt_decoder.module.js';
-import { cityPartsOf, ownerOf, underSets, GROUND_MESH, groundDrop } from './cityParts.js';
+import { cityPartsOf, ownerOf, underSets, GROUND_MESH, setDrop } from './cityParts.js';
 
 const BASE = import.meta.env?.BASE_URL || '/shootout/';
 const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
@@ -182,7 +182,7 @@ export async function loadCity(scene, renderer, folder = 'dizengoff-center') {
   set.scene.name = `set-${folder}`;
   loaded.forEach((g, i) => {
     g.scene.position.fromArray(sets[i].offset);
-    if (def) g.scene.traverse((o) => { if (o.isMesh && GROUND_MESH.test(o.name)) o.position.y -= groundDrop(i); });
+    if (def) g.scene.traverse((o) => { if (o.isMesh && GROUND_MESH.test(o.name)) o.position.y -= setDrop(sets[i], i); });
     set.scene.add(g.scene);
   });
   if (def) {

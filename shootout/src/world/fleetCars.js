@@ -11,7 +11,8 @@ const BAY_HL = 2.30; // nav bays are about 2.34 x 0.89; leave a little air
 const BAY_HW = 0.87;
 
 const paint = new THREE.MeshPhysicalMaterial({
-  name: 'fleet-paint', color: 0x303032, roughness: 0.3, metalness: 0.25,
+  // White, so a parked car's own colour (set on the batch instance) shows through.
+  name: 'fleet-paint', color: 0xffffff, roughness: 0.3, metalness: 0.25,
   clearcoat: 1, clearcoatRoughness: 0.05, envMapIntensity: 1.2,
 });
 const glass = new THREE.MeshPhysicalMaterial({
@@ -44,6 +45,19 @@ function kind(name) {
   if (/Taillight/.test(name)) return 'tail';
   if (/Chrome|Alloy|Mirror/.test(name)) return 'metal';
   return 'trim';
+}
+
+// Street colours. The body in the file is one dark paint; each spot picks one of these,
+// the same pick on every client.
+const PAINTS = [0xf2f2f0, 0xc5c8cc, 0x8e9399, 0x23262b, 0x8f2d2d, 0xb4532a, 0x1d3f78, 0x2a4a3c, 0xc6a15a, 0xd9d3c3, 0x4a4038, 0x6d3a4a]
+  .map((hex) => new THREE.Color(hex));
+
+/** Same colour on every client for a given parking spot. */
+export function fleetColor(i) {
+  let h = Math.imul(i + 7, 0x27bb2ee7);
+  h = Math.imul(h ^ (h >>> 15), 0x85ebca6b);
+  h ^= h >>> 13;
+  return PAINTS[(h >>> 0) % PAINTS.length];
 }
 
 /** Same style on every client for a given parking spot. */
@@ -225,8 +239,12 @@ export function placeFleet(spots) {
   return spots.map((spot, i) => {
     const tpl = templates[fleetVariant(i, templates.length)];
     const mesh = tpl.group.clone(true);
+    const color = fleetColor(i);
     const panes = {};
-    mesh.traverse((o) => { if (o.name.startsWith('pane-')) panes[o.name.slice(5)] = o; });
+    mesh.traverse((o) => {
+      if (o.name.startsWith('pane-')) panes[o.name.slice(5)] = o;
+      if (o.material?.name === 'fleet-paint') o.userData.fleetColor = color;
+    });
     return {
       x: spot.x, z: spot.z, y: spot.y, yaw: spot.yaw,
       hl: tpl.hl, hw: tpl.hw, mesh, panes, paneBoxes: tpl.paneBoxes, metalBoxes: tpl.metalBoxes,

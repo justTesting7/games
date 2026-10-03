@@ -143,7 +143,7 @@ export const MAPS = {
     id: 'telaviv',
     cityFolder: 'tel-aviv', // stitched districts, see src/world/cityParts.js
     label: 'Tel Aviv',
-    subtitle: "Dizengoff Square and Center, HaNevi'im, Masaryk, Sderot Hen and Habima in one city",
+    subtitle: "Dizengoff Square and Center, HaNevi'im, Masaryk, Sderot Hen, Habima and Frishman in one city",
     loadLabel: 'Raising Tel Aviv',
     plantLabel: 'Loading the city',
     textures: {

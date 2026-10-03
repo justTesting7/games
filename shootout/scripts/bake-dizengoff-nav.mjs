@@ -9,7 +9,7 @@ import { NodeIO } from '@gltf-transform/core';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { measureProfile, classifyStadium, inGateDoor } from '../src/world/stadium.js';
-import { cityPartsOf, ownerOf, GROUND_MESH, groundDrop } from '../src/world/cityParts.js';
+import { cityPartsOf, ownerOf, GROUND_MESH, setDrop } from '../src/world/cityParts.js';
 
 const MAP = process.argv[2];
 if (!MAP) throw new Error('usage: bake-dizengoff-nav.mjs <map-folder>');
@@ -70,7 +70,7 @@ for (const { doc, off, own } of sources) for (const n of doc.getRoot().listNodes
     for (let i = 0; i + 2 < count; i += 3) {
       const tri = [get(i), get(i + 1), get(i + 2)];
       if (partsDef && !GROUND_MESH.test(name) && ownerOf(partsDef, (tri[0][0] + tri[1][0] + tri[2][0]) / 3, (tri[0][2] + tri[1][2] + tri[2][2]) / 3) !== own) continue;
-      if (partsDef && GROUND_MESH.test(name)) for (const q of tri) q[1] -= groundDrop(own);
+      if (partsDef && GROUND_MESH.test(name)) for (const q of tri) q[1] -= setDrop(partsDef.sets[own], own);
       if (scooterPart) {
         if (col) { col.getElement(idx ? idx.getScalar(i) : i, cv); tri.rgb = [cv[0], cv[1], cv[2]]; }
         scooterPart.push(tri);
@@ -534,7 +534,16 @@ var rideRemove = [];
   console.log('rideable bikes', rides.filter((r) => r.kind === 'bike').length, 'mopeds', rides.filter((r) => r.kind === 'moped').length, 'kick scooters', rides.filter((r) => r.kind === 'kick').length);
 }
 
-const inScooter = (x, y, z) => [...scooterRemove, ...rideRemove].some((b) => x > b[0] - 0.1 && x < b[3] + 0.1 && y > b[1] - 0.1 && y < b[4] + 0.1 && z > b[2] - 0.1 && z < b[5] + 0.1);
+const rideGrid = new Map();
+for (const b of [...scooterRemove, ...rideRemove]) {
+  for (let i = Math.floor((b[0] - 0.1) / 8); i <= Math.floor((b[3] + 0.1) / 8); i++) {
+    for (let j = Math.floor((b[2] - 0.1) / 8); j <= Math.floor((b[5] + 0.1) / 8); j++) {
+      const k = `${i},${j}`;
+      (rideGrid.get(k) || rideGrid.set(k, []).get(k)).push(b);
+    }
+  }
+}
+const inScooter = (x, y, z) => (rideGrid.get(`${Math.floor(x / 8)},${Math.floor(z / 8)}`) || []).some((b) => x > b[0] - 0.1 && x < b[3] + 0.1 && y > b[1] - 0.1 && y < b[4] + 0.1 && z > b[2] - 0.1 && z < b[5] + 0.1);
 
 // Whatever car paint isn't inside a car found (fragments too small to measure, rows that
 // split into short bits, vans, cars on decks): grouped by neighbouring 2 m cells, each
