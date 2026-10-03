@@ -134,17 +134,18 @@ export class Weather {
     u.uAmount.value = this.amount;
     if (light) u.uLight.value.set(0.04 + light.x * 0.045, 0.045 + light.y * 0.045, 0.05 + light.z * 0.045); // dim at night
     this.mesh.visible = this.amount > 0.01;
-    // splashes on the ground around the player
-    if (this.amount > 0.01 && fx?.alpha && heightAt && at) {
+    // splashes on the ground around the player: in the additive pool, drawn with the other
+    // effects (in the alpha pool they kept the half-resolution smoke pass running all the
+    // time it rained), one spawn record reused
+    if (this.amount > 0.01 && fx?.add && heightAt && at) {
       this.splashAcc = (this.splashAcc || 0) + dt * 70 * this.amount;
+      const o = this._splash || (this._splash = { pos: new THREE.Vector3(), vel: new THREE.Vector3(), size: 0.012, life: 0.25, color: [0.22, 0.24, 0.26], alpha: 1, gravity: 9.8 });
       while (this.splashAcc > 1) {
         this.splashAcc -= 1;
         const x = at.x + (Math.random() - 0.5) * 24, z = at.z + (Math.random() - 0.5) * 24;
-        fx.alpha.spawn({
-          pos: new THREE.Vector3(x, heightAt(x, z) + 0.02, z),
-          vel: new THREE.Vector3((Math.random() - 0.5) * 0.4, 0.9 + Math.random() * 0.6, (Math.random() - 0.5) * 0.4),
-          size: 0.012, life: 0.25, color: [0.8, 0.85, 0.9], alpha: 0.6, gravity: 9.8,
-        });
+        o.pos.set(x, heightAt(x, z) + 0.02, z);
+        o.vel.set((Math.random() - 0.5) * 0.4, 0.9 + Math.random() * 0.6, (Math.random() - 0.5) * 0.4);
+        fx.add.spawn(o);
       }
     }
   }

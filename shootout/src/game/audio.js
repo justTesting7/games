@@ -840,18 +840,33 @@ export class Audio {
     R.burst += (R.burstGoal - R.burst) * Math.min(1, dt * 0.6);
     const flutter = 1 + 0.12 * Math.sin(R.t * 2.3) * Math.sin(R.t * 0.9 + 1);
     const on = underwater ? 0 : rain, heavy = R.burst * flutter;
+    // the levels and tones move slowly: set them ten times a second, not every frame
+    R.paramT = (R.paramT || 0) - dt;
+    const mode = `${inCar}${cover}`;
+    if (R.paramT <= 0 || mode !== R.mode) {
+      R.paramT = 0.1;
+      R.mode = mode;
+      this.rainLevels(R, on, heavy, inCar, cover, now);
+    }
+    if (on < 0.02 || inCar || cover) return;
+    this.rainDrops(R, dt, on, heavy, now);
+  }
+
+  rainLevels(R, on, heavy, inCar, cover, now) {
     R.out.gain.setTargetAtTime(on > 0.001 ? 1 : 0, now, 0.4);
     R.wash.g.gain.setTargetAtTime(on * 0.07 * (0.7 + 0.3 * heavy) * (inCar ? 0.6 : 1), now, 0.8);
     R.wash.filters[2].frequency.setTargetAtTime(5500 + 3000 * (heavy - 0.55), now, 1);
     for (const b of R.beds) {
-      b.next -= dt;
+      b.next -= 0.1;
       if (b.next <= 0) { b.level = 0.5 + Math.random() * 0.9; b.tone = 0.6 + Math.random() * 0.8; b.next = 1.5 + Math.random() * 5; }
       b.g.gain.setTargetAtTime(on * 0.1 * b.level * heavy * (inCar ? 0.35 : 1), now, 0.9);
       b.filters[1].frequency.setTargetAtTime(Math.min(16000, 7000 * b.tone), now, 1.2);
     }
     R.roof.g.gain.setTargetAtTime(inCar ? on * 0.16 * heavy : 0, now, 0.25);
     R.tone.frequency.setTargetAtTime(cover ? 900 : inCar ? 2600 : 12000, now, 0.3);
-    if (on < 0.02 || inCar || cover) return;
+  }
+
+  rainDrops(R, dt, on, heavy, now) {
     // the near drops, one by one, each its own: pitch, filter, loudness, place
     R.acc += dt * on * 16 * heavy;
     while (R.acc >= 1) {

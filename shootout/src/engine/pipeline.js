@@ -324,6 +324,7 @@ export class Pipeline {
       tColor: { value: null }, uInvViewProj: { value: new THREE.Matrix4() }, uViewProj: { value: new THREE.Matrix4() },
       uCamPos: { value: new THREE.Vector3() }, uCamForward: { value: new THREE.Vector3() },
       uTexel: { value: new THREE.Vector2() }, uWet: { value: 0 }, uTime: this.u.uTime, uFrame: { value: 0 },
+      uSteps: { value: 16 }, uGrow: { value: 1.42 },
     }, { transparent: true, blending: THREE.CustomBlending, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor, blendSrcAlpha: THREE.ZeroFactor, blendDstAlpha: THREE.OneFactor });
     this.wet = 0; // 0..1, set by the game (rain)
     this.motion = 0; // 0..1, set by the game (fast driving)
@@ -421,6 +422,11 @@ export class Pipeline {
       fs.needsUpdate = true;
     }
     this.waterMaterial.uniforms.uSSRSteps.value = q.ssr;
+    // the wet streets' reflections: fewer, longer steps on the lower settings (was 40 on all;
+    // the bisection after a crossing keeps the hit sharp)
+    const steps = Math.max(12, q.ssr), wu = this.wetMaterial.uniforms;
+    wu.uSteps.value = steps;
+    wu.uGrow.value = Math.pow(34 / 0.12, 1 / steps);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, this.mobile ? Math.min(q.pixelRatio, 1) : q.pixelRatio));
     if (changedMsaa && this.sceneRT) { this.sceneRT.dispose(); this.sceneRT = null; }
     this.resize(Math.max(2, window.innerWidth || 360), Math.max(2, window.innerHeight || 640));

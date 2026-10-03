@@ -776,6 +776,8 @@ uniform vec2 uTexel;
 uniform float uWet;
 uniform float uTime;
 uniform float uFrame;
+uniform int uSteps;   // the march (by quality), each step uGrow times the last: it reaches ~34 m
+uniform float uGrow;
 
 float h21(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 float vnoise(vec2 p) {
@@ -839,6 +841,7 @@ void main() {
   float jit = fract(52.9829189 * fract(dot(gl_FragCoord.xy + uFrame * 7.31, vec2(0.06711056, 0.00583715))));
   float t = 0.12 * (1.0 + jit * 0.15), prevT = 0.0;
   for (int i = 0; i < 40; i++) {
+    if (i >= uSteps) break;
     vec3 q = P + R * t;
     vec4 clip = uViewProj * vec4(q, 1.0);
     if (clip.w <= 0.0) break;
@@ -862,14 +865,14 @@ void main() {
       vec4 sh = texture(tColor, uh);
       diff = dot(qh - uCamPos, uCamForward) - sh.a;
       // the crossing was behind something thin (a pole, a leg): not what's reflected here
-      if (diff > shell) { prevT = t; t *= 1.15; continue; }
+      if (diff > shell) { prevT = t; t *= uGrow; continue; }
       hitCol = sh.rgb;
       vec2 e = min(uh, 1.0 - uh);
       found = clamp(min(e.x, e.y) * 10.0, 0.0, 1.0) * (1.0 - smoothstep(20.0, 34.0, hi)) * (1.0 - diff / shell * 0.5);
       break;
     }
     prevT = t;
-    t *= 1.15;
+    t *= uGrow;
   }
   float fres = 0.04 + 0.96 * pow(1.0 - clamp(dot(-V, N), 0.0, 1.0), 5.0);
   // a puddle is a near-perfect mirror and darkens the street under its film of water
