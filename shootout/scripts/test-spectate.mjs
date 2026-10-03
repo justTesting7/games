@@ -12,7 +12,7 @@ for (const [file, src, needle] of [
   ['player.js', player, 'const body = follow?.pos || this.pos'],
   ['main.js', main, 'const refreshSpectate = ()'],
   ['main.js', main, 'const spec = refreshSpectate()'],
-  ['main.js', main, 'player.update(dt, alive && !flying ? input : NO_INPUT, spec)'],
+  ['main.js', main, 'player.update(dt, alive && !flying && !busy ? input : NO_INPUT, spec)'],
   ['main.js', main, 'Spectating ${spec.persona?.name || spec.fighter.name}'],
   ['main.js', main, 'else if (player.fighter.alive) player.look'],
   ['player.js', player, 'const look = spectateLook(follow)'],

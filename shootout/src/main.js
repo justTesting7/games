@@ -787,6 +787,9 @@ async function init() {
 
   const resetLocalKit = () => {
     spectate = null;
+    player.tumble = null;
+    player.exitT = 1;
+    player.exitCar = null;
     combat.reset(player.fighter);
     player.fighter.loadout.reset();
     character.setWeapon('pistols');
@@ -1178,7 +1181,9 @@ async function init() {
       active: alive && !flying && !spec,
       squash: round.state === 'fight' ? combat : null,
     });
-    const state = player.update(dt, alive && !flying ? input : NO_INPUT, spec);
+    // (climbing out of a car, or rolling after bailing out: no control yet)
+    const busy = (player.exitT ?? 1) < 0.8 || !!player.tumble;
+    const state = player.update(dt, alive && !flying && !busy ? input : NO_INPUT, spec);
     const canShoot = alive && round.state !== 'countdown' && !(mode === 'multi' && round.state === 'waiting');
     if (canShoot) weapons.update(dt, input);
     else weapons.tick(player.fighter, dt);

@@ -398,6 +398,11 @@ export function stepGrip(state, { throttle, steer, handbrake = false, dt, sprint
  * Where a seated driver's hips go and where the steering wheel is, in world space
  * (a scooter rider stands instead).
  */
+// getting in: the part of the climb after which the driver has the wheel
+export const ENTER_SEATED = 0.8;
+// faster than this (m/s) a driver getting out is thrown clear and rolls
+export const BAIL_SPEED = 9;
+
 export function driverPose(car) {
   const S = specOf(car);
   if (S.kind === 'scooter' && S.astride) {
@@ -1107,6 +1112,7 @@ export class Cars {
         paneBoxes: s.paneBoxes || null,
         hl: s.hl, hw: s.hw, // measured footprint (city cars)
         metalBoxes: s.metalBoxes || null,
+        door: s.door || null, // the driver's door, hinged (fleet cars)
         wheelRig: null,
         cluster: null,
         home: { x: s.x, z: s.z, yaw: s.yaw },
@@ -1208,6 +1214,7 @@ export class Cars {
   // As good as new for a new round: full health, no fire or smoke, the paint back from
   // charred, the dents knocked out (each part's undented body, drawn by the batch again).
   repair(car) {
+    if (car.door) { car.doorK = 0; car.doorGoal = 0; car.door.rotation.y = 0; car.door.updateMatrix(); car.dirty = true; }
     car.hp = hpMax(car);
     car.wrecked = false;
     car.burnT = 0;
@@ -1256,6 +1263,43 @@ export class Cars {
     if (on) car.mesh.updateMatrixWorld(true);
     car.frozen = on;
     car.mesh.traverse((o) => { o.matrixAutoUpdate = !on; });
+  }
+
+  /** The driver's door opens, stays open `hold` seconds, and swings shut. */
+  doorPulse(car, hold = 0.55) {
+    if (!car?.door) return;
+    car.doorGoal = 1;
+    car.doorHold = hold;
+    if (car.body) car.body.rest = false;
+    this.doorSound(car, 'open');
+  }
+
+  // the door swings on its hinge (a quick open, a firmer close), then the batch follows it
+  swingDoor(car, dt) {
+    let k = car.doorK || 0;
+    if (k >= 1 && car.doorGoal === 1) {
+      car.doorHold = (car.doorHold ?? 0) - dt;
+      if (car.doorHold <= 0) car.doorGoal = 0;
+      return;
+    }
+    const goal = car.doorGoal || 0;
+    if (k === goal) return;
+    k += Math.sign(goal - k) * Math.min(Math.abs(goal - k), dt / (goal > k ? 0.32 : 0.26));
+    car.doorK = k;
+    const e = goal > 0 ? 1 - (1 - k) * (1 - k) : k * k; // eases out opening, slams in closing
+    car.door.rotation.y = -1.1 * e; // the hinge at the front: the back edge swings out (+x)
+    if (car.frozen) this.freeze(car, false);
+    car.door.updateMatrix();
+    car.dirty = true;
+    if (car.body) car.body.rest = false;
+    if (k === 0 && goal === 0) this.doorSound(car, 'shut');
+  }
+
+  doorSound(car, kind) {
+    const cam = this.world.player?.camera, audio = this.world.audio;
+    if (!cam || !audio?.door) return;
+    const d = Math.hypot(car.x - cam.position.x, car.z - cam.position.z);
+    if (d < 40) audio.door(kind, Math.min(1, 4 / Math.max(1, d)));
   }
 
   placeMesh(car) {
@@ -1328,8 +1372,11 @@ export class Cars {
     car.driver = player.fighter;
     car.lastDriver = player.fighter;
     car.remote = false;
-    player.enterFrom = player.pos.clone(); // the body slides from here into the seat
-    player.enterT = 0;
+    player.enterFrom = player.pos.clone(); // the body walks to the door and climbs in (see Player.updateInCar)
+    player.enterYaw = player.yaw;
+    player.enterT = car.spec ? ENTER_SEATED : 0; // (onto a two-wheeler: a quick swing of the leg)
+    this.freeze(car, false);
+    this.doorPulse(car, 0.5);
     player.vehicle = car;
     player.swimming = false;
     this.refreshSeat(car);
@@ -1360,11 +1407,22 @@ export class Cars {
     if (player.character?.root) player.character.root.visible = true;
     const at = this.exitSpot(car);
     const y = this.world.terrain.heightAt(at.x, at.z);
-    player.exitFrom = player.pos.clone(); // the seat: the body slides out to the door
-    player.exitT = 0;
+    const fast = Math.abs(car.speed) > BAIL_SPEED;
+    player.exitFrom = player.pos.clone(); // the seat: the body swings out to the door
+    player.exitCar = car;
+    player.exitT = fast ? 1 : 0;
     player.pos.set(at.x, y, at.z);
-    player.vel.set(0, 0, 0);
     player.yaw = car.yaw;
+    if (fast) {
+      // bailing out of a moving car: thrown clear with its momentum, rolling for a second
+      const o = localOffset(car.x, car.z, car);
+      const out = new THREE.Vector3(at.x - car.x, 0, at.z - car.z).normalize();
+      player.vel.set(car.vel.x * 0.85 + out.x * 2.5, 1.6, car.vel.z * 0.85 + out.z * 2.5);
+      player.tumble = { t: 0, roll: 0, yaw: Math.atan2(car.vel.x || o.fwdX, car.vel.z || o.fwdZ) };
+    } else {
+      player.vel.set(0, 0, 0);
+      this.doorPulse(car, 0.45);
+    }
     this.refreshSeat(car);
   }
 
@@ -1565,9 +1623,10 @@ export class Cars {
     const active = !!opts.active;
     const local = this.localCar();
     if (active && player?.fighter?.alive && local) {
-      const f = (input.forward ? 1 : 0) - (input.back ? 1 : 0) + (input.moveY || 0);
-      local.steer = THREE.MathUtils.clamp(driveSteer(input), -1, 1);
-      local.handbrake = !!input.fire; // Space: the fire button does nothing at the wheel
+      const seated = (player.enterT ?? 1) >= ENTER_SEATED; // still climbing in: no hands on the wheel yet
+      const f = seated ? (input.forward ? 1 : 0) - (input.back ? 1 : 0) + (input.moveY || 0) : 0;
+      local.steer = seated ? THREE.MathUtils.clamp(driveSteer(input), -1, 1) : 0;
+      local.handbrake = seated && !!input.fire; // Space: the fire button does nothing at the wheel
       const stepped = stepGrip(local, {
         throttle: THREE.MathUtils.clamp(f, -1, 1),
         steer: local.steer,
@@ -1595,6 +1654,7 @@ export class Cars {
     }
 
     for (const car of this.list) {
+      if (car.door && (car.doorGoal || car.doorK)) this.swingDoor(car, dt);
       const living = car.driver?.alive;
       if (car.ai && living && !car.driver.isPlayer && !car.remote) {
         // a rival at the wheel: same grip physics as the player's car

@@ -1523,16 +1523,18 @@ export class Character {
     const turn = (bone, axis, ang) => {
       if (bone && Math.abs(ang) > 1e-4) rotateBoneWorld(bone, this.tmp.q.setFromAxisAngle(axis, ang), this.tmp);
     };
+    // blend 0..1: part way down into the seat (climbing in or out)
+    const k = seat.blend ?? 1;
     const hips = B.Hips.getWorldPosition(new THREE.Vector3());
-    B.Hips.position.y -= hips.y - seat.hipY;
+    B.Hips.position.y -= (hips.y - seat.hipY) * k;
     B.Hips.updateMatrixWorld(true);
-    const thigh = seat.thigh ?? 1.45, knee = seat.knee ?? -1.3;
-    turn(B.LeftUpLeg, right, thigh); turn(B.LeftUpLeg, fwd, -0.07);
-    turn(B.RightUpLeg, right, thigh); turn(B.RightUpLeg, fwd, 0.07);
+    const thigh = (seat.thigh ?? 1.45) * k, knee = (seat.knee ?? -1.3) * k;
+    turn(B.LeftUpLeg, right, thigh); turn(B.LeftUpLeg, fwd, -0.07 * k);
+    turn(B.RightUpLeg, right, thigh); turn(B.RightUpLeg, fwd, 0.07 * k);
     turn(B.LeftLeg, right, knee); turn(B.RightLeg, right, knee);
-    turn(B.LeftFoot, right, 0.25); turn(B.RightFoot, right, 0.25);
-    turn(B.Spine, right, 0.1);
-    if (!seat.wheel || !B.LeftArm || !B.RightArm) return;
+    turn(B.LeftFoot, right, 0.25 * k); turn(B.RightFoot, right, 0.25 * k);
+    turn(B.Spine, right, 0.1 * k + 0.35 * Math.sin(Math.PI * k) * (seat.duck ?? 0)); // ducking under the roof line
+    if (!seat.wheel || !B.LeftArm || !B.RightArm || k < 0.85) return;
     const steer = this.steer || 0;
     for (const [side, out, sign] of [['Left', left, 1], ['Right', right, -1]]) {
       const sh = B[`${side}Arm`].getWorldPosition(new THREE.Vector3());

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { FLOAT_Y, canExitWater, shouldSwim, stepSwim, swimSpeed, hasSea } from './swim.js';
-import { cockpitEye, driverPose } from './cars.js';
+import { cockpitEye, driverPose, exitOf, ENTER_SEATED } from './cars.js';
 import { findVault, stepVault } from './vault.js';
 
 const GRAVITY = 16;
@@ -9,6 +9,12 @@ const RADIUS = 0.3;
 const SPEED = { walk: 1.7, jog: 3.9, sprint: 6.3, aim: 3.0, aimWalk: 1.6, crouch: 0.95 };
 
 const wrapAngle = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+const smooth = (x) => { const t = Math.min(1, Math.max(0, x)); return t * t * (3 - 2 * t); };
+const turnTo = (a, b, k) => a + wrapAngle(b - a) * k;
+// getting into a car: to the door (as it opens), then down into the seat, the door shut behind
+const ENTER_TIME = 1.15;
+// out: the door opens, legs out, up and away from it
+const EXIT_TIME = 0.95;
 
 /** Look a living subject is using — same yaw/pitch their own camera would have. */
 export function spectateLook(sub) {
@@ -133,6 +139,7 @@ export class Player {
       return driving;
     }
     if (this.vehicle && !follow) return this.updateInCar(dt, input);
+    if (this.tumble && !follow && this.fighter?.alive) return this.updateTumble(dt);
     const { terrain } = this.world;
     const weapon = this.fighter?.loadout.current;
     const sniping = weapon === 'rifle';
@@ -339,16 +346,22 @@ export class Player {
 
     const ch = this.character;
     ch.root.position.copy(this.pos);
-    if ((this.exitT ?? 1) < 1 && this.exitFrom) { // climbing out
-      this.exitT = Math.min(1, this.exitT + dt / 0.35);
-      const e = this.exitT * this.exitT * (3 - 2 * this.exitT);
-      ch.root.position.lerpVectors(this.exitFrom, this.pos, e);
+    let seat = null, rootYaw = this.yaw;
+    if ((this.exitT ?? 1) < 1 && this.exitFrom) { // climbing out: the door opens, legs out, up
+      this.exitT = Math.min(1, this.exitT + dt / EXIT_TIME);
+      const m = smooth((this.exitT - 0.28) / 0.55);
+      ch.root.position.lerpVectors(this.exitFrom, this.pos, m);
+      const out = Math.atan2(this.pos.x - this.exitFrom.x, this.pos.z - this.exitFrom.z);
+      const car = this.exitCar;
+      rootYaw = turnTo(car ? car.yaw : this.yaw, out, smooth(m * 1.5));
+      if (car && m < 0.97) seat = { ...(driverPose(car) || { hipY: this.exitFrom.y + 0.5 }), blend: 1 - m, duck: 1, wheel: m < 0.05 ? driverPose(car)?.wheel : null };
+      if (this.exitT >= 1) { this.yaw = out; rootYaw = out; this.exitCar = null; }
     }
     const pitchGoal = this.diving ? 1.05 : this.swimming ? 0.32 : 0;
     this.swimPitch += (pitchGoal - this.swimPitch) * Math.min(1, dt * 5);
     ch.root.rotation.order = 'YXZ';
     ch.root.rotation.x = this.swimPitch;
-    ch.root.rotation.y = this.yaw;
+    ch.root.rotation.y = rootYaw;
     ch.root.rotation.z = 0;
 
     if (follow) {
@@ -366,11 +379,67 @@ export class Player {
     }
 
     ch.update(dt, {
-      speed, onGround: this.onGround, airTime: this.airTime, strafe: true, localDir: this.localDir,
-      jumpStarted, predictedAir: (2 * JUMP_V) / GRAVITY, aiming: aiming && !this.swimming, aimPoint: this.aimPoint,
-      lookDir: this.lookDir(), crouch: this.crouchT, swimming: this.swimming, diving: this.diving,
+      speed: seat ? 0 : speed, onGround: this.onGround, airTime: this.airTime, strafe: true, localDir: this.localDir,
+      jumpStarted, predictedAir: (2 * JUMP_V) / GRAVITY, aiming: aiming && !this.swimming && !seat, aimPoint: this.aimPoint,
+      lookDir: this.lookDir(), crouch: this.crouchT, swimming: this.swimming, diving: this.diving, seat,
     });
     return { speed, aiming };
+  }
+
+  // Thrown out of a moving car: carried on with its momentum, rolling over and over along
+  // the ground (around the hips, tucked), slowed by the road, stopped by walls and cars;
+  // after a second or so, once it has slowed and come round upright, the player is up again.
+  updateTumble(dt) {
+    const T = this.tumble, { terrain } = this.world, v = this.vel, p = this.pos;
+    T.t += dt;
+    v.y -= GRAVITY * dt;
+    p.addScaledVector(v, dt);
+    const g = terrain.heightAt(p.x, p.z);
+    const ground = p.y <= g + 0.02;
+    if (p.y < g) { p.y = g; if (v.y < 0) v.y = -v.y * 0.25; }
+    const drag = Math.exp(-dt * (ground ? 2.6 : 0.2));
+    v.x *= drag; v.z *= drag;
+    const bx = p.x, bz = p.z;
+    this.world.veg?.colliders.resolveXZ(p, RADIUS, p.y, p.y + 0.9);
+    this.world.cars?.collideWalker(p, RADIUS, null);
+    const nx = p.x - bx, nz = p.z - bz, nl = Math.hypot(nx, nz);
+    if (nl > 1e-4) { // hit something: lose the speed going into it
+      const into = (v.x * nx + v.z * nz) / nl;
+      if (into < 0) { v.x -= (nx / nl) * into * 1.2; v.z -= (nz / nl) * into * 1.2; }
+    }
+    const hs = Math.hypot(v.x, v.z);
+    if (hs > 0.6) T.yaw = Math.atan2(v.x, v.z);
+    // the roll: as fast as it travels (a body ~0.85 m round when tucked), kept going at the
+    // end until it comes upright
+    if ((T.t > 0.9 && hs < 2.6) || T.t > 2.2) T.ending = true;
+    T.roll += Math.max(hs / 0.42, T.ending ? 7 : 0) * dt;
+    const turn = T.roll % (Math.PI * 2);
+    const ch = this.character;
+    if (T.ending && turn < 0.45) {
+      this.tumble = null;
+      this.yaw = T.yaw;
+      this.camYaw = turnTo(this.camYaw, T.yaw, 0.5);
+      v.set(0, 0, 0);
+      this.onGround = true;
+      this.airTime = 0;
+      ch.root.rotation.set(0, T.yaw, 0);
+      ch.root.position.copy(p);
+      return { speed: 0, aiming: false };
+    }
+    // rotate about the middle of the tucked body, not the feet
+    ch.root.rotation.order = 'YXZ';
+    ch.root.rotation.set(turn, T.yaw, 0);
+    const lift = 0.42;
+    const off = new THREE.Vector3(0, lift, 0).applyEuler(ch.root.rotation);
+    ch.root.position.set(p.x, p.y + lift, p.z).sub(off);
+    this.onGround = ground;
+    this.updateCamera(dt, false, false, hs);
+    ch.update(dt, {
+      speed: 0, onGround: true, airTime: 0, strafe: false, localDir: this.localDir.set(0, 0, 1),
+      jumpStarted: false, predictedAir: 0, aiming: false, aimPoint: this.aimPoint,
+      lookDir: this.lookDir(), crouch: 1, swimming: false, diving: false,
+    });
+    return { speed: hs, aiming: false };
   }
 
   updateInCar(dt, input) {
@@ -395,15 +464,28 @@ export class Player {
     this.time = (this.time || 0) + dt;
     const ch = this.character;
     ch.root.position.copy(this.pos);
-    if ((this.enterT ?? 1) < 1 && this.enterFrom) { // climbing in
-      this.enterT = Math.min(1, this.enterT + dt / 0.5);
-      const e = this.enterT * this.enterT * (3 - 2 * this.enterT);
-      ch.root.position.lerpVectors(this.enterFrom, this.pos, e);
+    let rootYaw = this.yaw, sit = 1, walk = 0;
+    if ((this.enterT ?? 1) < 1 && this.enterFrom) { // climbing in: to the door, then down into the seat
+      const t0 = this.enterT;
+      this.enterT = Math.min(1, this.enterT + dt / ENTER_TIME);
+      const ex = exitOf(car, 1);
+      const door = new THREE.Vector3(this.pos.x + (ex.x - this.pos.x) * 0.55, this.pos.y, this.pos.z + (ex.z - this.pos.z) * 0.55);
+      door.y = this.world.terrain.heightAt(door.x, door.z);
+      const a = smooth(this.enterT / 0.32), b = smooth((this.enterT - 0.32) / 0.45);
+      const at = new THREE.Vector3().lerpVectors(this.enterFrom, door, a);
+      if (b > 0) at.lerpVectors(door, this.pos, b);
+      ch.root.position.copy(at);
+      const walkYaw = Math.atan2(door.x - this.enterFrom.x, door.z - this.enterFrom.z);
+      const far = Math.hypot(door.x - this.enterFrom.x, door.z - this.enterFrom.z) > 0.25;
+      rootYaw = b > 0 ? turnTo(far ? walkYaw : this.enterYaw ?? car.yaw, car.yaw, b) : turnTo(this.enterYaw ?? car.yaw, far ? walkYaw : car.yaw, smooth(a * 2));
+      sit = b;
+      if (a < 1 && far) walk = Math.hypot(door.x - this.enterFrom.x, door.z - this.enterFrom.z) / (ENTER_TIME * 0.32);
+      if (t0 < ENTER_SEATED && this.enterT >= ENTER_SEATED) this.camYaw = car.yaw;
     }
     const standing = car.kind === 'scooter'; // a scooter rider is on show, not in a cockpit
     ch.root.rotation.order = 'YXZ';
     ch.root.rotation.x = 0;
-    ch.root.rotation.y = this.yaw;
+    ch.root.rotation.y = rootYaw;
     ch.root.rotation.z = standing ? car.body?.r || 0 : 0; // lean with the deck
     ch.root.visible = true; // seen through the glass from the chase camera
     if (!standing) {
@@ -413,10 +495,12 @@ export class Player {
     ch.steer = car.steer || 0;
     this.updateCamera(dt, false, Math.abs(car.speed) > (standing ? 9 : 14), Math.abs(car.speed));
     this.updateAim();
+    const pose = driverPose(car);
     ch.update(dt, {
-      speed: 0, onGround: true, airTime: 0, strafe: false, localDir: this.localDir.set(0, 0, 1),
+      speed: walk, onGround: true, airTime: 0, strafe: false, localDir: this.localDir.set(0, 0, 1),
       jumpStarted: false, predictedAir: 0, aiming: false, aimPoint: this.aimPoint,
-      lookDir: this.lookDir(), crouch: 0, swimming: false, diving: false, seat: driverPose(car),
+      lookDir: this.lookDir(), crouch: 0, swimming: false, diving: false,
+      seat: pose && sit > 0.02 ? (sit < 1 ? { ...pose, blend: sit, duck: 1 } : pose) : null,
     });
     return { speed: Math.abs(car.speed), aiming: false, driving: true };
   }

@@ -75,6 +75,7 @@ class Remote {
     if (Number.isFinite(this.carId) && fleet) {
       const car = fleet.byId(this.carId);
       if (car) {
+        if (this.vehicle !== car) fleet.doorPulse?.(car, 0.5);
         this.vehicle = car;
         car.driver = this.fighter;
         car.remote = true;
@@ -92,6 +93,7 @@ class Remote {
     } else {
       if (this.vehicle) {
         if (this.vehicle.driver === this.fighter) this.vehicle.driver = null;
+        this.cars?.doorPulse?.(this.vehicle, 0.45);
         this.vehicle = null;
       }
       this.pos.copy(this.body);

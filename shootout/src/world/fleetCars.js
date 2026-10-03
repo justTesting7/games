@@ -197,28 +197,84 @@ function prepare(root) {
   const { hl, hw } = fitIntoBay(all);
   const group = new THREE.Group();
   group.name = root.name;
-  for (const key of ['paint', 'trim', 'metal', 'tyre', 'head', 'tail']) {
-    const geo = merge(buckets[key]);
-    if (!geo) continue;
-    const mesh = new THREE.Mesh(geo, MATERIALS[key]);
-    mesh.name = key;
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-    group.add(mesh);
-  }
   const glassGeo = merge(buckets.glass);
   const paneGeos = glassGeo ? splitGlass(glassGeo) : {};
   glassGeo?.dispose();
   const paneBoxes = {};
+  for (const [name, geo] of Object.entries(paneGeos)) paneBoxes[name] = boxOf(geo.attributes.position.array);
+  // the driver's door (the left, +x side: left-hand drive), cut out of the body along the
+  // front side window, hinged at its front edge so it can swing open
+  const win = paneBoxes.leftF;
+  const door = win ? { x0: hw * 0.45, z0: win.z0 - 0.04, z1: win.z1 + 0.06, y0: 0.18, y1: win.y1 + 0.02 } : null;
+  const doorGroup = door ? new THREE.Group() : null;
+  if (doorGroup) {
+    doorGroup.name = 'door';
+    doorGroup.position.set(hw, 0, door.z1);
+    group.add(doorGroup);
+  }
+  const add = (geo, material, name, shadow) => {
+    let parent = group;
+    if (door) {
+      const [inside, rest] = splitBox(geo, door);
+      if (inside) {
+        inside.translate(-hw, 0, -door.z1);
+        const m = new THREE.Mesh(inside, material);
+        m.name = name; m.castShadow = shadow; m.receiveShadow = true;
+        doorGroup.add(m);
+      }
+      geo = rest;
+      if (!geo) return;
+    }
+    const mesh = new THREE.Mesh(geo, material);
+    mesh.name = name;
+    mesh.castShadow = shadow;
+    mesh.receiveShadow = true;
+    parent.add(mesh);
+  };
+  for (const key of ['paint', 'trim', 'metal', 'tyre', 'head', 'tail']) {
+    const geo = merge(buckets[key]);
+    if (geo) add(geo, MATERIALS[key], key, true);
+  }
   for (const [name, geo] of Object.entries(paneGeos)) {
+    if (name === 'leftF' && doorGroup) { // the window goes with the door, whole
+      geo.translate(-hw, 0, -door.z1);
+      const m = new THREE.Mesh(geo, glass);
+      m.name = `pane-${name}`; m.castShadow = false; m.receiveShadow = true;
+      doorGroup.add(m);
+      continue;
+    }
     const mesh = new THREE.Mesh(geo, glass);
     mesh.name = `pane-${name}`;
     mesh.castShadow = false;
     mesh.receiveShadow = true;
     group.add(mesh);
-    paneBoxes[name] = boxOf(geo.attributes.position.array);
   }
   return { name: root.name, group, hl, hw, paneBoxes, metalBoxes: metalOf(paneBoxes, hl, hw) };
+}
+
+// Splits a non-indexed geometry by triangle centre: inside the box, and the rest.
+function splitBox(geo, b) {
+  const pos = geo.attributes.position.array, nor = geo.attributes.normal.array;
+  const inIdx = [], outIdx = [];
+  for (let i = 0; i + 8 < pos.length; i += 9) {
+    const x = (pos[i] + pos[i + 3] + pos[i + 6]) / 3, y = (pos[i + 1] + pos[i + 4] + pos[i + 7]) / 3, z = (pos[i + 2] + pos[i + 5] + pos[i + 8]) / 3;
+    (x > b.x0 && y > b.y0 && y < b.y1 && z > b.z0 && z < b.z1 ? inIdx : outIdx).push(i);
+  }
+  if (!inIdx.length) return [null, geo];
+  const make = (idx) => {
+    if (!idx.length) return null;
+    const p = new Float32Array(idx.length * 9), n = new Float32Array(idx.length * 9);
+    idx.forEach((s, k) => { p.set(pos.subarray(s, s + 9), k * 9); n.set(nor.subarray(s, s + 9), k * 9); });
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(p, 3));
+    g.setAttribute('normal', new THREE.BufferAttribute(n, 3));
+    g.userData.shared = true;
+    g.computeBoundingSphere();
+    return g;
+  };
+  const res = [make(inIdx), make(outIdx)];
+  geo.dispose();
+  return res;
 }
 
 /** Styles from an already-parsed scene (the bake test uses this). */
@@ -248,6 +304,7 @@ export function placeFleet(spots) {
     return {
       x: spot.x, z: spot.z, y: spot.y, yaw: spot.yaw,
       hl: tpl.hl, hw: tpl.hw, mesh, panes, paneBoxes: tpl.paneBoxes, metalBoxes: tpl.metalBoxes,
+      door: mesh.getObjectByName('door') || null,
     };
   });
 }

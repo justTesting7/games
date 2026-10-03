@@ -1434,6 +1434,7 @@ export class Rival {
     const door = exitOf(car, 1);
     const to = new THREE.Vector3(door.x - this.pos.x, 0, door.z - this.pos.z);
     if (to.length() < 1.3) {
+      this.world.cars?.doorPulse?.(car, 0.5);
       car.driver = this.fighter;
       car.ai = { throttle: 0, steer: 0, handbrake: false };
       this.seatedIn = car;
@@ -1505,7 +1506,7 @@ export class Rival {
     const car = d.car;
     if (car.claim?.f === this.fighter) car.claim = null;
     if (failed) (this.badCars || (this.badCars = new Map())).set(car, this.combat.time + 40);
-    if (car.driver === this.fighter) car.driver = null;
+    if (car.driver === this.fighter) { car.driver = null; this.world.cars?.doorPulse?.(car, 0.45); }
     car.ai = null;
     if (this.seatedIn === car) {
       this.standUp();

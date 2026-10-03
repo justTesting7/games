@@ -422,6 +422,20 @@ export class Audio {
     }
   }
 
+  // A car door: the latch clicks and the hinge creaks a little opening; shutting, a heavy
+  // thunk of the panel into its seal and the latch catching. k 0..1 by distance.
+  door(kind, k = 1) {
+    if (!this.ctx || k < 0.02) return;
+    if (kind === 'open') {
+      this.noiseBurst({ freq: 2600, q: 3, type: 'bandpass', gain: 0.12 * k, attack: 0.002, release: 0.04 });
+      this.noiseBurst({ freq: 900, q: 6, type: 'bandpass', gain: 0.03 * k, attack: 0.05, release: 0.25, rate: 0.6 });
+    } else {
+      this.noiseBurst({ freq: 140, q: 0.8, type: 'lowpass', gain: 0.55 * k, attack: 0.004, release: 0.22, send: 0.2 });
+      this.noiseBurst({ freq: 420, q: 1.2, type: 'bandpass', gain: 0.2 * k, attack: 0.003, release: 0.09 });
+      this.noiseBurst({ freq: 3200, q: 3, type: 'bandpass', gain: 0.06 * k, attack: 0.002, release: 0.03 });
+    }
+  }
+
   // Tyres sliding on asphalt: a narrow, pitched hiss; k 0..1 by how hard.
   squeal(k = 1) {
     if (!this.ctx) return;
