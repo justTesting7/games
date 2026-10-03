@@ -216,13 +216,12 @@ export class Audio {
     e.p.pan.setTargetAtTime(s.pan || 0, now, 0.1);
   }
 
-  // A car: a four-cylinder petrol engine, 1.6 litres or so. One engine cycle (two turns of
-  // the crank) holds four combustion pulses, each cylinder a little different, so the
-  // sound throbs at the cycle rate under its firing note (rpm / 30: ~27 Hz at idle, ~200 Hz
-  // near the red line) instead of buzzing like a pure tone. The exhaust shapes it (a boom
-  // in the body, a pipe resonance, the muffler opening with the throttle); the intake roars
-  // under load, pulsing with the firing; a gearbox whines faintly; the tyres hiss on the
-  // road with speed. Five gears, shifting up under load (the revs drop, then climb again).
+  // A car: a big V8, heavy and low. One engine cycle (two turns of the crank) holds eight
+  // rounded combustion pulses, the two banks' unequal (the cross-plane burble), so it
+  // rumbles at the cycle rate under its firing note (rpm / 15: ~43 Hz at idle). The
+  // exhaust shapes it: a deep boom, a low-mid body and a muffler that stays dark until the
+  // throttle opens it; the intake growls under load; tall gears keep the revs low; the
+  // tyres hiss on the road with speed.
   carEngine(slot, s) {
     const ctx = this.ctx, now = ctx.currentTime;
     this.cars = this.cars || [];
@@ -235,17 +234,17 @@ export class Audio {
       const pre = ctx.createGain(); pre.gain.value = 1;
       const drive = ctx.createWaveShaper();
       const curve = new Float32Array(1024);
-      for (let i = 0; i < 1024; i++) { const x = i / 512 - 1; curve[i] = Math.tanh(x * 2.4) / Math.tanh(2.4); }
+      for (let i = 0; i < 1024; i++) { const x = i / 512 - 1; curve[i] = Math.tanh(x * 1.6) / Math.tanh(1.6); }
       drive.curve = curve;
       drive.oversample = '2x';
-      const boom = ctx.createBiquadFilter(); boom.type = 'peaking'; boom.frequency.value = 95; boom.Q.value = 1.2; boom.gain.value = 8;
-      const pipe = ctx.createBiquadFilter(); pipe.type = 'peaking'; pipe.frequency.value = 380; pipe.Q.value = 1.8; pipe.gain.value = 5;
+      const boom = ctx.createBiquadFilter(); boom.type = 'lowshelf'; boom.frequency.value = 110; boom.gain.value = 11;
+      const pipe = ctx.createBiquadFilter(); pipe.type = 'peaking'; pipe.frequency.value = 190; pipe.Q.value = 1.1; pipe.gain.value = 5;
       const muffler = ctx.createBiquadFilter(); muffler.type = 'lowpass'; muffler.Q.value = 0.7;
       const hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 28;
       // intake roar: noise through a band, opened and closed at the firing rate
       const noise = ctx.createBufferSource();
       noise.buffer = this.noise; noise.loop = true;
-      const roarBand = ctx.createBiquadFilter(); roarBand.type = 'bandpass'; roarBand.frequency.value = 700; roarBand.Q.value = 0.9;
+      const roarBand = ctx.createBiquadFilter(); roarBand.type = 'bandpass'; roarBand.frequency.value = 350; roarBand.Q.value = 0.7;
       const roarGate = ctx.createGain(); roarGate.gain.value = 0.5;
       const fireLfo = ctx.createOscillator(); fireLfo.type = 'triangle';
       const lfoDepth = ctx.createGain(); lfoDepth.gain.value = 0.45;
@@ -281,55 +280,56 @@ export class Audio {
     const v = Math.abs(s.speed), thr = Math.max(0, Math.min(1, s.throttle || 0));
     e.load += (thr - e.load) * Math.min(1, dt * 8);
     // the gearbox: wheel turns to engine revs through the gear and the final drive
-    const RATIO = [0, 3.6, 2.1, 1.42, 1.06, 0.85], wheel = (v / (2 * Math.PI * 0.31)) * 60 * 4.1;
-    const upAt = 2600 + 3200 * e.load, downAt = 1350 + 900 * e.load;
+    const RATIO = [0, 2.97, 2.07, 1.43, 1.0, 0.84], wheel = (v / (2 * Math.PI * 0.33)) * 60 * 3.4;
+    const upAt = 2100 + 3000 * e.load, downAt = 1100 + 800 * e.load;
     if (e.shift > 0) e.shift -= dt;
     else if (e.gear < 5 && wheel * RATIO[e.gear] > upAt) { e.gear++; e.shift = 0.22; }
     else if (e.gear > 1 && wheel * RATIO[e.gear] < downAt) { e.gear--; e.shift = 0.15; }
     if (v < 0.3) e.gear = 1;
     // pulling away the clutch slips: the revs sit above what the wheels give
-    const idle = 820, geared = wheel * RATIO[e.gear], slip = idle + 1400 * e.load;
+    const idle = 650, geared = wheel * RATIO[e.gear], slip = idle + 1300 * e.load;
     let target = e.gear === 1 && geared < slip ? Math.max(geared, slip * Math.min(1, 0.6 + v * 0.2)) : geared;
-    target = Math.max(idle, Math.min(6600, target));
+    target = Math.max(idle, Math.min(5800, target));
     if (e.shift > 0) target *= 0.92; // the throttle lifts through a shift
     e.rpm += (target - e.rpm) * Math.min(1, dt * (target > e.rpm ? 6 + 6 * e.load : 5));
-    const wob = e.rpm < 1100 ? 1 + 0.03 * Math.sin(now * 7.3) * Math.sin(now * 2.1) : 1; // an idle never quite steady
+    const wob = e.rpm < 950 ? 1 + 0.035 * Math.sin(now * 5.3) * Math.sin(now * 1.7) : 1; // a lopey idle
     const rpm = e.rpm * wob, cycle = rpm / 120;
     const load = e.shift > 0 ? e.load * 0.3 : e.load;
     e.osc.frequency.setTargetAtTime(cycle, now, 0.02);
-    e.fireLfo.frequency.setTargetAtTime(rpm / 30, now, 0.02);
-    e.pre.gain.setTargetAtTime(0.6 + 1.6 * load, now, 0.05);           // pulls hard: the pulses crackle
-    e.muffler.frequency.setTargetAtTime(380 + rpm * 0.18 + load * 1700, now, 0.05);
-    e.pipe.frequency.setTargetAtTime(300 + rpm * 0.025, now, 0.1);
-    e.roarBand.frequency.setTargetAtTime(450 + rpm * 0.16, now, 0.06);
-    e.roar.gain.setTargetAtTime((0.02 + 0.16 * load) * Math.min(1, rpm / 3000), now, 0.06);
+    e.fireLfo.frequency.setTargetAtTime(rpm / 15, now, 0.02);
+    e.pre.gain.setTargetAtTime(0.55 + 1.0 * load, now, 0.05);          // pulls hard: it growls
+    e.muffler.frequency.setTargetAtTime(170 + rpm * 0.09 + load * 1000, now, 0.05);
+    e.pipe.frequency.setTargetAtTime(150 + rpm * 0.015, now, 0.1);
+    e.roarBand.frequency.setTargetAtTime(240 + rpm * 0.07, now, 0.06);
+    e.roar.gain.setTargetAtTime((0.015 + 0.09 * load) * Math.min(1, rpm / 2500), now, 0.06);
     e.whine.frequency.setTargetAtTime((rpm / 60) * 7.3, now, 0.03);
-    e.whineG.gain.setTargetAtTime(Math.min(0.012, v * 0.0006) * (e.gear <= 2 ? 1 : 0.4), now, 0.1);
+    e.whineG.gain.setTargetAtTime(Math.min(0.005, v * 0.0003) * (e.gear <= 2 ? 1 : 0.4), now, 0.1);
     e.roadG.gain.setTargetAtTime(slot === 0 ? Math.min(0.09, v * v * 0.00012) : 0, now, 0.2);
     const far = s.dist > 1 ? s.dist : 0;
     e.air.frequency.setTargetAtTime(far ? Math.max(1200, 16000 - far * 260) : 16000, now, 0.2);
     const att = far ? Math.min(1, 7 / far) : 1;
-    e.g.gain.setTargetAtTime((0.1 + 0.08 * load + 0.03 * Math.min(1, rpm / 5000)) * att, now, 0.06);
+    e.g.gain.setTargetAtTime((0.13 + 0.09 * load + 0.03 * Math.min(1, rpm / 4500)) * att, now, 0.06);
     e.p.pan.setTargetAtTime(s.pan || 0, now, 0.1);
   }
 
-  // One cycle of a four-cylinder engine: four combustion pulses (a sharp rise, a decay, a
-  // little rebound), each cylinder's a bit stronger or weaker and a hair early or late.
+  // One cycle of a cross-plane V8: eight rounded pulses (a quick rise, a long decay, a soft
+  // rebound); the banks fire unevenly into their pipes, so the pulses alternate strong and
+  // weak in an irregular pattern, and each is a hair early or late.
   engineCycleWave() {
     if (this._cycleWave) return this._cycleWave;
     const N = 2048, x = new Float32Array(N);
-    const amp = [1, 0.86, 0.95, 0.8], late = [0, 0.006, -0.004, 0.009];
-    for (let c = 0; c < 4; c++) {
-      const start = (c / 4 + late[c]) * N;
+    const amp = [1, 0.7, 0.95, 1, 0.68, 0.92, 0.74, 0.7], late = [0, 0.004, -0.003, 0.006, -0.002, 0.005, 0.001, -0.004];
+    for (let c = 0; c < 8; c++) {
+      const start = (c / 8 + late[c]) * N;
       for (let i = 0; i < N; i++) {
-        let u = (i - start) / (N / 4); // in firing intervals
-        if (u < 0) u += 4;
-        x[i] += amp[c] * (Math.exp(-u / 0.13) * (1 - Math.exp(-u / 0.012)) - 0.35 * Math.exp(-u / 0.3) * (1 - Math.exp(-u / 0.08)));
+        let u = (i - start) / (N / 8); // in firing intervals
+        if (u < 0) u += 8;
+        x[i] += amp[c] * (Math.exp(-u / 0.24) * (1 - Math.exp(-u / 0.035)) - 0.3 * Math.exp(-u / 0.5) * (1 - Math.exp(-u / 0.15)));
       }
     }
     let mean = 0;
     for (const v of x) mean += v / N;
-    const H = 160, re = new Float32Array(H), im = new Float32Array(H);
+    const H = 120, re = new Float32Array(H), im = new Float32Array(H);
     for (let k = 1; k < H; k++) {
       let a = 0, b = 0;
       for (let i = 0; i < N; i++) { const w = (2 * Math.PI * k * i) / N, v = x[i] - mean; a += v * Math.cos(w); b += v * Math.sin(w); }
