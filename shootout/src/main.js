@@ -1224,7 +1224,7 @@ async function init() {
       terrain.update(elapsed);
       if (terrain.group.visible) terrain.updateLOD(camera.position);
       const viewPos = spec?.pos || player.pos;
-      if (grass) grass.update(elapsed, camera.position, viewPos);
+      if (grass) grass.update(elapsed, camera.position, viewPos, weapons.drone.flying ? null : camera); // (the drone sees round the player too)
       if (mapDef.vegetation) veg.update(elapsed, camera.position, false, camera.getWorldDirection(vegDir));
       if (city) city.update(dt, fx, camera);
       if (arena) arena.update(dt, fx, camera);

@@ -33,6 +33,7 @@ uniform float uWorldSize;
 uniform float uTime;
 uniform float uSpacing;
 uniform float uSide;
+uniform vec2 uTile;
 uniform float uInner;
 uniform float uOuter;
 uniform float uWidth;
@@ -52,10 +53,12 @@ float gNoise(vec2 p) {
 }
 `;
 
-// Blades sit on a grid snapped to the camera so they never swim as it moves.
+// Blades sit on a grid snapped to the camera so they never swim as it moves. The grid is
+// drawn a tile at a time (uTile: the tile's first cell, from the snapped centre), so the
+// tiles out of view or out of the ring's reach aren't drawn at all.
 const grassBegin = /* glsl */ `
 float gid = float(gl_InstanceID);
-vec2 cellIdx = vec2(mod(gid, uSide), floor(gid / uSide)) - uSide * 0.5;
+vec2 cellIdx = vec2(mod(gid, uSide), floor(gid / uSide)) + uTile;
 vec2 cell = floor(uCenter.xz / uSpacing) + cellIdx;
 float h1 = gHash(cell), h2 = gHash(cell + 17.31), h3 = gHash(cell + 41.7), h4 = gHash(cell + 7.77);
 vec2 root = (cell + vec2(h1, h2)) * uSpacing;
@@ -101,7 +104,7 @@ vGrassT = t;
 
 const grassNormal = /* glsl */ `
 float gid0 = float(gl_InstanceID);
-vec2 cell0 = floor(uCenter.xz / uSpacing) + vec2(mod(gid0, uSide), floor(gid0 / uSide)) - uSide * 0.5;
+vec2 cell0 = floor(uCenter.xz / uSpacing) + vec2(mod(gid0, uSide), floor(gid0 / uSide)) + uTile;
 float yaw0 = gHash(cell0 + 17.31) * 6.2831;
 vec3 bladeN = vec3(-sin(yaw0), 0.0, cos(yaw0));
 // Bias the normal towards the sky so the field shades like a soft volume.
@@ -123,61 +126,91 @@ export class Grass {
     };
     this.common = common;
     const rings = [
-      { spacing: 0.085, outer: 18, inner: 0, width: 0.045, height: 0.55, segments: 5, density: 1.0 },
-      { spacing: 0.2, outer: 48, inner: 14, width: 0.1, height: 0.6, segments: 3, density: 0.9 },
+      { spacing: 0.085, outer: 18, inner: 0, width: 0.045, height: 0.55, segments: 5, density: 1.0, tile: 6 },
+      { spacing: 0.2, outer: 48, inner: 14, width: 0.1, height: 0.6, segments: 3, density: 0.9, tile: 16 },
     ];
+    this.terrain = terrain;
+    this.tiles = [];
     for (const r of rings) {
       const spacing = r.spacing / Math.sqrt(quality);
-      const side = Math.ceil((r.outer * 2) / spacing);
+      const m = Math.ceil(r.tile / spacing); // cells along a tile
+      const n = Math.ceil((r.outer * 2) / (m * spacing)); // tiles along the ring's square
       const geo = bladeGeometry(r.segments);
-      geo.instanceCount = side * side;
-      const uniforms = {
+      geo.instanceCount = m * m;
+      const shared = {
         ...common,
         uSpacing: { value: spacing },
-        uSide: { value: side },
+        uSide: { value: m },
         uInner: { value: r.inner },
         uOuter: { value: r.outer },
         uWidth: { value: r.width * Math.sqrt(r.spacing / spacing) },
         uHeight: { value: r.height },
         uDensity: { value: r.density },
       };
-      const mat = new THREE.MeshStandardMaterial({ roughness: 0.55, metalness: 0, side: THREE.DoubleSide });
-      mat.onBeforeCompile = (shader) => {
-        Object.assign(shader.uniforms, uniforms);
-        shader.vertexShader = grassVertexPars + shader.vertexShader
-          .replace('#include <beginnormal_vertex>', grassNormal)
-          .replace('#include <begin_vertex>', grassBegin)
-          .replace('#include <project_vertex>', 'vec4 mvPosition = viewMatrix * vec4(transformed, 1.0); gl_Position = projectionMatrix * mvPosition;')
-          .replace('#include <worldpos_vertex>', 'vec4 worldPosition = vec4(transformed, 1.0);')
-          .replace('#include <defaultnormal_vertex>', 'vec3 transformedNormal = normalMatrix * objectNormal;')
-          .replace('#include <normal_vertex>', `
-            #ifndef FLAT_SHADED
-              vNormal = normalize(mat3(viewMatrix) * objectNormal);
-            #endif`);
-        shader.fragmentShader = `
-          varying vec3 vGrassColor;
-          varying float vGrassAO;
-          varying float vGrassT;
-        ` + shader.fragmentShader
-          .replace('#include <map_fragment>', 'diffuseColor.rgb = vGrassColor;')
-          .replace('#include <aomap_fragment>', `
-            reflectedLight.indirectDiffuse *= vGrassAO;
-            reflectedLight.directDiffuse *= mix(0.55, 1.0, vGrassAO);
-            reflectedLight.indirectSpecular *= vGrassAO;
-            reflectedLight.directDiffuse += reflectedLight.directDiffuse * vGrassT * 0.35;`);
-      };
-      mat.customProgramCacheKey = () => `grass-${r.segments}`;
-      const mesh = new THREE.Mesh(geo, mat);
-      mesh.frustumCulled = false;
-      mesh.receiveShadow = true;
-      this.meshes.push(mesh);
-      this.group.add(mesh);
+      for (let tz = 0; tz < n; tz++) for (let tx = 0; tx < n; tx++) {
+        // each tile its own material (one program for all): its first cell is its own uniform
+        const uniforms = { ...shared, uTile: { value: new THREE.Vector2(tx * m - (n * m) / 2, tz * m - (n * m) / 2) } };
+        const mat = new THREE.MeshStandardMaterial({ roughness: 0.55, metalness: 0, side: THREE.DoubleSide });
+        mat.onBeforeCompile = (shader) => {
+          Object.assign(shader.uniforms, uniforms);
+          shader.vertexShader = grassVertexPars + shader.vertexShader
+            .replace('#include <beginnormal_vertex>', grassNormal)
+            .replace('#include <begin_vertex>', grassBegin)
+            .replace('#include <project_vertex>', 'vec4 mvPosition = viewMatrix * vec4(transformed, 1.0); gl_Position = projectionMatrix * mvPosition;')
+            .replace('#include <worldpos_vertex>', 'vec4 worldPosition = vec4(transformed, 1.0);')
+            .replace('#include <defaultnormal_vertex>', 'vec3 transformedNormal = normalMatrix * objectNormal;')
+            .replace('#include <normal_vertex>', `
+              #ifndef FLAT_SHADED
+                vNormal = normalize(mat3(viewMatrix) * objectNormal);
+              #endif`);
+          shader.fragmentShader = `
+            varying vec3 vGrassColor;
+            varying float vGrassAO;
+            varying float vGrassT;
+          ` + shader.fragmentShader
+            .replace('#include <map_fragment>', 'diffuseColor.rgb = vGrassColor;')
+            .replace('#include <aomap_fragment>', `
+              reflectedLight.indirectDiffuse *= vGrassAO;
+              reflectedLight.directDiffuse *= mix(0.55, 1.0, vGrassAO);
+              reflectedLight.indirectSpecular *= vGrassAO;
+              reflectedLight.directDiffuse += reflectedLight.directDiffuse * vGrassT * 0.35;`);
+        };
+        mat.customProgramCacheKey = () => `grass-${r.segments}`;
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.frustumCulled = false; // culled here, by tile (see update)
+        mesh.receiveShadow = true;
+        this.meshes.push(mesh);
+        this.group.add(mesh);
+        this.tiles.push({ mesh, tx, tz, m, n, spacing, inner: r.inner, outer: r.outer });
+      }
     }
+    this._frustum = new THREE.Frustum();
+    this._m = new THREE.Matrix4();
+    this._s = new THREE.Sphere();
   }
 
-  update(time, center, player) {
+  /** camera (optional): tiles out of its view, or out of their ring's reach, aren't drawn. */
+  update(time, center, player, camera = null) {
     this.common.uTime.value = time;
     this.common.uCenter.value.copy(center);
     if (player) this.common.uPlayer.value.copy(player);
+    const F = this._frustum;
+    if (camera) F.setFromProjectionMatrix(this._m.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
+    for (const t of this.tiles) {
+      const sp = t.spacing, size = t.m * sp;
+      const x0 = (Math.floor(center.x / sp) + t.tx * t.m - (t.n * t.m) / 2) * sp;
+      const z0 = (Math.floor(center.z / sp) + t.tz * t.m - (t.n * t.m) / 2) * sp;
+      const cx = x0 + size / 2, cz = z0 + size / 2;
+      // the nearest and farthest the tile's ground comes to the centre
+      const nx = Math.max(x0 - center.x, 0, center.x - (x0 + size)), nz = Math.max(z0 - center.z, 0, center.z - (z0 + size));
+      const fx = Math.max(Math.abs(x0 - center.x), Math.abs(x0 + size - center.x)), fz = Math.max(Math.abs(z0 - center.z), Math.abs(z0 + size - center.z));
+      let on = Math.hypot(nx, nz) < t.outer && Math.hypot(fx, fz) > t.inner;
+      if (on && camera) {
+        this._s.center.set(cx, this.terrain.heightAt(cx, cz) + 0.5, cz);
+        this._s.radius = size * 0.71 + 3;
+        on = F.intersectsSphere(this._s);
+      }
+      t.mesh.visible = on;
+    }
   }
 }
