@@ -152,6 +152,7 @@ export async function loadDizengoff(renderer, folder = 'dizengoff-center', { sta
     },
     heightAt,
     lamps,
+    nav, // (the street map is drawn from its collision boxes)
     cameraFar: FAR_DISTANCE,
     addColliders: (colliders) => {
       for (const c of pitchProps?.colliders || []) colliders.add(c);

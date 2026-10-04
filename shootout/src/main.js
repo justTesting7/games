@@ -13,6 +13,7 @@ import { Arena } from './world/arena.js';
 import { arenaHeightAt, standSpawn } from './world/arenaLayout.js';
 import { studioRivalSpots, blockedAt } from './world/glbMap.js';
 import { dealPlazas, loadDizengoff } from './world/dizengoff.js';
+import { buildMinimap, drawMinimap } from './game/minimap.js';
 import { seeded } from './world/rivalSpots.js';
 import { buildLab, LAB } from './world/lab.js';
 import { NightLights } from './world/nightLights.js';
@@ -436,6 +437,7 @@ async function init() {
   if (mapDef.id === 'city' || mapDef.id === 'manhattan') city = new City(terrain, veg.colliders, pipeline);
   if (garden) arena = new Arena(terrain, veg.colliders, pipeline);
   let studio = null;
+  let minimap = null, minimapT = 0; // the street map (city maps)
   const fighters = mode === 'solo'
     ? [selection.player, ...selection.rivals].map(byId)
     : [byId(selection.player)];
@@ -452,6 +454,7 @@ async function init() {
         : await loadDizengoff(pipeline.renderer, mapDef.cityFolder, { stadiumStart: !!mapDef.stadiumStart });
       if (studio.cameraFar) { camera.far = studio.cameraFar; camera.updateProjectionMatrix(); }
       studioHeight = studio.heightAt;
+      if (studio.nav?.boxes?.length > 20 && mapDef.cityFolder) { minimap = buildMinimap(studio.nav); $('minimap').classList.remove('hidden'); }
       studio.addColliders(veg.colliders);
       pipeline.scene.add(studio.group);
       // the city stands still: no matrix of it is recomposed per frame
@@ -1357,6 +1360,8 @@ async function init() {
       time: elapsed,
     });
     $('radar').classList.toggle('scoped', scoped);
+    if (minimap && (minimapT = (minimapT || 0) + 1) % 2 === 0) { drawMinimap($('minimapcanvas'), minimap, { x: radarSelf.pos.x, z: radarSelf.pos.z, yaw: radarYaw }); }
+    $('minimap').classList.toggle('scoped', scoped);
     setStyle($('damage'), 'opacity', spec ? 0 : +Math.max(hurt, alive ? Math.max(0, (45 - hp) / 45) * 0.45 : 0.7).toFixed(2));
     if (spec && (round.state === 'fight' || (mode === 'solo' && round.state === 'over'))) {
       const who = spec.persona?.name || spec.fighter.name;

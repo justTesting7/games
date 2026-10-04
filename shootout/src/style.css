@@ -87,6 +87,11 @@ html, body {
   opacity: 0.65; text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
 }
 #radar.scoped { opacity: 0.22; }
+/* the street map, bottom left above the health bar */
+#minimap { position: absolute; left: 24px; bottom: 112px; width: 176px; height: 176px; filter: drop-shadow(0 6px 16px rgba(0, 0, 0, 0.55)); }
+#minimap canvas { width: 176px; height: 176px; display: block; border-radius: 50%; }
+#minimap.hidden { display: none; }
+#minimap.scoped { opacity: 0.22; }
 
 #health, #weapon, #round {
   position: absolute; display: flex; flex-direction: column;
