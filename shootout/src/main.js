@@ -715,7 +715,9 @@ async function init() {
     }
     if (studio?.plazas?.length && mode === 'solo') {
       // anywhere in the city (a fresh deal every round), the three plazas only as a fallback
-      const spots = studio.scatter?.(rivals.length + 1) || dealPlazas(studio.plazas, rivals.length + 1);
+      // each next to a free car of its own (not a two-wheeler, not burnt out)
+      const free = cars.list.filter((c) => !c.spec && !c.wrecked && !c.driver);
+      const spots = studio.scatter?.(rivals.length + 1, free) || dealPlazas(studio.plazas, rivals.length + 1);
       player.spawn(spots[0].x, spots[0].z, spots[0].yaw);
       player.vel.set(0, 0, 0);
       rivals.forEach((r, i) => r.spawn(spots[i + 1].x, spots[i + 1].z, spots[i + 1].yaw));

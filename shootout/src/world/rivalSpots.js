@@ -52,21 +52,47 @@ export function slotSpawns(spots, count = 16) {
 /**
  * Solo starts anywhere in a big city: the player at a random open spot, each rival 70-300 m
  * from them and 55 m or more from the others (looser, a step at a time, when the spots
- * can't fit them all). The player faces roughly toward the rivals, each rival roughly
- * toward the player. spots: [[x, z], ...]. Returns [{ x, z, yaw }] (the player first) or null.
+ * can't fit them all). With `cars` ([{ x, z }]: the free drivable cars), only spots with
+ * one of them within `reach` m count, and each start claims its own (start.car, an index).
+ * The player faces roughly toward the rivals, each rival roughly toward the player.
+ * spots: [[x, z], ...]. Returns [{ x, z, yaw, car? }] (the player first) or null.
  */
-export function scatterStarts(spots, count, rand = Math.random, { near = 70, far = 300, apart = 55 } = {}) {
-  if (!spots?.length || spots.length < count) return null;
-  const pick = () => spots[Math.floor(rand() * spots.length)];
-  const [px, pz] = pick();
-  const out = [{ x: px, z: pz }];
+export function scatterStarts(spots, count, rand = Math.random, { near = 70, far = 300, apart = 55, cars = null, reach = 14 } = {}) {
+  if (!spots?.length) return null;
+  const used = new Set();
+  // the free car nearest (x, z) within reach, or -1
+  const carAt = (x, z) => {
+    if (!cars) return -2;
+    let best = -1, bd = reach;
+    for (let i = 0; i < cars.length; i++) {
+      if (used.has(i)) continue;
+      const d = Math.hypot(cars[i].x - x, cars[i].z - z);
+      if (d < bd) { bd = d; best = i; }
+    }
+    return best;
+  };
+  const pool = cars ? spots.filter(([x, z]) => cars.some((c) => Math.hypot(c.x - x, c.z - z) < reach)) : spots;
+  if (pool.length < count) return null;
+  const pick = () => pool[Math.floor(rand() * pool.length)];
+  const take = (x, z) => {
+    const c = carAt(x, z);
+    if (c === -1) return null;
+    if (c >= 0) used.add(c);
+    return c >= 0 ? { x, z, car: c } : { x, z };
+  };
+  let first = null;
+  for (let tries = 0; !first && tries < 200; tries++) first = take(...pick());
+  if (!first) return null;
+  const out = [first];
+  const { x: px, z: pz } = first;
   for (let tries = 0; out.length < count && tries < 4000; tries++) {
     const k = Math.max(0.3, 1 - Math.floor(tries / 500) * 0.12);
     const [x, z] = pick();
     const d = Math.hypot(x - px, z - pz);
     if (d < near * k || d > far / k) continue;
     if (out.some((o) => Math.hypot(x - o.x, z - o.z) < apart * k)) continue;
-    out.push({ x, z });
+    const s = take(x, z);
+    if (s) out.push(s);
   }
   if (out.length < count) return null;
   let cx = 0, cz = 0;
