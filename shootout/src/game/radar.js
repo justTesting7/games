@@ -47,6 +47,13 @@ function fitCanvas(canvas) {
   return size;
 }
 
+// How close: red within ~15 m, through orange and yellow, to green past ~250 m (the scale
+// spends more of its range on the near distances, where it matters).
+export function distanceColor(dist) {
+  const t = Math.sqrt(Math.min(1, Math.max(0, (dist - 15) / 235)));
+  return `hsl(${Math.round(t * 120)}, 90%, 52%)`;
+}
+
 export function drawRadar(canvas, { blips = [], range = RADAR_RANGE, time = 0 } = {}) {
   if (!canvas) return;
   const size = fitCanvas(canvas);
@@ -100,7 +107,7 @@ export function drawRadar(canvas, { blips = [], range = RADAR_RANGE, time = 0 } 
   for (const b of blips) {
     const px = cx + b.x * scale;
     const py = cx - b.y * scale;
-    ctx.fillStyle = b.color;
+    ctx.fillStyle = Number.isFinite(b.dist) ? distanceColor(b.dist) : b.color;
     ctx.strokeStyle = 'rgba(0, 0, 0, 0.65)';
     ctx.lineWidth = Math.max(1, size * 0.01);
     if (b.edge) {
@@ -123,23 +130,13 @@ export function drawRadar(canvas, { blips = [], range = RADAR_RANGE, time = 0 } 
       ctx.fill();
       ctx.stroke();
     }
-    // the initial and how far away they are; near the rim the label sits on the inside of
-    // the blip (outside the circle it would be cut off)
     const mark = (b.name || '?').trim().charAt(0).toUpperCase();
-    const far = Number.isFinite(b.dist) ? `${Math.round(b.dist)}m` : '';
-    if (mark || far) {
-      const r = Math.hypot(px - cx, py - cx);
-      let lx = px, ly = py + size * 0.075;
-      if (r > rr * 0.62) { lx = px - ((px - cx) / r) * size * 0.11; ly = py - ((py - cx) / r) * size * 0.11; }
+    if (mark) {
+      ctx.fillStyle = '#fff8e8';
+      ctx.font = `700 ${Math.round(size * 0.07)}px "Segoe UI", system-ui, sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.lineWidth = Math.max(2, size * 0.02);
-      ctx.strokeStyle = 'rgba(0, 0, 0, 0.75)';
-      ctx.fillStyle = '#fff8e8';
-      ctx.font = `700 ${Math.round(size * 0.062)}px "Segoe UI", system-ui, sans-serif`;
-      const text = mark && far ? `${mark} ${far}` : mark || far;
-      ctx.strokeText(text, lx, ly);
-      ctx.fillText(text, lx, ly);
+      ctx.fillText(mark, px, py + size * 0.055);
     }
   }
 
