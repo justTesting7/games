@@ -100,6 +100,27 @@ export function addNavColliders(nav, colliders, heightAt, noRay = false) {
  * Dizengoff Center: the optimised city set (set.glb) plus its far skyline
  * (far.glb), walked on the baked height/collision grid.
  */
+function fillPatch(r, heightAt) {
+  const STEP = 6, nx = Math.ceil((r.x1 - r.x0) / STEP), nz = Math.ceil((r.z1 - r.z0) / STEP);
+  const pos = [], idx = [];
+  for (let j = 0; j <= nz; j++) for (let i = 0; i <= nx; i++) {
+    const x = Math.min(r.x1, r.x0 + i * STEP), z = Math.min(r.z1, r.z0 + j * STEP);
+    pos.push(x, heightAt(x, z) - 0.06, z);
+  }
+  for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) {
+    const a = j * (nx + 1) + i, b = a + 1, c = a + nx + 1, d = c + 1;
+    idx.push(a, c, b, b, c, d);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: 0x5d636a, roughness: 0.9, metalness: 0 }));
+  m.name = 'fill-ground';
+  m.receiveShadow = true;
+  return m;
+}
+
 export async function loadDizengoff(renderer, folder = 'dizengoff-center', { stadiumStart = false } = {}) {
   const group = new THREE.Group();
   group.name = `city-${folder}`;
@@ -116,6 +137,8 @@ export async function loadDizengoff(renderer, folder = 'dizengoff-center', { sta
     o.castShadow = !NO_CAST.test(o.name);
   });
   city.far.traverse((o) => { if (o.isMesh) o.frustumCulled = false; });
+  // gaps no district covers: a plain street patch at the baked heights (see CITY_PARTS.fill)
+  for (const r of cityPartsOf(folder)?.fill || []) group.add(fillPatch(r, makeNavHeight(nav)));
   const stadium = nav.stadium ? buildStadium(THREE, city.set, nav.stadium, nav.stadium.floorY) : null;
   if (stadium) group.add(stadium.group);
   const pitchProps = nav.stadium?.pitch ? buildPitchProps(nav.stadium.pitch) : null;

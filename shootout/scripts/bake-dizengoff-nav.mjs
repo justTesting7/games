@@ -170,6 +170,30 @@ if (seatTris.length) {
   console.log('stadium centre', c, 'floor', floorY, 'toe r', Math.min(...profile.toe).toFixed(0) + '-' + Math.max(...profile.toe).toFixed(0), 'cells', stamped);
 }
 
+// ground where no set has any (the parts' fill rects): heights interpolated from the nearest
+// ground up and down each column (else along the row), so the gap is walkable
+if (partsDef?.fill) {
+  let filled = 0;
+  const known = (i, j) => i >= 0 && j >= 0 && i < W && j < H && ground[j * W + i] > -1e8;
+  for (const r of partsDef.fill) {
+    const i0 = Math.max(0, Math.floor((r.x0 - X0) / CELL)), i1 = Math.min(W - 1, Math.ceil((r.x1 - X0) / CELL));
+    const j0 = Math.max(0, Math.floor((r.z0 - Z0) / CELL)), j1 = Math.min(H - 1, Math.ceil((r.z1 - Z0) / CELL));
+    const patch = new Map();
+    for (let i = i0; i <= i1; i++) for (let j = j0; j <= j1; j++) {
+      if (known(i, j)) continue;
+      let a = j - 1; while (a >= 0 && j - a < 400 && !known(i, a)) a--;
+      let b = j + 1; while (b < H && b - j < 400 && !known(i, b)) b++;
+      const hasA = known(i, a), hasB = known(i, b);
+      let y = null;
+      if (hasA && hasB) y = ground[a * W + i] + (ground[b * W + i] - ground[a * W + i]) * ((j - a) / (b - a));
+      else if (hasA || hasB) y = ground[(hasA ? a : b) * W + i];
+      if (y !== null) patch.set(j * W + i, y);
+    }
+    for (const [k, y] of patch) { ground[k] = y; filled++; }
+  }
+  console.log('filled ground cells', filled);
+}
+
 // cars: cluster the paint triangles into vehicles, one drivable car each
 const cars = [];
 // what of the car paint isn't one of them (a car on a deck or a roof, a van or a bus out of

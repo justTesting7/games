@@ -29,6 +29,9 @@ export const CITY_PARTS = {
       // Rothschild: also an 800 m tile, three chunks
       { folder: 'rothschild', offset: [155.75, 11.05, 1008.7], half: 404, drop: 0.02, files: ['set.glb', 'set-2.glb', 'set-3.glb'] },
     ],
+    // holes no set's ground covers (found from the tiles' union): filled with a plain street
+    // patch, heights interpolated from the edges (the bake) and drawn to match (dizengoff.js)
+    fill: [{ x0: 110, x1: 320, z0: 480, z1: 600 }],
     spill: 35, // buildings reach this far past the tile edge
     // where rounds start (solo deals one at random; multiplayer slots go round them).
     // The nav bake keeps the three parked cars nearest each one drivable.
