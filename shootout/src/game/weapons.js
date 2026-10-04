@@ -147,6 +147,7 @@ export class Weapons {
     if (f.character.weapon !== def.key) return false;
     L.reloadT = def.reload;
     f.character.startAction(def.key === 'rifle' ? 'reload' : 'pistolReload', def.reload);
+    if (f === this.player?.fighter) this.player.aimHold = 0; // reloading on the run: free to sprint
     f.character.reloadCues = def.key === 'rifle'
       ? [[0.38, 'boltBack'], [0.8, 'round'], [1.1, 'round'], [1.4, 'round'], [1.7, 'round'], [2.0, 'round'], [2.32, 'boltFwd']]
       : [[0.18, 'magOut'], [0.96, 'magIn'], [1.28, 'slide']];
@@ -812,7 +813,8 @@ export class Weapons {
         ? this.queued > 0 && !input.fire
         : (def.auto && input.fire) || this.queued > 0;
       if (firing) {
-        this.player.aimHold = 1.2;
+        // (pulling the trigger mid-reload doesn't raise the guns: it would hold you to a walk)
+        if (!L.reloading) this.player.aimHold = 1.2;
         const scopedShot = L.current === 'rifle' && (this.sniperWasScoped || this.player.scopeT > 0.4);
         const ready = scopedShot
           ? ch.weapon === 'rifle' && ch.equipT >= 1

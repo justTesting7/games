@@ -191,7 +191,7 @@ export class Player {
     if (moving) {
       if (this.crouching) target = SPEED.crouch;
       else if (this.scoped) target = SPEED.aimWalk;
-      else if (aiming) target = input.sprint ? SPEED.aim : (this.walkMode ? SPEED.aimWalk : SPEED.aim * 0.85);
+      else if (aiming && !reloading) target = input.sprint ? SPEED.aim : (this.walkMode ? SPEED.aimWalk : SPEED.aim * 0.85);
       else target = input.sprint ? SPEED.sprint : this.walkMode ? SPEED.walk : SPEED.jog;
       if (stick < 0.98) target *= stick;
       if (this.character.stagger > 0) target *= 0.45; // shot in the leg
