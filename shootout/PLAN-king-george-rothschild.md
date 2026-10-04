@@ -1,4 +1,4 @@
-# Add King George (and maybe Rothschild) to Tel Aviv
+# Add King George and Rothschild to Tel Aviv (both done except the deploy: only verify seams/fps + deploy remain)
 
 State: raw exports sit untracked at `public/assets/maps/king george/` (set 134 MB, far 1 MB) and `public/assets/maps/rotschild/` (set 150 MB). Cloudflare rejects files over 25 MiB, so they must not be deployed raw.
 Do the same as for Habima/Frishman (commits 1653e7f, 32e92bc). Commit to main each step, restart the dev server (`.claude/launch.json`).
