@@ -48,3 +48,31 @@ export function slotSpawns(spots, count = 16) {
   }
   return chosen.map(([x, z]) => ({ x, z, yaw: Math.atan2(cx - x, cz - z) }));
 }
+
+/**
+ * Solo starts anywhere in a big city: the player at a random open spot, each rival 70-300 m
+ * from them and 55 m or more from the others (looser, a step at a time, when the spots
+ * can't fit them all). The player faces roughly toward the rivals, each rival roughly
+ * toward the player. spots: [[x, z], ...]. Returns [{ x, z, yaw }] (the player first) or null.
+ */
+export function scatterStarts(spots, count, rand = Math.random, { near = 70, far = 300, apart = 55 } = {}) {
+  if (!spots?.length || spots.length < count) return null;
+  const pick = () => spots[Math.floor(rand() * spots.length)];
+  const [px, pz] = pick();
+  const out = [{ x: px, z: pz }];
+  for (let tries = 0; out.length < count && tries < 4000; tries++) {
+    const k = Math.max(0.3, 1 - Math.floor(tries / 500) * 0.12);
+    const [x, z] = pick();
+    const d = Math.hypot(x - px, z - pz);
+    if (d < near * k || d > far / k) continue;
+    if (out.some((o) => Math.hypot(x - o.x, z - o.z) < apart * k)) continue;
+    out.push({ x, z });
+  }
+  if (out.length < count) return null;
+  let cx = 0, cz = 0;
+  for (let i = 1; i < out.length; i++) { cx += out[i].x; cz += out[i].z; }
+  if (out.length > 1) { cx /= out.length - 1; cz /= out.length - 1; } else { cx = px + 1; cz = pz; }
+  out[0].yaw = Math.atan2(cx - px, cz - pz) + (rand() - 0.5) * 1.2;
+  for (let i = 1; i < out.length; i++) out[i].yaw = Math.atan2(px - out[i].x, pz - out[i].z) + (rand() - 0.5) * 1.5;
+  return out;
+}

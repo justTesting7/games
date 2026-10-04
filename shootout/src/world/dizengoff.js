@@ -8,7 +8,7 @@ import { buildShotMesh } from './shotMesh.js';
 import { chunkMeshes, cullDetails, hideDetails, CityCuller } from './chunkMeshes.js';
 import { findLamps } from './nightLights.js';
 import { buildPitchProps } from './pitchProps.js';
-import { pickRivalSpots, slotSpawns } from './rivalSpots.js';
+import { pickRivalSpots, slotSpawns, scatterStarts } from './rivalSpots.js';
 
 const BASE = import.meta.env?.BASE_URL || '/shootout/';
 
@@ -139,6 +139,8 @@ export async function loadDizengoff(renderer, folder = 'dizengoff-center', { sta
     stadium: nav.stadium || null,
     /** Open ground the pigeons can have: the same places fighters may start from. */
     pigeonHomes: () => (nav.spots || []).map(([x, z]) => ({ x, z })),
+    /** Solo starts scattered over the whole map (the plazas among the spots), or null. */
+    scatter: (count) => scatterStarts([...(nav.spots || []), ...(plazas || []).map((p) => [p.x, p.z])], count),
     rivalSpots: (origin, count) => (stands
       ? Array.from({ length: count }, (_, i) => stands[(i + 1) % stands.length]) // the other stands
       : pickRivalSpots(nav.spots || [], origin, count)),

@@ -714,7 +714,8 @@ async function init() {
       return;
     }
     if (studio?.plazas?.length && mode === 'solo') {
-      const spots = dealPlazas(studio.plazas, rivals.length + 1);
+      // anywhere in the city (a fresh deal every round), the three plazas only as a fallback
+      const spots = studio.scatter?.(rivals.length + 1) || dealPlazas(studio.plazas, rivals.length + 1);
       player.spawn(spots[0].x, spots[0].z, spots[0].yaw);
       player.vel.set(0, 0, 0);
       rivals.forEach((r, i) => r.spawn(spots[i + 1].x, spots[i + 1].z, spots[i + 1].yaw));
@@ -833,7 +834,7 @@ async function init() {
       player.spawn(s.x, s.z, s.yaw);
       player.vel.set(0, 0, 0);
     } else if (studio?.plazas?.length && mode === 'solo') {
-      // spawnRivals deals Dizengoff Square, Dizengoff Center and Masaryk, including the player
+      // spawnRivals scatters everyone over the city, the player included
     } else if (studio) {
       player.spawn(spawn.x, spawn.z, facing);
       player.vel.set(0, 0, 0);
