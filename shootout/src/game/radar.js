@@ -123,13 +123,23 @@ export function drawRadar(canvas, { blips = [], range = RADAR_RANGE, time = 0 } 
       ctx.fill();
       ctx.stroke();
     }
+    // the initial and how far away they are; near the rim the label sits on the inside of
+    // the blip (outside the circle it would be cut off)
     const mark = (b.name || '?').trim().charAt(0).toUpperCase();
-    if (mark) {
-      ctx.fillStyle = '#fff8e8';
-      ctx.font = `700 ${Math.round(size * 0.07)}px "Segoe UI", system-ui, sans-serif`;
+    const far = Number.isFinite(b.dist) ? `${Math.round(b.dist)}m` : '';
+    if (mark || far) {
+      const r = Math.hypot(px - cx, py - cx);
+      let lx = px, ly = py + size * 0.075;
+      if (r > rr * 0.62) { lx = px - ((px - cx) / r) * size * 0.11; ly = py - ((py - cx) / r) * size * 0.11; }
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(mark, px, py + size * 0.055);
+      ctx.lineWidth = Math.max(2, size * 0.02);
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.75)';
+      ctx.fillStyle = '#fff8e8';
+      ctx.font = `700 ${Math.round(size * 0.062)}px "Segoe UI", system-ui, sans-serif`;
+      const text = mark && far ? `${mark} ${far}` : mark || far;
+      ctx.strokeText(text, lx, ly);
+      ctx.fillText(text, lx, ly);
     }
   }
 
