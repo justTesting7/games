@@ -1190,7 +1190,7 @@ export class Cars {
 
   reset() {
     for (const car of this.list) {
-      if (car.driver?.isPlayer) this.ejectLocal(car.driver);
+      if (car.driver?.isPlayer && this.world.player?.vehicle === car) this.ejectLocal(this.world.player); // (the driver is a fighter; it's the player who gets out)
       car.driver = null;
       car.remote = false;
       car.speed = 0;
