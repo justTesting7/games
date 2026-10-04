@@ -23,6 +23,9 @@ export const CITY_PARTS = {
       // Frishman: the hole between Dizengoff Square and Masaryk. The overlap is the same
       // streets the other sets already own; this one keeps the part they never exported.
       { folder: 'frishman', offset: [182.09, 1.82, -64.95], half: 200, drop: 0.02 },
+      // King George: an 800 m tile (aligned by align-city.mjs against dizengoff-square);
+      // built as three chunks under the 25 MiB asset limit
+      { folder: 'king-george', offset: [-285.9, 1.22, 424.0], half: 400, drop: 0.02, files: ['set.glb', 'set-2.glb', 'set-3.glb'] },
     ],
     spill: 35, // buildings reach this far past the tile edge
     // where rounds start (solo deals one at random; multiplayer slots go round them).

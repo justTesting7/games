@@ -563,7 +563,7 @@ const inScooter = (x, y, z) => (rideGrid.get(`${Math.floor(x / 8)},${Math.floor(
     seen.add(k0);
     while (stack.length) {
       const k = stack.pop();
-      group.push(...byCell.get(k));
+      for (const t of byCell.get(k)) group.push(t);
       const [i, j] = k.split(',').map(Number);
       for (let di = -1; di <= 1; di++) for (let dj = -1; dj <= 1; dj++) {
         const n = `${i + di},${j + dj}`;
@@ -580,7 +580,7 @@ for (const b of junk) for (let i = Math.floor(b[0] / 8); i <= Math.floor(b[3] / 
 }
 const inJunk = (x, y, z) => (junkGrid.get(`${Math.floor(x / 8)},${Math.floor(z / 8)}`) || []).some((b) => x > b[0] && x < b[3] && y > b[1] && y < b[4] && z > b[2] && z < b[5]);
 // pass 2: things standing on it (car bodies too: inCar() lets the drivable ones through)
-tris.solid.push(...carParts.carpaint);
+for (const t of carParts.carpaint) tris.solid.push(t); // (a spread overflows the stack on a big map)
 const low = new Uint8Array(W * H), tall = new Uint8Array(W * H);
 for (const tri of tris.solid) {
   const paint = tri.paint;
