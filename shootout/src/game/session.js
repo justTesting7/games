@@ -327,7 +327,8 @@ export class Session {
       const s = standSpawn(slot);
       this.player.spawn(s.x, s.z, s.yaw);
     } else if (getMap(this.mapId).cityFolder) {
-      const s = this.slotSpawn?.(slot) || studioSlotSpawn(this.spawn, slot);
+      // this round's scattered starts (dealt from the room's seed), else the fixed ones
+      const s = this.roundStarts?.[slot] || this.slotSpawn?.(slot) || studioSlotSpawn(this.spawn, slot);
       this.player.spawn(s.x, s.z, s.yaw);
     } else {
       const ang = slot * 2.15;

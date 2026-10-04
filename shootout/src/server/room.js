@@ -433,11 +433,13 @@ export class GameRoom extends DurableObject {
     }
     this.fleet = Array.from({ length: FLEET }, () => null);
     this.seats = Array(FLEET).fill(null);
-    this.round = { state: 'countdown', ends: Date.now() + 3000 };
+    // seed: every client deals this round's scattered starts from it (the same on all)
+    this.round = { state: 'countdown', ends: Date.now() + 3000, seed: Math.floor(Math.random() * 2 ** 31) };
     this.broadcast(null, {
       t: 'round',
       state: 'countdown',
       ends: this.round.ends,
+      seed: this.round.seed,
       slots: Object.fromEntries([...this.players.values()].map((p) => [p.id, p.slot])),
       peers: [...this.players.values()].map((p) => this.snap(p)),
       cars: [],

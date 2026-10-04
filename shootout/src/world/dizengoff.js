@@ -140,7 +140,7 @@ export async function loadDizengoff(renderer, folder = 'dizengoff-center', { sta
     /** Open ground the pigeons can have: the same places fighters may start from. */
     pigeonHomes: () => (nav.spots || []).map(([x, z]) => ({ x, z })),
     /** Solo starts scattered over the whole map (the plazas among the spots), or null. */
-    scatter: (count, cars) => scatterStarts([...(nav.spots || []), ...(plazas || []).map((p) => [p.x, p.z])], count, Math.random, { cars }),
+    scatter: (count, cars, rand = Math.random) => scatterStarts([...(nav.spots || []), ...(plazas || []).map((p) => [p.x, p.z])], count, rand, { cars }),
     rivalSpots: (origin, count) => (stands
       ? Array.from({ length: count }, (_, i) => stands[(i + 1) % stands.length]) // the other stands
       : pickRivalSpots(nav.spots || [], origin, count)),

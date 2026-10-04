@@ -44,7 +44,7 @@ export class Traffic {
   /** A parked car that can pull straight out (nothing parked just ahead of it). */
   free(car) {
     const cars = this.world.cars.list;
-    if (car.driver || car.wrecked || car.spec || (car.hp ?? 100) < 60) return false;
+    if (car.driver || car.wrecked || car.spec || car.startFor || (car.hp ?? 100) < 60) return false; // (startFor: kept for a player's start)
     return !cars.some((o) => {
       if (o === car) return false;
       const dx = o.x - car.x, dz = o.z - car.z;

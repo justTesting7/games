@@ -102,3 +102,15 @@ export function scatterStarts(spots, count, rand = Math.random, { near = 70, far
   for (let i = 1; i < out.length; i++) out[i].yaw = Math.atan2(px - out[i].x, pz - out[i].z) + (rand() - 0.5) * 1.5;
   return out;
 }
+
+/** A small seeded random generator (mulberry32): the same numbers on every client for a seed. */
+export function seeded(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}

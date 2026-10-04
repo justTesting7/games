@@ -13,6 +13,7 @@ import { Arena } from './world/arena.js';
 import { arenaHeightAt, standSpawn } from './world/arenaLayout.js';
 import { studioRivalSpots, blockedAt } from './world/glbMap.js';
 import { dealPlazas, loadDizengoff } from './world/dizengoff.js';
+import { seeded } from './world/rivalSpots.js';
 import { buildLab, LAB } from './world/lab.js';
 import { NightLights } from './world/nightLights.js';
 import { Weather } from './world/weather.js';
@@ -705,6 +706,22 @@ async function init() {
   // Rivals appear 18-28 m away, ahead of the player on either side, on
   // open, dry, walkable ground. In the Garden each fighter starts on a
   // different 18th-row stand.
+  // the cars dealt to the starts are kept from the traffic until the round is under way
+  const claimStartCars = (list, spots) => {
+    for (const c of cars.list) c.startFor = null;
+    spots?.forEach((sp, i) => { if (sp.car >= 0 && list[sp.car]) list[sp.car].startFor = i + 1; });
+    setTimeout(() => { for (const c of cars.list) c.startFor = null; }, 45000);
+  };
+  // Multiplayer starts scattered like solo's, the same on every client: the room deals a
+  // seed each round, and every client deals the same spots from it (each by its slot).
+  // The cars considered are the parked ones at home, in list order (traffic is local).
+  const netStarts = (seed, count) => {
+    if (!studio?.scatter || !Number.isFinite(seed)) return null;
+    const parked = cars.list.filter((c) => !c.spec);
+    const spots = studio.scatter(count, parked.map((c) => c.home || c), seeded(seed));
+    if (spots) claimStartCars(parked, spots);
+    return spots;
+  };
   const spawnRivals = () => {
     if (garden) {
       rivals.forEach((r, i) => {
@@ -718,6 +735,7 @@ async function init() {
       // each next to a free car of its own (not a two-wheeler, not burnt out)
       const free = cars.list.filter((c) => !c.spec && !c.wrecked && !c.driver);
       const spots = studio.scatter?.(rivals.length + 1, free) || dealPlazas(studio.plazas, rivals.length + 1);
+      claimStartCars(free, spots);
       player.spawn(spots[0].x, spots[0].z, spots[0].yaw);
       player.vel.set(0, 0, 0);
       rivals.forEach((r, i) => r.spawn(spots[i + 1].x, spots[i + 1].z, spots[i + 1].yaw));
@@ -855,6 +873,8 @@ async function init() {
       resetLocalKit();
       session.beginRound(msg);
       const slot = msg.slots?.[net.id] ?? session.slot;
+      const slots = Object.values(msg.slots || {}).filter(Number.isFinite);
+      session.roundStarts = netStarts(msg.seed, Math.max(slot, ...slots, 1) + 1);
       session.placeLocal(slot);
       round.state = 'countdown';
       round.ends = msg.ends || (Date.now() + 3000);
