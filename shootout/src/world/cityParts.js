@@ -31,7 +31,7 @@ export const CITY_PARTS = {
     ],
     // holes no set's ground covers (found from the tiles' union): filled with a plain street
     // patch, heights interpolated from the edges (the bake) and drawn to match (dizengoff.js)
-    fill: [{ x0: 110, x1: 320, z0: 480, z1: 600 }],
+    fill: [{ x0: 100, x1: 330, z0: 428, z1: 626 }], // (the ground meshes end short of their tiles: the real gap runs z 437-619)
     spill: 35, // buildings reach this far past the tile edge
     // where rounds start (solo deals one at random; multiplayer slots go round them).
     // The nav bake keeps the three parked cars nearest each one drivable.
