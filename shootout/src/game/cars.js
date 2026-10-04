@@ -39,7 +39,7 @@ export const SCOOTER = {
   enterR: 2.3,
   seatX: 0,
   seatY: 0.16,
-  seatZ: -0.08,
+  seatZ: 0.1, // mid-deck: the bars within reach
   // as quick as a car (it's a game)
   maxSpeed: 24,
   boostSpeed: 30,
@@ -413,7 +413,14 @@ export function driverPose(car) {
       wheel: new THREE.Vector3(seat.x + o.fwdX * a.barZ, car.y + a.barY, seat.z + o.fwdZ * a.barZ),
     };
   }
-  if (S.kind === 'scooter') return null; // a kick scooter rider stands
+  if (S.kind === 'scooter') {
+    // a kick scooter: standing on the deck, both hands on the grips (the bar turns with the steer)
+    // the grips where the bar really is (it turns with the steer)
+    const h = car.handle;
+    if (!h) return null;
+    h.updateWorldMatrix(true, false);
+    return { stand: true, grips: [h.localToWorld(new THREE.Vector3(0.25, 1.04, -0.13)), h.localToWorld(new THREE.Vector3(-0.25, 1.04, -0.13))] };
+  }
   const o = localOffset(car.x, car.z, car);
   const seat = seatOf(car);
   if (car.cockpit) {

@@ -1049,7 +1049,7 @@ export class Character {
     this.syncGait();
     this.mixer.update(dt);
     this.root.updateMatrixWorld(true);
-    this.seated = !!s.seat;
+    this.seated = !!s.seat && !s.seat.stand; // (standing on a kick scooter isn't sitting)
     // far away (detail 0): skip the touches nobody can see at that range
     const near = this.detail !== 0;
     if (s.seat) this.applySeated(s.seat);
@@ -1523,6 +1523,17 @@ export class Character {
     const turn = (bone, axis, ang) => {
       if (bone && Math.abs(ang) > 1e-4) rotateBoneWorld(bone, this.tmp.q.setFromAxisAngle(axis, ang), this.tmp);
     };
+    if (seat.stand) { // on a kick scooter: knees soft, leaning into the bars, hands on the grips
+      turn(B.Spine, right, 0.32);
+      turn(B.LeftLeg, right, -0.15); turn(B.RightLeg, right, -0.15);
+      for (const [side, out, k] of [['Left', left, 0], ['Right', right, 1]]) {
+        if (!B[`${side}Arm`] || !seat.grips?.[k]) continue;
+        const sh = B[`${side}Arm`].getWorldPosition(new THREE.Vector3());
+        solveArm(B, side, seat.grips[k], sh.clone().addScaledVector(UP, -0.35).addScaledVector(out, 0.35),
+          fwd.clone().addScaledVector(UP, -0.3).normalize(), out, 1, this.tmp);
+      }
+      return;
+    }
     // blend 0..1: part way down into the seat (climbing in or out)
     const k = seat.blend ?? 1;
     const hips = B.Hips.getWorldPosition(new THREE.Vector3());

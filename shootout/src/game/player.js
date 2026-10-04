@@ -488,10 +488,8 @@ export class Player {
     ch.root.rotation.y = rootYaw;
     ch.root.rotation.z = standing ? car.body?.r || 0 : 0; // lean with the deck
     ch.root.visible = true; // seen through the glass from the chase camera
-    if (!standing) {
-      if (ch.rifle) ch.rifle.visible = false;
-      ch.pistols?.forEach((p) => { p.visible = false; });
-    }
+    if (!standing && ch.rifle) ch.rifle.visible = false;
+    ch.pistols?.forEach((p) => { p.visible = false; }); // (the hands are on the wheel or the bars)
     ch.steer = car.steer || 0;
     this.updateCamera(dt, false, Math.abs(car.speed) > (standing ? 9 : 14), Math.abs(car.speed));
     this.updateAim();
