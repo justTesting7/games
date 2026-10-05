@@ -193,6 +193,33 @@ if (partsDef?.fill) {
   }
   console.log('filled ground cells', filled);
 }
+// Posts, bollards and signs whose material counts as ground raised the ground under them
+// by their height: 1 m spikes that cars and walkers met as ramps and walls. A morphological
+// opening (min then max over a 5 x 5 cell window, known cells only) flattens whatever is
+// narrower than 2.5 m and keeps broad features (kerbs' lines, slopes, stairs); those objects
+// then stand above the clean ground and block as the obstacles they are.
+{
+  const R = 2, NO = -1e9;
+  const pass = (src, dst, along, pick) => { // along: 'x' | 'z'
+    for (let j = 0; j < H; j++) for (let i = 0; i < W; i++) {
+      const k = j * W + i; if (src[k] < -1e8) { dst[k] = NO; continue; }
+      let v = src[k];
+      for (let d = -R; d <= R; d++) {
+        const ii = along === 'x' ? i + d : i, jj = along === 'z' ? j + d : j;
+        if (ii < 0 || jj < 0 || ii >= W || jj >= H) continue;
+        const u = src[jj * W + ii]; if (u < -1e8) continue;
+        v = pick(v, u);
+      }
+      dst[k] = v;
+    }
+  };
+  const a = new Float32Array(W * H), b = new Float32Array(W * H), min = Math.min, max = Math.max;
+  pass(ground, a, 'x', min); pass(a, b, 'z', min); // erosion
+  pass(b, a, 'x', max); pass(a, b, 'z', max); // dilation
+  let flat = 0, hi = 0;
+  for (let k = 0; k < W * H; k++) { if (ground[k] < -1e8) continue; if (ground[k] - b[k] > 0.3) { flat++; hi = Math.max(hi, ground[k] - b[k]); } ground[k] = b[k]; }
+  console.log('ground spikes flattened:', flat, 'cells, tallest', hi.toFixed(2), 'm');
+}
 // holes left in the ground (cells enclosed by ground, with none of their own): where a gap
 // no set covers still is
 {

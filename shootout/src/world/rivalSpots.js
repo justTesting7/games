@@ -57,7 +57,7 @@ export function slotSpawns(spots, count = 16) {
  * The player faces roughly toward the rivals, each rival roughly toward the player.
  * spots: [[x, z], ...]. Returns [{ x, z, yaw, car? }] (the player first) or null.
  */
-export function scatterStarts(spots, count, rand = Math.random, { near = 70, far = 300, apart = 55, cars = null, reach = 14 } = {}) {
+export function scatterStarts(spots, count, rand = Math.random, { near = 70, far = 300, apart = 55, cars = null, reach = 14, clear = 3.4 } = {}) {
   if (!spots?.length) return null;
   const used = new Set();
   // the free car nearest (x, z) within reach, or -1
@@ -71,7 +71,12 @@ export function scatterStarts(spots, count, rand = Math.random, { near = 70, far
     }
     return best;
   };
-  const pool = cars ? spots.filter(([x, z]) => cars.some((c) => Math.hypot(c.x - x, c.z - z) < reach)) : spots;
+  // with a free car close by, but not inside or hemmed in by one: nothing within `clear` m
+  const pool = cars ? spots.filter(([x, z]) => {
+    let near = false;
+    for (const c of cars) { const d = Math.hypot(c.x - x, c.z - z); if (d < clear) return false; if (d < reach) near = true; }
+    return near;
+  }) : spots;
   if (pool.length < count) return null;
   const pick = () => pool[Math.floor(rand() * pool.length)];
   const take = (x, z) => {
