@@ -11,10 +11,12 @@ export class CarBatch {
     this.parent = parent;
     this.batches = [];
     this.parts = []; // { car, mesh, batch, id }
+    this.byCar = new Map(); // car -> its parts in this batch (car.batched also holds an older batch's)
   }
 
   /** cars: records whose .mesh Group holds the car's meshes (and .panes by name). */
   build(cars) {
+    this.cars = cars;
     const byMat = new Map();
     for (const car of cars) {
       car.mesh.traverse((o) => {
@@ -60,6 +62,7 @@ export class CarBatch {
         const part = { car, mesh, batch, id, gid };
         this.parts.push(part);
         (car.batched || (car.batched = [])).push(part);
+        const own = this.byCar.get(car); if (own) own.push(part); else this.byCar.set(car, [part]);
         mesh.visible = false; // drawn by the batch from here on
       }
       this.parent.add(batch);
@@ -82,6 +85,10 @@ export class CarBatch {
         };
       }
     }
+    // the originals are all hidden (the batch draws them): hide their groups too, so no pass
+    // (the colour pass, three shadow maps) visits their parts; carDents shows one again
+    // when a part is dented and drawn on its own
+    for (const car of cars) car.mesh.visible = false;
     this.sync(true);
     return this;
   }
@@ -101,17 +108,20 @@ export class CarBatch {
 
   /** Copies the transforms of the cars that moved (car.dirty) into their instances. */
   sync(all = false) {
-    for (const p of this.parts) {
-      if (!all && !p.car.dirty) continue;
-      p.mesh.updateWorldMatrix(true, false);
-      p.batch.setMatrixAt(p.id, p.mesh.matrixWorld);
+    for (const [car, list] of this.byCar) { // (per car: ~1100 cars, not ~17,000 parts, twice a frame)
+      if (!all && !car.dirty) continue;
+      for (const p of list) {
+        p.mesh.updateWorldMatrix(true, false);
+        p.batch.setMatrixAt(p.id, p.mesh.matrixWorld);
+      }
+      car.dirty = false;
     }
-    for (const p of this.parts) p.car.dirty = false;
   }
 
   dispose() {
     for (const b of this.batches) { b.removeFromParent(); b.dispose(); }
     this.batches = [];
     this.parts = [];
+    this.byCar.clear();
   }
 }

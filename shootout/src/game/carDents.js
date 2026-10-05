@@ -160,6 +160,7 @@ export function dentCar(car, at, dir, depth, radius = 0.7) {
     if (!part.own) {
       part.own = true;
       mesh.visible = true;
+      if (car.mesh) car.mesh.visible = true; // (the group is hidden while all its parts are in the batch)
       if (part.batch) part.batch.setVisibleAt(part.id, false);
       // The batch was tinting this body. On its own it needs that colour on a copy of the paint.
       const c = mesh.userData.fleetColor;
