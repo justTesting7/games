@@ -193,6 +193,25 @@ if (partsDef?.fill) {
   }
   console.log('filled ground cells', filled);
 }
+// holes left in the ground (cells enclosed by ground, with none of their own): where a gap
+// no set covers still is
+{
+  const seen = new Uint8Array(W * H), stack = [];
+  for (let j = 0; j < H; j++) for (let i = 0; i < W; i++) if ((i === 0 || j === 0 || i === W - 1 || j === H - 1) && ground[j * W + i] < -1e8) { seen[j * W + i] = 1; stack.push(j * W + i); }
+  const flood = (k0, keep) => {
+    const q = [k0]; seen[k0] = 1; let n = 0, a = 1e9, b = -1e9, c = 1e9, d = -1e9;
+    while (q.length) {
+      const k = q.pop(); const i = k % W, j = (k - i) / W; n++; a = Math.min(a, i); b = Math.max(b, i); c = Math.min(c, j); d = Math.max(d, j);
+      for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const ii = i + di, jj = j + dj, kk = jj * W + ii; if (ii < 0 || jj < 0 || ii >= W || jj >= H || seen[kk] || ground[kk] > -1e8) continue; seen[kk] = 1; q.push(kk); }
+    }
+    return { n, x: [X0 + a * CELL, X0 + (b + 1) * CELL], z: [Z0 + c * CELL, Z0 + (d + 1) * CELL] };
+  };
+  while (stack.length) { const k = stack.pop(); const i = k % W, j = (k - i) / W; for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const ii = i + di, jj = j + dj, kk = jj * W + ii; if (ii < 0 || jj < 0 || ii >= W || jj >= H || seen[kk] || ground[kk] > -1e8) continue; seen[kk] = 1; stack.push(kk); } }
+  const holes = [];
+  for (let k = 0; k < W * H; k++) if (!seen[k] && ground[k] < -1e8) holes.push(flood(k));
+  holes.sort((p, q) => q.n - p.n);
+  console.log('ground holes (m2, x range, z range):', holes.filter((h) => h.n > 400).slice(0, 8).map((h) => `${Math.round(h.n * CELL * CELL)} x${h.x.map(Math.round)} z${h.z.map(Math.round)}`).join(' | ') || 'none');
+}
 
 // cars: cluster the paint triangles into vehicles, one drivable car each
 const cars = [];

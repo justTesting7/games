@@ -28,6 +28,8 @@ export const CITY_PARTS = {
       { folder: 'king-george', offset: [-285.9, 1.22, 424.0], half: 400, drop: 0.02, files: ['set.glb', 'set-2.glb', 'set-3.glb'] },
       // Rothschild: also an 800 m tile, three chunks
       { folder: 'rothschild', offset: [155.75, 11.05, 1008.7], half: 404, drop: 0.02, files: ['set.glb', 'set-2.glb', 'set-3.glb'] },
+      // Cremieux: a 412 m tile, one file
+      { folder: 'cremieux', offset: [595.4, 11.92, 780.84], half: 206, drop: 0.02 },
     ],
     // holes no set's ground covers (found from the tiles' union): filled with a plain street
     // patch, heights interpolated from the edges (the bake) and drawn to match (dizengoff.js)
