@@ -454,6 +454,7 @@ async function init() {
         : await loadDizengoff(pipeline.renderer, mapDef.cityFolder, { stadiumStart: !!mapDef.stadiumStart });
       if (studio.cameraFar) { camera.far = studio.cameraFar; camera.updateProjectionMatrix(); }
       studioHeight = studio.heightAt;
+      if (studio.nav?.bounds) terrain.bounds = studio.nav.bounds; // (the map's own limits, not the island's)
       if (studio.nav?.boxes?.length > 20 && mapDef.cityFolder) { minimap = buildMinimap(studio.nav); $('minimap').classList.remove('hidden'); }
       studio.addColliders(veg.colliders);
       pipeline.scene.add(studio.group);

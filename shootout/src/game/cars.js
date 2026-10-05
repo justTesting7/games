@@ -1745,9 +1745,9 @@ export class Cars {
   groundCar(car) {
     const { terrain } = this.world;
     if (!terrain.inBounds(car.x, car.z)) {
-      const lim = HALF_WORLD - 2;
-      car.x = THREE.MathUtils.clamp(car.x, -lim, lim);
-      car.z = THREE.MathUtils.clamp(car.z, -lim, lim);
+      const b = terrain.bounds || { minX: -HALF_WORLD, maxX: HALF_WORLD, minZ: -HALF_WORLD, maxZ: HALF_WORLD };
+      car.x = THREE.MathUtils.clamp(car.x, b.minX + 2, b.maxX - 2);
+      car.z = THREE.MathUtils.clamp(car.z, b.minZ + 2, b.maxZ - 2);
       car.speed *= 0.2;
       car.vel.multiplyScalar(0.2);
     }

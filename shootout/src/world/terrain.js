@@ -415,6 +415,8 @@ export class Terrain {
   }
 
   inBounds(x, z) {
+    const b = this.bounds; // a city map's own extents (it can run far past the island's square)
+    if (b) return x > b.minX + 1 && x < b.maxX - 1 && z > b.minZ + 1 && z < b.maxZ - 1;
     return Math.abs(x) < HALF_WORLD - 1 && Math.abs(z) < HALF_WORLD - 1;
   }
 
